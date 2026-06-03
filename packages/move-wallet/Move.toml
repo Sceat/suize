@@ -1,0 +1,40 @@
+[package]
+name = "suize"
+edition = "2024"
+
+[dependencies]
+# --- Sui framework (pinned to testnet; matches our deployment target) ---
+# `override = true` is REQUIRED: the DeepBook dep below pins a DIFFERENT
+# sui-framework / move-stdlib rev (563c158…) than ours (0a9aa91…); without the
+# overrides `sui move build` aborts with "multiple versions of package 0x…0002 /
+# 0x…0001". The override forces a SINGLE framework version (ours) across the whole
+# graph. (The CLI's NOTE about auto-injected deps is expected and harmless.)
+MoveStdlib = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "framework/testnet", override = true }
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/testnet", override = true }
+
+# --- DeepBook v3 (the DEGEN-tier spot-swap venue) ---
+# Repo:  https://github.com/MystenLabs/deepbookv3 , subdir packages/deepbook.
+# Rev:   923f7e8a49219ce8925a9b7d7539a171e7d02eec  (the `main` HEAD as of pinning;
+#        a COMMIT HASH, not a moving branch, so the build is deterministic).
+# Transitively pulls the `token` package (the `DEEP` coin type the source compiles
+# against) — see the runtime-address note below. Provides
+# `deepbook::pool::swap_exact_base_for_quote` / `swap_exact_quote_for_base`
+# (public, Coin-in/Coin-out) used by `suize::swap`.
+#
+# RUNTIME (PTB-build-time) ADDRESSES — the off-chain agent supplies these; they are
+# NOT compile-time inputs and intentionally do not live in this manifest:
+#   • DeepBook v3 package (mainnet):  published-at
+#     0x0e735f8c93a95722efd73521aca7a7652c0bb71ed1daf41b26dfd7d1ff71f748
+#     (original-id 0x2c8d603bc51326b8c13cef9dd07031a408a48dddb541963357661df5d3204809, version 8)
+#   • DeepBook v3 package (testnet):  published-at
+#     0x74cd5657843c627f3d80f713b71e9f895bbbeb470956d8a8e1185badf6cc77c8
+#     (original-id 0xfb28c4cbc6865bd1c897d26aecbe1f8792d1509a20ffec692c800660cbec6982, version 19)
+#   • The LIVE DEEP coin + the SUI/USDC `Pool` object IDs are passed by the agent
+#     at runtime. NOTE: the source `token::deep::DEEP` here is the package's own
+#     placeholder; the production DEEP type-arg resolves to the deployed DEEP coin
+#     package on-chain. This mismatch is a compile-only artifact and is documented
+#     in `sources/swap.move`.
+deepbook = { git = "https://github.com/MystenLabs/deepbookv3.git", subdir = "packages/deepbook", rev = "923f7e8a49219ce8925a9b7d7539a171e7d02eec" }
+
+[addresses]
+suize = "0x0"

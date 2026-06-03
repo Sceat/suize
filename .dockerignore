@@ -1,0 +1,17 @@
+# Root build context ignore. The backend image builds from the repo root
+# (services/backend/Dockerfile) — keep node_modules, secrets, and build
+# artifacts out of the context so they can never leak into an image.
+**/node_modules
+**/.env
+**/.env.local
+**/.env.*.local
+.git
+**/dist
+**/build
+**/.vercel
+**/.playwright-mcp
+**/*.tsbuildinfo
+**/.DS_Store
+veo3
+screenshots
+**/screenshots

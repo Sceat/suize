@@ -3,6 +3,9 @@ node_modules/
 .pnp
 .pnp.js
 .yarn/install-state.gz
+# Bun is the one toolchain — keep foreign lockfiles out of the workspace.
+package-lock.json
+yarn.lock
 
 # ── Build output ─────────────────────────────────────────────────────
 dist/
@@ -10,6 +13,7 @@ dist-ssr/
 build/
 out/
 *.local
+*.tsbuildinfo
 
 # ── Env / secrets ────────────────────────────────────────────────────
 .env

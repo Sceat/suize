@@ -1,0 +1,30 @@
+{
+  "name": "@suize/crash",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mysten/dapp-kit": "^1.0.6",
+    "@mysten/enoki": "^1.0.8",
+    "@mysten/sui": "^2.17.0",
+    "@mysten/wallet-standard": "^0.20.0",
+    "@suize/shared": "workspace:*",
+    "@tanstack/react-query": "^5.90.5",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.0"
+  }
+}

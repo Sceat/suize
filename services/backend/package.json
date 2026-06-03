@@ -1,0 +1,27 @@
+{
+  "name": "@suize/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "check:emails": "bun scripts/check-emails.ts",
+    "push": "bash scripts/push.sh",
+    "push:patch": "bash scripts/push.sh patch",
+    "push:minor": "bash scripts/push.sh minor",
+    "push:major": "bash scripts/push.sh major"
+  },
+  "dependencies": {
+    "@mysten/enoki": "^1.0.8",
+    "@mysten/sui": "^2.17.0",
+    "@mysten/suins": "^1.1.4",
+    "@suize/shared": "workspace:*",
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}

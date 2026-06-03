@@ -1,0 +1,15 @@
+/*
+  Suize wallet styles — the entry CSS.
+
+  The design system ("white -> blue -> ice", light-default + dark toggle) lives in
+  an extractable module: src/system/. Tokens, the gradient signature, primitives,
+  the ambient field, and the loader are defined there.
+
+  Imports: Tailwind v4 + the system tokens + the journal tokens. The journal tokens
+  are scoped under `.journal` (the mockup gold/paper ramp wins for the journal screen
+  ONLY), so they override the app tokens inside the journal subtree without leaking
+  into the loader / onboarding. Order matters: journal AFTER tokens.css.
+*/
+@import 'tailwindcss';
+@import '../system/tokens.css';
+@import '../system/tokens-journal.css';

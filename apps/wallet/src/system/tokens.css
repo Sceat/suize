@@ -1,0 +1,315 @@
+/* =============================================================================
+   SUIZE — design system tokens (the single visual contract).
+   -----------------------------------------------------------------------------
+   Light is the default (`:root`); dark via `[data-theme="dark"]`. Ported VERBATIM
+   from the locked design extraction (/tmp/suize-build/DESIGN.md §2). The signature
+   is the white -> blue -> ice gradient applied as background-clipped text.
+
+   This file is the SINGLE EXTRACTABLE CONTRACT for src/system/*. It has zero
+   app-local dependencies; @import it once at the CSS root (src/styles/index.css).
+
+   Tailwind v4 reads `--color-*` inside @theme, so the @theme block at the bottom
+   re-exposes the live `:root` vars as utility aliases (text-ink, bg-paper, …).
+   ALL legacy ether/ice/carbon/gold/sui aliases are DELETED — none survive.
+   ========================================================================== */
+
+/* ── LIGHT (default) ──────────────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
+
+  /* surfaces + ink */
+  --paper: #f6f8fa; /* page bg */
+  --paper-2: #ffffff; /* cards / sheets */
+  --paper-3: #eef3f7; /* tertiary surface */
+  --ink: #0b1b2b; /* primary text */
+  --ink-2: #38505f; /* secondary text */
+  --ink-3: #7c95a6; /* muted / labels */
+  --hair: rgba(11, 27, 43, 0.1); /* hairline */
+  --hair-2: rgba(11, 27, 43, 0.055); /* faint hairline */
+
+  /* accent + signal */
+  --cyan: #1e8fe6;
+  --cyan-bright: #4da2ff;
+  --cyan-soft: #7ac4ff;
+  --cyan-wash: rgba(30, 143, 230, 0.08);
+  --good: #15976b;
+  --good-wash: rgba(21, 151, 107, 0.1);
+  --warn: #b26b14;
+
+  /* signature gradient — white -> blue -> ice */
+  --g1: #9fd2ff;
+  --g2: #4da2ff;
+  --g3: #1e8fe6;
+  --grad: linear-gradient(100deg, var(--g1) 0%, var(--g2) 42%, var(--g3) 78%, var(--g2) 100%);
+  --grad-sheen: linear-gradient(100deg, var(--g3) 0%, var(--g2) 30%, #bfe3ff 48%, var(--g2) 66%, var(--g3) 100%);
+  --grad-mark: linear-gradient(105deg, var(--g3) 0%, var(--g2) 34%, var(--g3) 62%, #1781d2 100%);
+
+  /* buttons (tokenized — primitives.tsx reads these) */
+  --btn-face: var(--paper-2);
+  --btn-ink: var(--ink);
+  --btn-line: var(--hair);
+  --btn-cy-from: #3fa3f0;
+  --btn-cy-to: #1781d2;
+  --btn-cy-ink: #ffffff;
+  --btn-cy-line: var(--cyan);
+  --btn-cy-glow: rgba(30, 143, 230, 0.55);
+
+  /* sparkline / ambient / misc */
+  --spark: #15976b;
+  --spark-fill-a: rgba(21, 151, 107, 0.16);
+  --spark-fill-b: rgba(21, 151, 107, 0);
+  --sand-glow: rgba(30, 143, 230, 0.1);
+  --amb-a: rgba(122, 196, 255, 0.16);
+  --amb-b: rgba(30, 143, 230, 0.07);
+  --amb-blend: multiply;
+  --current: rgba(122, 196, 255, 0.1);
+  --scrim: rgba(11, 27, 43, 0.32);
+  --sel: var(--cyan);
+  --sel-ink: #ffffff;
+
+  /* type families */
+  --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --sans: 'Space Grotesk', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* motion easings */
+  --e-expo: cubic-bezier(0.16, 1, 0.3, 1); /* primary reveal / move */
+  --e-quart: cubic-bezier(0.25, 1, 0.5, 1); /* color / bg transitions */
+  --e-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* toggle / swap overshoot */
+  --e-inout: cubic-bezier(0.76, 0, 0.24, 1);
+
+  /* motion durations (founder deliberately SLOWED everything) */
+  --d-swap: 0.7s; /* theme / bg swap */
+  --d-reveal: 1.6s; /* section reveal */
+  --d-count: 2600ms; /* count-up */
+  --d-grad: 11s; /* gradient shift loop */
+
+  /* layout / radii / spacing */
+  --corner: 4px; /* default radius for btns / cards / fields */
+  --sheet-corner: 14px; /* bottom-sheet top corners (Add / Send / Convert) */
+  --pad: clamp(24px, 6vw, 120px); /* section horizontal padding */
+}
+
+/* ── DARK (whiter, icier — g1 becomes pure white) ─────────────────────────── */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --paper: #04070e;
+  --paper-2: #0a1120;
+  --paper-3: #060b16;
+  --ink: #eaf2fd;
+  --ink-2: #aebed6;
+  --ink-3: #8092ab;
+  --hair: rgba(122, 196, 255, 0.14);
+  --hair-2: rgba(122, 196, 255, 0.07);
+
+  /* ── DARK ACCENT = ORANGE-GOLD (warm amber → gold) ──────────────────────────
+     Light stays blue/cyan (above, untouched). In dark ONLY the accent family is a
+     premium gold: bright #f0c674, mid #e8b85c, deep amber #c8922e. The `--cyan*`
+     names are kept (they're the system's "accent" channel — every accent reads
+     them); only their VALUES turn gold here. HealthDot green (`--good`) stays. */
+  --cyan: #f0c674; /* active accent (gold) */
+  --cyan-bright: #f3cf8a;
+  --cyan-soft: #e8b85c;
+  --cyan-wash: rgba(240, 198, 116, 0.1);
+  --good: #56e0c0;
+  --good-wash: rgba(86, 224, 192, 0.1);
+  --warn: #ffb74d;
+
+  /* signature gradient — white → gold (the dark wordmark / number signature) */
+  --g1: #ffffff;
+  --g2: #f3d9a0;
+  --g3: #e8b85c;
+  --grad: linear-gradient(100deg, var(--g1) 0%, var(--g2) 40%, var(--g3) 76%, var(--g2) 100%);
+  --grad-sheen: linear-gradient(100deg, var(--g3) 0%, var(--g2) 28%, #ffffff 48%, var(--g2) 66%, var(--g3) 100%);
+  --grad-mark: linear-gradient(105deg, var(--g3) 0%, var(--g2) 36%, var(--g3) 64%, #c8922e 100%);
+
+  /* primary button face → warm gold gradient on near-black ink */
+  --btn-face: rgba(240, 198, 116, 0.04);
+  --btn-cy-from: rgba(240, 198, 116, 0.2);
+  --btn-cy-to: rgba(200, 146, 46, 0.1);
+  --btn-cy-ink: #04070e;
+  --btn-cy-line: var(--cyan);
+  --btn-cy-glow: rgba(240, 198, 116, 0.45);
+
+  /* sparkline / ambient / selection → gold */
+  --spark: #f0c674;
+  --spark-fill-a: rgba(240, 198, 116, 0.18);
+  --spark-fill-b: rgba(240, 198, 116, 0);
+  --sand-glow: rgba(240, 198, 116, 0.1);
+  --amb-a: rgba(232, 184, 92, 0.1);
+  --amb-b: rgba(160, 110, 30, 0.1);
+  --amb-blend: screen;
+  --current: rgba(240, 198, 116, 0.42);
+  --scrim: rgba(2, 5, 12, 0.62);
+  --sel-ink: #04070e;
+}
+
+/* ── base ─────────────────────────────────────────────────────────────────── */
+body {
+  margin: 0;
+  font-family: var(--sans);
+  color: var(--ink);
+  background-color: var(--paper);
+  font-feature-settings: 'ss01', 'ss02';
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition:
+    background-color var(--d-swap) var(--e-quart),
+    color var(--d-swap) var(--e-quart);
+}
+
+::selection {
+  background: var(--sel);
+  color: var(--sel-ink);
+}
+
+input {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ── utilities ────────────────────────────────────────────────────────────── */
+
+/* Tabular figures wherever numbers matter. */
+.tnum {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  letter-spacing: -0.01em;
+}
+
+/* Hide scrollbars but keep scroll (the ADVANCED activity log). */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* The shell height — the SINGLE no-scroll owner. dvh first (fallback for engines
+   without svh), then svh where supported (so the shell never exceeds the *small*
+   viewport when the mobile URL bar is shown, which would reintroduce doc scroll). */
+.suize-shell {
+  height: 100dvh;
+  height: 100svh;
+}
+
+/* THE SIGNATURE GRADIENT (background-clipped text). */
+.grad {
+  background-image: var(--grad);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: gradShift var(--d-grad) ease-in-out infinite;
+}
+.grad--sheen {
+  background-image: var(--grad-sheen);
+  background-size: 220% 100%;
+}
+.grad--mark {
+  background-image: var(--grad-mark);
+  background-size: 180% 100%;
+}
+@keyframes gradShift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+/* Fallback for engines without background-clip:text — fill with the flat accent. */
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .grad {
+    -webkit-text-fill-color: var(--cyan);
+    color: var(--cyan);
+  }
+}
+
+/* the soft breath — used by Loader: a gentle swell + fade, eased so it never
+   feels mechanical. */
+@keyframes suize-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.08);
+  }
+}
+.suize-breathe {
+  animation: suize-breathe 3.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+.suize-breathe-slow {
+  animation: suize-breathe 5.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation-delay: -1.2s;
+}
+
+/* the one allowed health dot's soft halo pulse. */
+@keyframes suize-dp {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 45%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--good) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grad {
+    animation: none;
+  }
+  .suize-breathe,
+  .suize-breathe-slow {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+/* ── Tailwind v4 color aliases ────────────────────────────────────────────────
+   Re-expose the live `:root` vars as `--color-*` so utilities (bg-paper,
+   text-ink, border-hair, text-cyan, …) resolve to the THEMED value. Tailwind v4
+   reads these at build time as the value `var(--paper)`, so the utilities stay
+   theme-reactive at runtime. Also register the font families.
+   ────────────────────────────────────────────────────────────────────────── */
+@theme {
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-paper-3: var(--paper-3);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-hair: var(--hair);
+  --color-hair-2: var(--hair-2);
+
+  --color-cyan: var(--cyan);
+  --color-cyan-bright: var(--cyan-bright);
+  --color-cyan-soft: var(--cyan-soft);
+  --color-cyan-wash: var(--cyan-wash);
+  --color-good: var(--good);
+  --color-good-wash: var(--good-wash);
+  --color-warn: var(--warn);
+
+  --font-serif: var(--serif);
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+
+  --radius-corner: var(--corner);
+
+  --ease-expo: var(--e-expo);
+  --ease-quart: var(--e-quart);
+  --ease-spring: var(--e-spring);
+  --ease-inout: var(--e-inout);
+}
