@@ -20,9 +20,9 @@ export const ENOKI_API_KEY: string = import.meta.env.VITE_ENOKI_API_KEY ?? '';
 export const GOOGLE_CLIENT_ID: string = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
 
 /**
- * Backend WebSocket URL — the single Enoki-verified transport (replaces the old
- * `VITE_SPONSOR_URL` HTTP base). The wallet is pure-WS now: handle + sponsor +
- * execute + balance pushes all ride this one socket. Dev: `ws://localhost:8080/ws`
+ * Backend WebSocket URL — the single Enoki-verified transport. The wallet is
+ * pure-WS now: handle + sponsor + execute + balance pushes all ride this one
+ * socket. Dev: `ws://localhost:8080/ws`
  * (the backend's default PORT — services/backend/src/config.ts); prod:
  * `wss://api.suize.io/ws`. Trailing slash stripped; `ws.ts` appends the `?address=`
  * query param at connect time.
@@ -49,3 +49,11 @@ export const SUINS_PARENT = 'suize';
 /** Explorer base for tappable tx digests in the LOG. */
 export const EXPLORER_TX = (digest: string) =>
   `https://suiscan.xyz/${NETWORK}/tx/${digest}`;
+
+/**
+ * SuiVision tx-block URL for a digest — used by the chat confirm card's "View on
+ * SuiVision" link after a send executes. Testnet → https://testnet.suivision.xyz/...;
+ * mainnet drops the subdomain (https://suivision.xyz/...).
+ */
+export const SUIVISION_TX = (digest: string) =>
+  `https://${NETWORK === 'mainnet' ? '' : NETWORK + '.'}suivision.xyz/txblock/${digest}`;

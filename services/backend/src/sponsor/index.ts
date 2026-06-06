@@ -1,15 +1,19 @@
 // Sponsor module — Enoki sponsored-transaction backend.
-// Folded from the standalone `suize-sponsor` service. Exposes:
-//   POST /sponsor  ({ network, transactionKindBytes, sender } -> { bytes, digest })
-//   POST /execute  ({ digest, signature } -> { digest })
-// plus a readiness probe (`sponsorReady`) used by the shared /ready endpoint.
-// CORS / json / client-IP now come from the shared ../http layer.
+// Folded from the standalone `suize-sponsor` service. Sponsorship is now
+// WS-ONLY: the authenticated WebSocket (src/ws) calls createSponsor /
+// executeSponsor DIRECTLY, pinning `sender` to the verified ws.data.address.
+// The former public HTTP POST /sponsor + POST /execute routes have been REMOVED
+// (no body-trusted `sender`, no per-IP limiter — the WS path's per-address token
+// bucket + the global daily quota are the gas-drain backstops). This module now
+// exposes only the transport-agnostic CORE (createSponsor / executeSponsor /
+// SponsorError), the shared suiClient, and a readiness probe (`sponsorReady`)
+// used by the shared /ready endpoint.
 import { EnokiClient } from "@mysten/enoki";
 import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import { CRASH_MOVE_TARGETS, WALLET_MOVE_TARGETS } from "@suize/shared";
 import type { SponsorRequest, SponsorResponse, ExecuteRequest, ExecuteResponse } from "@suize/shared";
 import { config } from "../config";
-import { json, getIp } from "../http";
+import { sponsorDailyCeiling } from "../quota";
 
 const ENOKI_PRIVATE_API_KEY = config.enokiPrivateApiKey;
 
@@ -34,37 +38,20 @@ const ALLOWED_MOVE_TARGETS: string[] = [...CRASH_MOVE_TARGETS, ...WALLET_MOVE_TA
 
 const SUI_ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/;
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
-const MAX_BODY_BYTES = 128 * 1024; // 128 KiB — kind-bytes + signatures are tiny.
+// Gas-budget bound: Enoki sets the gas budget from the tx it sponsors, and it
+// scales with PTB complexity. `onlyTransactionKind` BCS carries no gas field we
+// can read, so we cap the EFFECTIVE budget by bounding the decoded kind size.
+// A legitimate crash/wallet PTB (a few move calls) is at most a couple KiB;
+// 16 KiB is generous headroom yet rejects a pathological many-command PTB built
+// purely to inflate Enoki's gas estimate and drain the pool. base64 inflates by
+// ~4/3, so the encoded string cap is derived from this decoded cap.
+const MAX_TX_KIND_BYTES = 16 * 1024;
+const MAX_TX_KIND_B64_LEN = Math.ceil((MAX_TX_KIND_BYTES * 4) / 3) + 4;
 
-// In-memory per-IP token bucket. The service is stateless and small, so a
-// process-local limiter is enough to blunt gas-pool drain abuse; it does NOT
-// coordinate across replicas (acceptable — Enoki's allow-list is the hard cap).
-const RATE_LIMIT_CAPACITY = 5;       // burst
-const RATE_LIMIT_REFILL_PER_SEC = 2; // sustained
-type Bucket = { tokens: number; last: number };
-const buckets = new Map<string, Bucket>();
-
-const takeToken = (ip: string | null): boolean => {
-  if (!ip) return true;
-  const now = Date.now();
-  const b = buckets.get(ip) ?? { tokens: RATE_LIMIT_CAPACITY, last: now };
-  const elapsed = (now - b.last) / 1000;
-  b.tokens = Math.min(RATE_LIMIT_CAPACITY, b.tokens + elapsed * RATE_LIMIT_REFILL_PER_SEC);
-  b.last = now;
-  if (b.tokens < 1) {
-    buckets.set(ip, b);
-    return false;
-  }
-  b.tokens -= 1;
-  buckets.set(ip, b);
-  return true;
-};
-
-// Evict idle buckets so the map can't grow unbounded under IP churn.
-setInterval(() => {
-  const cutoff = Date.now() - 60_000;
-  for (const [ip, b] of buckets) if (b.last < cutoff) buckets.delete(ip);
-}, 60_000).unref?.();
+// NOTE: there is NO per-IP token bucket here anymore. It only ever guarded the
+// (now-removed) public HTTP /sponsor + /execute routes. Over the WS-only path the
+// per-AUTHENTICATED-address token bucket (src/ws/index.ts) plus the process-global
+// daily quota (createSponsor → sponsorDailyCeiling, below) are the gas-drain caps.
 
 // Enoki client + Sui RPC client. If the key is missing the app refuses to boot
 // (see src/index.ts), so by the time these run the key is present.
@@ -72,17 +59,6 @@ const enokiClient = new EnokiClient({ apiKey: ENOKI_PRIVATE_API_KEY ?? "" });
 // Exported so the WS server (src/ws/balance) reuses the SAME RPC client for the
 // initial getBalance push — one client, one place, no second config.
 export const suiClient = new SuiJsonRpcClient({ url: config.suiRpcUrl, network: "testnet" });
-
-// Reject oversized bodies up front (Content-Length), then guard again on the
-// parsed string length in case the header lies.
-const readBody = async (req: Request): Promise<{ ok: true; body: any } | { ok: false }> => {
-  const len = Number(req.headers.get("content-length") ?? 0);
-  if (len > MAX_BODY_BYTES) return { ok: false };
-  let body: string;
-  try { body = await req.text(); } catch { return { ok: false }; }
-  if (body.length > MAX_BODY_BYTES) return { ok: false };
-  try { return { ok: true, body: JSON.parse(body) }; } catch { return { ok: false }; }
-};
 
 export const sponsorReady = async (): Promise<boolean> => {
   if (!ENOKI_PRIVATE_API_KEY) return false;
@@ -101,11 +77,11 @@ export const sponsorReady = async (): Promise<boolean> => {
 };
 
 // ---------------------------------------------------------------------------
-// CORE — the Enoki calls, transport-agnostic. Both the HTTP route matchers
-// below AND the WebSocket server (src/ws) call these so the sponsorship logic
-// lives in EXACTLY one place. They validate the wire contract and either return
-// the shared response type or throw `SponsorError` (a tagged, client-safe error
-// the caller maps to its own transport: HTTP status vs WS error frame).
+// CORE — the Enoki calls, transport-agnostic. The WebSocket server (src/ws) is
+// now the ONLY caller; sponsorship logic lives in EXACTLY one place. They
+// validate the wire contract and either return the shared response type or throw
+// `SponsorError` (a tagged, client-safe error the WS route maps onto an
+// errorResponse frame; the `.status` field is the HTTP-equivalent code).
 // ---------------------------------------------------------------------------
 
 /** A validation/Enoki failure with the client-safe message + HTTP-equivalent status. */
@@ -118,12 +94,12 @@ export class SponsorError extends Error {
 
 // EnokiClientError carries the ACTUAL failure reason in `code` + `errors[]` (and
 // sometimes a nested `cause`), NOT in `.message` (which is just "Bad Request").
-// The previous catch logged only `.message`, so the real reason — most often a
-// server-side dry-run MoveAbort (e.g. a cash_out/redeem against a stale/wrong
-// reconstructed position) surfacing as a generic Enoki 400 -> our 502 — was
-// silently dropped, leaving the client toast useless ("sponsor 502"). Pull the
-// detail out, log it in full, and fold the first `errors[].message` into the
-// client-facing message so the toast is actionable.
+// That detail — a server-side dry-run MoveAbort (e.g. a cash_out/redeem against a
+// stale/wrong reconstructed position), an Enoki policy/allow-list rejection, or an
+// internal address/object id — is INFORMATION DISCLOSURE if echoed to the client:
+// it leaks our Move abort codes, allow-list shape, and dry-run internals to an
+// external attacker probing the surface. So we log the full detail SERVER-SIDE
+// and return a CATEGORY-ONLY message to the client (e.g. "sponsorship failed").
 type EnokiErrorShape = {
   code?: unknown;
   errors?: Array<{ message?: unknown }> | undefined;
@@ -134,16 +110,15 @@ const enokiFailure = (tag: string, err: unknown, fallback: string): SponsorError
   const e = err as Error & EnokiErrorShape;
   const detail =
     e?.errors?.[0]?.message != null ? String(e.errors[0].message) : undefined;
+  // Full diagnostics stay in the server log ONLY — never on the wire.
   console.error(`[${tag}]`, {
     message: e?.message,
     code: e?.code,
     detail,
     cause: e?.cause,
   });
-  // Append the real reason to the client message when we have one, so the toast
-  // is actionable instead of an opaque "sponsorship failed".
-  const message = detail ? `${fallback}: ${detail}` : fallback;
-  return new SponsorError(message, 502);
+  // Client gets the category only. No Enoki/Move-abort detail leaks off-box.
+  return new SponsorError(fallback, 502);
 };
 
 /**
@@ -160,6 +135,28 @@ export const createSponsor = async (input: Partial<SponsorRequest>): Promise<Spo
   if (!SUI_ADDRESS_RE.test(sender)) throw new SponsorError("invalid sender address", 400);
   if (!transactionKindBytes || !BASE64_RE.test(transactionKindBytes)) {
     throw new SponsorError("invalid transactionKindBytes", 400);
+  }
+  // Gas-budget bound: reject an oversized PTB before it reaches Enoki, so a
+  // jailbroken client cannot inflate the sponsored gas budget by submitting a
+  // pathologically large transaction kind (see MAX_TX_KIND_BYTES). The base64
+  // length cap is a cheap upper bound on the decoded byte size.
+  if (transactionKindBytes.length > MAX_TX_KIND_B64_LEN) {
+    throw new SponsorError("transaction too large", 400);
+  }
+
+  // GAS-DRAIN CEILING — enforced for BOTH transports (HTTP /sponsor + WS
+  // sponsorRequest both land here). A process-global daily cap on total
+  // sponsored txs, plus a per-address sub-cap, both keyed by the validated
+  // `sender`. Hit either and we 429 BEFORE spending a cent of the Enoki pool.
+  // Status 429 is mapped client-side to a "slow down / try later" toast.
+  const quota = sponsorDailyCeiling.consume(sender);
+  if (!quota.ok) {
+    throw new SponsorError(
+      quota.scope === "global"
+        ? "sponsor capacity reached, try again later"
+        : "daily sponsor limit reached for this account",
+      429,
+    );
   }
 
   // Restrict the address allow-list to the sender so the sponsored tx cannot
@@ -197,53 +194,6 @@ export const executeSponsor = async (input: Partial<ExecuteRequest>): Promise<Ex
   } catch (err) {
     throw enokiFailure("execute", err, "execution failed");
   }
-};
-
-const handleSponsor = async (req: Request, origin: string | null): Promise<Response> => {
-  const ip = getIp(req);
-  if (!takeToken(ip)) return json({ error: "too many requests" }, 429, origin, { "Retry-After": "1" });
-
-  const parsed = await readBody(req);
-  if (!parsed.ok) return json({ error: "invalid or oversized body" }, 400, origin);
-
-  try {
-    const res = await createSponsor(parsed.body);
-    return json(res, 200, origin);
-  } catch (err) {
-    if (err instanceof SponsorError) return json({ error: err.message }, err.status, origin);
-    throw err;
-  }
-};
-
-const handleExecute = async (req: Request, origin: string | null): Promise<Response> => {
-  const ip = getIp(req);
-  if (!takeToken(ip)) return json({ error: "too many requests" }, 429, origin, { "Retry-After": "1" });
-
-  const parsed = await readBody(req);
-  if (!parsed.ok) return json({ error: "invalid or oversized body" }, 400, origin);
-
-  try {
-    const res = await executeSponsor(parsed.body);
-    return json(res, 200, origin);
-  } catch (err) {
-    if (err instanceof SponsorError) return json({ error: err.message }, err.status, origin);
-    throw err;
-  }
-};
-
-/**
- * Route matcher for the sponsor module. Returns a Response for POST /sponsor and
- * POST /execute, or null if the path/method is not ours (so the main server can
- * try the next module).
- */
-export const handleSponsorRoute = (
-  req: Request,
-  url: URL,
-  origin: string | null,
-): Promise<Response> | null => {
-  if (req.method === "POST" && url.pathname === "/sponsor") return handleSponsor(req, origin);
-  if (req.method === "POST" && url.pathname === "/execute") return handleExecute(req, origin);
-  return null;
 };
 
 export const sponsorInfo = {

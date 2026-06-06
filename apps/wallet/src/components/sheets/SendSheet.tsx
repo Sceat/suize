@@ -33,7 +33,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSuiClient } from '@mysten/dapp-kit';
 import { Sheet } from './Sheet';
 import { CurrencySelect } from './CurrencySelect';
-import { Button, Field, Check, X, ExternalLink, ICON_STROKE } from '../../system';
+import { Button, Field, Check, X, ExternalLink, Mail, MessageCircle, ICON_STROKE } from '../../system';
 import type { Currency } from '../../data/types';
 import { SPONSORED_COINS } from '../../data/coins';
 import { resolveRecipient, type SuiClient } from '../../data/suins';
@@ -122,6 +122,11 @@ export function SendSheet({ currencies, onClose, onSend }: SendSheetProps) {
   );
 
   const gasless = SPONSORED_COINS.has(coinType);
+
+  // Only USD-pegged stablecoins get a "$" prefix on the amount field — for SUI/DEEP/
+  // WAL the value is in coin units, so a "$" would imply a USD amount it isn't. The
+  // coin symbol suffix always carries the true unit.
+  const isStable = selected?.sym === 'USDC' || selected?.sym === 'USDSUI';
 
   // debounced recipient verification (hex passthrough OR SuiNS resolve).
   useEffect(() => {
@@ -259,6 +264,85 @@ export function SendSheet({ currencies, onClose, onSend }: SendSheetProps) {
           />
         </div>
 
+        {/* Or send to — email / WhatsApp, muted, non-interactive, never faked */}
+        <div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 12,
+              fontFamily: 'var(--mono)',
+              fontSize: 10.5,
+              letterSpacing: '0.2em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+              marginBottom: 10,
+            }}
+          >
+            <span>Or send to</span>
+            <span style={{ letterSpacing: '0.08em' }}>Coming soon</span>
+          </div>
+          <ul
+            style={{
+              listStyle: 'none',
+              margin: 0,
+              padding: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 7,
+            }}
+          >
+            {[
+              { icon: <Mail size={17} strokeWidth={ICON_STROKE} aria-hidden />, label: 'Email' },
+              { icon: <MessageCircle size={17} strokeWidth={ICON_STROKE} aria-hidden />, label: 'WhatsApp' },
+            ].map((row) => (
+              <li
+                key={row.label}
+                aria-disabled="true"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '12px 15px',
+                  borderRadius: 'var(--corner)',
+                  border: '1px solid var(--hair-2)',
+                  background: 'transparent',
+                  color: 'var(--ink-3)',
+                  opacity: 0.65,
+                  cursor: 'default',
+                  userSelect: 'none',
+                }}
+              >
+                <span style={{ flex: '0 0 auto', display: 'inline-flex' }}>{row.icon}</span>
+                <span style={{ fontFamily: 'var(--sans)', fontSize: 14, flex: '1 1 auto' }}>{row.label}</span>
+                <span
+                  style={{
+                    fontFamily: 'var(--mono)',
+                    fontSize: 10,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Soon
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p
+            style={{
+              margin: '10px 0 0',
+              fontFamily: 'var(--mono)',
+              fontSize: 11,
+              lineHeight: 1.6,
+              letterSpacing: '0.02em',
+              color: 'var(--ink-3)',
+            }}
+          >
+            Send to anyone by email or WhatsApp — claimable link, coming soon.
+          </p>
+        </div>
+
         {/* amount */}
         <div>
           <div
@@ -278,7 +362,7 @@ export function SendSheet({ currencies, onClose, onSend }: SendSheetProps) {
             onChange={(e) => setAmount(e.currentTarget.value)}
             placeholder="0.00"
             inputMode="decimal"
-            prefix="$"
+            prefix={isStable ? '$' : undefined}
             suffix={selected?.sym ?? ''}
             disabled={sending || sent}
           />

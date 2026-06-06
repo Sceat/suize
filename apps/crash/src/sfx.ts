@@ -93,10 +93,12 @@ export const unlock = (): void => {
 
 export const is_muted = (): boolean => muted
 
-// Toggle mute, persist the choice, and apply it to the live master gain. Returns
-// the new muted state so the caller can update its toggle UI.
-export const toggle_mute = (): boolean => {
-  muted = !muted
+// Set the mute state explicitly, persist it, and apply it to the live master
+// gain. EVERY cue funnels through `beep()` which early-returns while muted (and the
+// master rides to 0), so this silences ALL sfx — taps, ticks, tension, heartbeat,
+// win/loss — regardless of any other state (e.g. the settling-bip gate).
+export const set_muted = (b: boolean): void => {
+  muted = b
   try {
     localStorage.setItem(LS_MUTED, muted ? '1' : '0')
   } catch {
@@ -104,6 +106,12 @@ export const toggle_mute = (): boolean => {
   }
   if (master && ctx)
     master.gain.setTargetAtTime(muted ? 0 : 1, ctx.currentTime, 0.02)
+}
+
+// Toggle mute, persist the choice, and apply it to the live master gain. Returns
+// the new muted state so the caller can update its toggle UI.
+export const toggle_mute = (): boolean => {
+  set_muted(!muted)
   return muted
 }
 

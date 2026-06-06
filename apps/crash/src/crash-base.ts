@@ -475,7 +475,15 @@ export function mount(
   function resize(): void {
     dpr = Math.min(dprCap, window.devicePixelRatio || 1)
     W = root.clientWidth
-    H = root.clientHeight
+    // On the desktop "fold" the stage is viewport-pinned so root.clientHeight ==
+    // the viewport height. On a phone the stage flows into a TALL scrolling column
+    // (see the ≤560px reflow), where the chart canvas is pinned `position:fixed`
+    // as a viewport hero — so its drawing height must stay the VISIBLE viewport,
+    // not the full scroll height (which would push the chart band far off screen
+    // and squash the line). Clamp to innerHeight: a no-op on desktop (equal), the
+    // correct viewport band on mobile. innerWidth guard keeps it desktop-exact.
+    const viewportH = window.innerHeight || root.clientHeight
+    H = root.clientHeight > viewportH ? viewportH : root.clientHeight
     bandTopY = H * bandTopFrac
     bandH = H * bandHeightFrac
     rightX = W * rightFrac
@@ -835,7 +843,23 @@ export function mount(
   const t0 = performance.now()
   let lastT = t0
 
+  // RAF ROBUSTNESS: a per-frame throw must NEVER permanently kill the chart loop
+  // while React keeps feeding host data (the chart would silently freeze). Run the
+  // body in a try, log ONCE, and ALWAYS reschedule from the finally.
+  let frameErrored = false
   function frame(now: number): void {
+    try {
+      frameBody(now)
+    } catch (err) {
+      if (!frameErrored) {
+        frameErrored = true
+        console.error('[crash-base] frame() error (loop kept alive):', err)
+      }
+    } finally {
+      raf = requestAnimationFrame(frame)
+    }
+  }
+  function frameBody(now: number): void {
     const t = (now - t0) * timeScale
     const dt = Math.min(40, now - lastT)
     lastT = now
@@ -880,7 +904,7 @@ export function mount(
     }
 
     drawChart(t, now)
-    raf = requestAnimationFrame(frame)
+    // (the reschedule lives in frame()'s finally — keeps the loop alive on a throw)
   }
 
   // ---- THEME WATCH — re-read document.documentElement.dataset.theme on a small

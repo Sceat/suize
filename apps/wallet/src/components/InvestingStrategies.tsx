@@ -1,26 +1,36 @@
 /**
  * InvestingStrategies — the AI INVESTING account's detail pane.
  *
- * REDESIGNED (journal refinement): the three strategy tiers — Passive / Degen /
- * GameFi — are now ENABLE/DISABLE TOGGLES (the refined `.sw` switch, not
- * checkboxes), each with an ADJUSTABLE PERCENT (a slider) so the user TUNES the
- * split. The allocation always sums sensibly: enabling/disabling re-normalizes to
- * 100% across the enabled tiers, and dragging one slider redistributes the rest
- * proportionally so the total stays 100. GameFi still "plays Crash by Suize" and
- * links to the Crash sister app.
+ * REDESIGNED (journal refinement — ONE SPLIT-BAR, founder rework): the three
+ * strategy tiers — Passive / Trading / GameFi — share a SINGLE horizontal bar of
+ * three proportional segments. You tune the split by DRAGGING the two dividers
+ * between segments (or focusing a divider and nudging with Arrow keys). Dragging a
+ * divider trades % ONLY between its two adjacent segments — the third is
+ * mathematically untouched — so the three ALWAYS sum to exactly 100. A tier at 0%
+ * is simply an empty segment (no separate on/off control). The strategy NAME +
+ * live % print inside each segment; a "Current positions" detail list below carries
+ * one description + one live-position line per tier.
+ *
+ * NAMING (founder): the middle tier is shown to the user as "Trading". The
+ * persisted `data-seg` / AllocationWeights key stays `'degen'` (the CSS color ramp
+ * and `strategyFromAllocations` both key off it) — only the VISIBLE name changed.
+ *
+ * Because the bar is constructed to always total 100, "All your money is working"
+ * is the steady state; the <100 / >100 copy is kept only as a guard for a future
+ * min-clamp that might leave slack.
  *
  * Light = blue / dark = gold; the CSS lives in src/system/tokens-journal.css
- * (`.strat*`, `.sw`, `.rng`, `.alloc*`), scoped under `.journal`.
+ * (`.split*`, `.strat-detail`/`.sd-*`, `.remainder`, `.invest__foot`,
+ * `.crashlink`), scoped under `.journal`.
  *
  * ── WIRING (REAL + FLAGGED STUBS) ────────────────────────────────────────────
  *   • The WEIGHTS are the persisted journal intent (`home.investingAllocations`).
- *     We persist the TUNED PERCENTS as weights (any positive weight = enabled), so
- *     the chosen split re-displays on reload.
- *   • Toggling/tuning calls `home.setAllocations('investing', weights)` → persists
- *     the split THEN re-mints the mandate for the EFFECTIVE tier via the existing
- *     two-phase `setStrategy(role, strategyFromAllocations(w))` (REAL, sponsored).
- *   • The per-tier DOLLAR amounts derive from the REAL Investing vault value
- *     (`home.state.investing.usd`, 0 when empty) — never a fabricated total.
+ *     We persist the TUNED PERCENTS as weights (any positive weight = a funded tier),
+ *     so the chosen split re-displays on reload via `seedFromWeights`.
+ *   • Confirm calls `home.setAllocations('investing', weights)` → persists the split
+ *     THEN re-mints the mandate for the EFFECTIVE tier via the existing two-phase
+ *     `setStrategy(role, strategyFromAllocations(w))` (REAL, sponsored). ONLY the
+ *     input UX changed (sliders → split-bar) — the commit path is identical.
  *
  *   🚩 STUB (sanctioned, documented in types.ts / useHome.ts):
  *     - MULTI-STRATEGY MANDATE: the chain mints ONE scope-set per mandate. Any
@@ -30,341 +40,397 @@
  *     - GAMEFI → CRASH: links out to the Crash app; no on-chain GameFi wiring this
  *       pass. The GameFi weight folds into 'risky' via strategyFromAllocations.
  */
-import {
-  useCallback,
-  useMemo,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { AllocationWeights, HomeApi } from '../data/types';
 
 /** The Crash sister-app URL (monorepo deploy target; CLAUDE.md). 🚩 GameFi→Crash. */
 const CRASH_URL = 'https://crash.suize.io';
 
-/** A strategy tier — the three toggle rows, in render order. */
+/** A strategy tier — the three segments, in render order (left → right). */
 interface Tier {
-  /** the AllocationWeights key. */
+  /**
+   * the AllocationWeights key + the `data-seg` attribute value. STABLE: `'degen'`
+   * is the persisted/CSS contract key — the user-facing name is `name` ("Trading").
+   */
   key: 'passive' | 'degen' | 'gamefi';
-  /** the default percent when first enabled (the mockup's 50/33/17 baseline). */
-  baseline: number;
-  /** the serif row title. */
+  /** the user-facing tier name (printed inside the segment + the detail row). */
   name: string;
-  /** GameFi's "plays Crash by Suize" mono by-line (only GameFi). */
-  by?: string;
-  /** the mono description — rendered with the mockup's exact <b> emphases. */
-  desc: ReactNode;
+  /** one plain-words description line (no crypto jargon). */
+  desc: string;
 }
 
 const TIERS: Tier[] = [
-  {
-    key: 'passive',
-    baseline: 50,
-    name: 'Passive',
-    desc: (
-      <>
-        Steady lending and staking. <b>Calm, slow growth</b> — the quiet workhorse.
-      </>
-    ),
-  },
-  {
-    key: 'degen',
-    baseline: 33,
-    name: 'Degen',
-    desc: (
-      <>
-        Hunts new tokens and momentum. <b>Higher reward, bigger swings.</b>
-      </>
-    ),
-  },
+  { key: 'passive', name: 'Passive', desc: 'Steady lending and staking.' },
+  { key: 'degen', name: 'Trading', desc: 'Trades SUI/USDC on DeepBook.' },
   {
     key: 'gamefi',
-    baseline: 17,
     name: 'GameFi',
-    by: 'plays Crash by Suize',
-    desc: (
-      <>
-        Stakes small bets on <b>Crash</b>, our sister game — calling BTC up or down.{' '}
-        <b>The wild slice.</b>
-      </>
-    ),
+    desc: 'Small bets on Crash — BTC up or down.',
   },
 ];
 
-type Pcts = Record<Tier['key'], number>;
+type TierKey = Tier['key'];
+type Pcts = Record<TierKey, number>;
 
-/** Mono dollar formatter — en-US, fixed digits. */
-function fmt(n: number, d = 2): string {
-  return n.toLocaleString('en-US', {
-    minimumFractionDigits: d,
-    maximumFractionDigits: d,
-  });
+/** The smallest a segment may shrink to while dragging its neighbour's divider. */
+const MIN_SEG = 0;
+
+/** The "Split evenly" reset — sums to exactly 100. */
+const EVEN_SPLIT: Pcts = { passive: 34, degen: 33, gamefi: 33 };
+
+/** Clamp a percent into [0, 100] and round to a whole number. */
+function clampPct(n: number): number {
+  return Math.max(0, Math.min(100, Math.round(n)));
 }
 
-/** Round a percent map so the enabled tiers sum to exactly 100 (largest-remainder). */
-function normalizeTo100(raw: Pcts, enabled: Record<Tier['key'], boolean>): Pcts {
-  const onKeys = TIERS.map((t) => t.key).filter((k) => enabled[k]);
-  const out: Pcts = { passive: 0, degen: 0, gamefi: 0 };
-  if (onKeys.length === 0) return out;
-  const sum = onKeys.reduce((a, k) => a + Math.max(0, raw[k]), 0) || 1;
-  // scale to 100, then largest-remainder round to integers summing to 100
-  const scaled = onKeys.map((k) => ({ k, v: (Math.max(0, raw[k]) / sum) * 100 }));
-  const floored = scaled.map((s) => ({ ...s, f: Math.floor(s.v), r: s.v - Math.floor(s.v) }));
-  let used = floored.reduce((a, s) => a + s.f, 0);
-  floored.sort((a, b) => b.r - a.r);
-  let i = 0;
-  while (used < 100 && floored.length > 0) {
-    floored[i % floored.length].f += 1;
-    used += 1;
-    i += 1;
-  }
-  for (const s of floored) out[s.k] = s.f;
-  return out;
-}
-
-/** Seed enabled + percents from the persisted weights (positive weight = enabled). */
-function seedFromWeights(w: AllocationWeights | undefined): { enabled: Record<Tier['key'], boolean>; pcts: Pcts } {
-  if (!w) {
-    const enabled = { passive: true, degen: true, gamefi: true };
-    const pcts = { passive: 50, degen: 33, gamefi: 17 } as Pcts;
-    return { enabled, pcts: normalizeTo100(pcts, enabled) };
-  }
-  const enabled = {
-    passive: (w.passive ?? 0) > 0,
-    degen: (w.degen ?? 0) > 0,
-    gamefi: (w.gamefi ?? 0) > 0,
+/**
+ * Seed the split from the persisted weights (positive weight = a funded tier).
+ * Falls back to the even split when nothing is persisted. We do NOT force a sum of
+ * 100 on read — a legacy blob is shown as-saved; the remainder readout will flag it.
+ */
+function seedFromWeights(w: AllocationWeights | undefined): Pcts {
+  if (!w) return { ...EVEN_SPLIT };
+  return {
+    passive: clampPct(w.passive ?? 0),
+    degen: clampPct(w.degen ?? 0),
+    gamefi: clampPct(w.gamefi ?? 0),
   };
-  const rawPcts = {
-    passive: w.passive ?? 0,
-    degen: w.degen ?? 0,
-    gamefi: w.gamefi ?? 0,
-  } as Pcts;
-  return { enabled, pcts: normalizeTo100(rawPcts, enabled) };
 }
 
-/** Build the AllocationWeights payload — the tuned percent as the weight (0 = off). */
-function weightsFrom(pcts: Pcts, enabled: Record<Tier['key'], boolean>): AllocationWeights {
+/** Build the AllocationWeights payload — the tuned percent as the weight (0 = unallocated). */
+function weightsFrom(pcts: Pcts): AllocationWeights {
   const w: AllocationWeights = {};
   for (const t of TIERS) {
-    if (enabled[t.key] && pcts[t.key] > 0) w[t.key] = pcts[t.key];
+    if (pcts[t.key] > 0) w[t.key] = pcts[t.key];
   }
   return w;
+}
+
+/** Whole-dollar money string for a position line ("$240"). */
+function usd0(n: number): string {
+  return `$${Math.round(n).toLocaleString('en-US')}`;
+}
+
+/**
+ * The "current position" line for a tier, derived from the investing balance × its
+ * share of the split.
+ *
+ * HONESTY: the autonomous loop that actually OPENS positions is a documented stub, so
+ * in production (`demo` false) we NEVER synthesize an open position, a bet count, or
+ * P&L. We report the honest truth: the funds are ALLOCATED to the tier and waiting for
+ * the AI ("$X allocated · waiting for your AI"). When a tier has no funds it reads
+ * "Not active yet".
+ *
+ * `demo` true (DEV ?preview hatch) may show the EXAMPLE positions — "$X staked on
+ * Navi", "$X open on DeepBook", "N recent Crash bets" — so the populated design stays
+ * reviewable. That branch never reaches a real user.
+ */
+function positionText(
+  key: TierKey,
+  pct: number,
+  investingUsd: number,
+  demo: boolean,
+): string {
+  const dollars = investingUsd * (pct / 100);
+  if (investingUsd <= 0 || pct <= 0 || dollars < 1) return 'Not active yet';
+
+  // PRODUCTION — honest: allocated, but no position is open (the agent loop is stubbed).
+  if (!demo) return `${usd0(dollars)} allocated · waiting for your AI`;
+
+  // DEV ?preview — example positions for the populated design (never a real user).
+  switch (key) {
+    case 'passive':
+      return `${usd0(dollars)} staked on Navi`;
+    case 'degen':
+      return `${usd0(dollars)} open on DeepBook`;
+    case 'gamefi': {
+      const bets = Math.max(1, Math.min(9, Math.round(dollars / 5)));
+      return `${bets} recent Crash ${bets === 1 ? 'bet' : 'bets'}`;
+    }
+  }
 }
 
 export interface InvestingStrategiesProps {
   /** the data hook (useHome) — for the persisted split, the real vault total, the re-mint. */
   home: HomeApi;
+  /**
+   * DEV-ONLY design preview flag. `true` ONLY under `?preview` → positionText may show
+   * the EXAMPLE open positions / bet count. `false` in production → positionText reports
+   * the honest truth (allocated · waiting for your AI), never a synthesized position.
+   */
+  demo: boolean;
 }
 
-export function InvestingStrategies({ home }: InvestingStrategiesProps) {
-  const { state } = home;
+export function InvestingStrategies({ home, demo }: InvestingStrategiesProps) {
   const role = 'investing' as const;
 
-  const seed = useMemo(() => seedFromWeights(home.investingAllocations), [home.investingAllocations]);
-  const [enabled, setEnabled] = useState<Record<Tier['key'], boolean>>(seed.enabled);
-  const [pcts, setPcts] = useState<Pcts>(seed.pcts);
+  const seed = useMemo(
+    () => seedFromWeights(home.investingAllocations),
+    [home.investingAllocations],
+  );
+  const [pcts, setPcts] = useState<Pcts>(seed);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // The dollar base = the REAL Investing vault value (0 when empty/unfunded).
-  const investTotal = state.investing.usd;
-  const onCount = TIERS.filter((t) => enabled[t.key]).length;
-  const total = TIERS.reduce((a, t) => a + (enabled[t.key] ? pcts[t.key] : 0), 0);
-  const summary = `${onCount} ${onCount === 1 ? 'strategy' : 'strategies'} enabled`;
+  /** the bar element — measured to convert a pointer dx into a % of its width. */
+  const barRef = useRef<HTMLDivElement | null>(null);
 
-  // Persist + re-mint (fire-and-forget; roll back on failure handled by caller of toggle).
-  const persist = useCallback(
-    (nextPcts: Pcts, nextEnabled: Record<Tier['key'], boolean>) => {
-      setError(null);
-      const weights = weightsFrom(nextPcts, nextEnabled);
-      void home.setAllocations(role, weights).catch((e: unknown) => {
-        setError(e instanceof Error ? e.message : 'Could not update strategies.');
-      });
-    },
-    [home],
-  );
+  const total = TIERS.reduce((a, t) => a + pcts[t.key], 0);
+  const exact = total === 100;
+  const waiting = 100 - total; // >0 → still waiting · <0 → too much
 
-  // Toggle a tier on/off → re-normalize the split to 100 across what remains on.
-  const toggle = useCallback(
-    (key: Tier['key']) => {
-      setEnabled((prevEn) => {
-        const nextEn = { ...prevEn, [key]: !prevEn[key] };
-        // when enabling, give the tier its baseline before normalizing
-        setPcts((prevP) => {
-          const seedP: Pcts = { ...prevP };
-          if (nextEn[key] && seedP[key] <= 0) {
-            seedP[key] = TIERS.find((t) => t.key === key)!.baseline;
-          }
-          const normalized = normalizeTo100(seedP, nextEn);
-          persist(normalized, nextEn);
-          return normalized;
-        });
-        return nextEn;
-      });
-    },
-    [persist],
-  );
+  // ── the core trade: move `delta`% from one neighbour to the other ──────────
+  // A divider sits between segment `left` (index i) and `right` (index i+1). We
+  // shift `delta` percentage points from `right` into `left` (delta may be
+  // negative). ONLY these two segments change; the third is untouched, so the sum
+  // is invariant. Both neighbours are clamped to >= MIN_SEG, and we re-derive the
+  // partner from the moved one to keep their pair-sum exact (no rounding drift).
+  const tradeAt = useCallback((dividerIndex: 0 | 1, delta: number) => {
+    setError(null);
+    setPcts((p) => {
+      const leftKey = TIERS[dividerIndex].key;
+      const rightKey = TIERS[dividerIndex + 1].key;
+      const pair = p[leftKey] + p[rightKey]; // invariant across the trade
+      let left = Math.round(p[leftKey] + delta);
+      left = Math.max(MIN_SEG, Math.min(pair - MIN_SEG, left));
+      const right = pair - left;
+      if (left === p[leftKey] && right === p[rightKey]) return p; // no-op
+      return { ...p, [leftKey]: left, [rightKey]: right };
+    });
+  }, []);
 
-  // Drag a tier's slider → set its percent, redistribute the rest proportionally to
-  // keep the enabled total at 100. Persist the tuned split (debounced via commit).
-  const onSlide = useCallback(
-    (key: Tier['key'], value: number) => {
-      setPcts((prevP) => {
-        const others = TIERS.map((t) => t.key).filter((k) => k !== key && enabled[k]);
-        const v = Math.max(0, Math.min(100, value));
-        const next: Pcts = { ...prevP, [key]: v };
-        const remaining = 100 - v;
-        const otherSum = others.reduce((a, k) => a + prevP[k], 0);
-        if (others.length === 0) {
-          next[key] = 100; // the only enabled tier always owns 100
-        } else if (otherSum <= 0) {
-          // split the remainder evenly
-          const each = remaining / others.length;
-          others.forEach((k) => (next[k] = each));
-        } else {
-          others.forEach((k) => (next[k] = (prevP[k] / otherSum) * remaining));
+  // ── pointer drag on a divider: convert dx (px) → % of the bar width ─────────
+  const onDividerPointerDown = useCallback(
+    (dividerIndex: 0 | 1) => (e: React.PointerEvent<HTMLDivElement>) => {
+      // ignore secondary buttons; let keyboard handle the rest
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      const bar = barRef.current;
+      if (!bar) return;
+      const barWidth = bar.getBoundingClientRect().width;
+      if (barWidth <= 0) return;
+
+      const el = e.currentTarget;
+      el.setPointerCapture(e.pointerId);
+      const startX = e.clientX;
+      const pxToPct = (px: number) => (px / barWidth) * 100;
+
+      // We accumulate against a fresh read each move via tradeAt's functional
+      // update, but tradeAt expects an *incremental* delta — so track the last
+      // applied integer step and only feed the difference.
+      let appliedSteps = 0;
+
+      const onMove = (ev: PointerEvent) => {
+        const wantSteps = Math.round(pxToPct(ev.clientX - startX));
+        const step = wantSteps - appliedSteps;
+        if (step !== 0) {
+          tradeAt(dividerIndex, step);
+          appliedSteps = wantSteps;
         }
-        return normalizeTo100(next, enabled);
-      });
+      };
+      const onUp = (ev: PointerEvent) => {
+        el.releasePointerCapture(ev.pointerId);
+        el.removeEventListener('pointermove', onMove);
+        el.removeEventListener('pointerup', onUp);
+        el.removeEventListener('pointercancel', onUp);
+      };
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerup', onUp);
+      el.addEventListener('pointercancel', onUp);
     },
-    [enabled],
+    [tradeAt],
   );
 
-  // Commit (persist + re-mint) when the user releases the slider — avoids a re-mint
-  // storm while dragging.
-  const commit = useCallback(() => {
-    persist(pcts, enabled);
-  }, [persist, pcts, enabled]);
-
-  const onRowKey = useCallback(
-    (e: KeyboardEvent<HTMLSpanElement>, key: Tier['key']) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        toggle(key);
+  // ── keyboard on a focused divider: Arrow keys nudge ±1% (Home/End jump) ────
+  const onDividerKeyDown = useCallback(
+    (dividerIndex: 0 | 1) => (e: React.KeyboardEvent<HTMLDivElement>) => {
+      let delta = 0;
+      let jump = false;
+      switch (e.key) {
+        case 'ArrowLeft':
+        case 'ArrowDown':
+          delta = -1;
+          break;
+        case 'ArrowRight':
+        case 'ArrowUp':
+          delta = 1;
+          break;
+        case 'Home':
+          delta = -100;
+          jump = true;
+          break;
+        case 'End':
+          delta = 100;
+          jump = true;
+          break;
+        default:
+          return;
       }
+      e.preventDefault();
+      tradeAt(dividerIndex, jump ? delta : delta * (e.shiftKey ? 5 : 1));
     },
-    [toggle],
+    [tradeAt],
   );
+
+  /** "Split evenly" — reset to the 34/33/33 baseline. */
+  const splitEvenly = useCallback(() => {
+    setError(null);
+    setPcts({ ...EVEN_SPLIT });
+  }, []);
+
+  // ── Confirm → persist + re-mint (EXISTING path; only the input UX changed) ──
+  const confirm = useCallback(async () => {
+    if (total !== 100 || busy) return; // block, never auto-correct
+    setError(null);
+    setBusy(true);
+    try {
+      await home.setAllocations(role, weightsFrom(pcts));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Could not update strategies.');
+    } finally {
+      setBusy(false);
+    }
+  }, [home, pcts, total, busy]);
+
+  // The live remainder copy + tone. The bar is built to always total 100, so the
+  // steady-state line is the rule; the slack copy is the future-min-clamp guard.
+  const remainderText = exact
+    ? 'All your money is working'
+    : waiting > 0
+      ? `${waiting}% still waiting`
+      : `${-waiting}% too much`;
+
+  // running cumulative % for the two dividers' aria-valuenow (position along bar)
+  const div1Now = pcts.passive;
+  const div2Now = pcts.passive + pcts.degen;
+
+  // The funded sandbox total — drives the honest "current position" lines. 0 in
+  // the fresh/preview state → every tier reads "Not active yet".
+  const investingUsd = home.state.investing.usd;
 
   return (
     <div className="pane__scroll">
-      <div className="detail" id="stratDetail">
-        <div className="strats" id="strats">
-          {TIERS.map((t) => {
-            const on = enabled[t.key];
-            const pct = on ? pcts[t.key] : 0;
-            const amt = (investTotal * pct) / 100;
-            return (
-              <div
-                key={t.key}
-                className={`strat ${on ? 'on' : 'off'}`}
-                data-strat={t.key}
-              >
-                {/* the refined ON/OFF toggle (not a checkbox) */}
-                <div className="strat__toggle">
-                  <span
-                    className="sw"
-                    role="switch"
-                    tabIndex={0}
-                    aria-checked={on}
-                    aria-pressed={on}
-                    aria-label={`${t.name} strategy on/off`}
-                    onClick={() => toggle(t.key)}
-                    onKeyDown={(e) => onRowKey(e, t.key)}
-                  />
-                </div>
-                <div className="strat__main">
-                  <div className="strat__name">
-                    {t.name}
-                    {t.by ? <span className="by">{t.by}</span> : null}
-                  </div>
-                  <div className="strat__desc">{t.desc}</div>
-                </div>
-                <div className="strat__share">
-                  <span className="pct">{pct}%</span>
-                  <span className="amt">${fmt(amt, 0)}</span>
-                </div>
-
-                {/* the adjustable PERCENT slider (only meaningful when enabled) */}
-                <div className="strat__slider">
-                  <input
-                    className="rng"
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={pct}
-                    disabled={!on}
-                    aria-label={`${t.name} allocation percent`}
-                    onChange={(e) => onSlide(t.key, Number(e.target.value))}
-                    onPointerUp={commit}
-                    onKeyUp={commit}
-                  />
-                  <span className="strat__rngval">{pct}%</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="alloc">
-          <div className="alloc__lab">
-            <span className="k">How the ${fmt(investTotal, 0)} is split</span>
-            <span className={`v ${total === 100 ? 'ok' : onCount > 0 ? 'warn' : ''}`} id="allocSum">
-              {onCount > 0 ? `${total}% · ${summary}` : summary}
-            </span>
-          </div>
-          <div className="alloc__bar" id="allocBar">
-            {TIERS.map((t) => {
-              const on = enabled[t.key];
-              const pct = on ? pcts[t.key] : 0;
-              return (
-                <div
-                  key={t.key}
-                  className={`alloc__seg ${t.key}${on ? ' on' : ''}`}
-                  data-seg={t.key}
-                  style={{ flexBasis: `${pct}%` }}
-                />
-              );
-            })}
-          </div>
-          <div className="alloc__keys">
-            {TIERS.map((t) => {
-              const on = enabled[t.key];
-              const pct = on ? pcts[t.key] : 0;
-              return (
-                <span
-                  key={t.key}
-                  className={`alloc__key ${t.key}${on ? '' : ' off'}`}
-                  data-key={t.key}
-                >
-                  <i />
-                  <b>{t.name}</b> · <span data-keypct>{pct}%</span>
-                </span>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 🚩 GameFi → Crash: links out to the sister app (no on-chain GameFi this pass). */}
-        <a
-          className="crashlink"
-          href={CRASH_URL}
-          target="_blank"
-          rel="noreferrer noopener"
-        >
-          <b>Crash</b>
-          <span>by Suize · BTC up or down, every round</span>
-          <span className="arr" aria-hidden="true">
-            →
-          </span>
-        </a>
-
-        {error ? (
-          <p className="note" role="alert" style={{ marginTop: 14 }}>
-            {error}
-          </p>
-        ) : null}
+      {/* live remainder readout (>100% → .warn) */}
+      <div
+        className={`remainder${!exact && waiting < 0 ? ' warn' : ''}`}
+        role="status"
+        aria-live="polite"
+      >
+        {remainderText}
       </div>
+
+      {/* ONE split-bar — three proportional segments + two draggable dividers. */}
+      <div className="split" ref={barRef}>
+        {/* Passive segment */}
+        <div
+          className="split__seg"
+          data-seg="passive"
+          style={{ flexBasis: `${pcts.passive}%`, flexGrow: 0, flexShrink: 0 }}
+        >
+          <span className="split__name">{TIERS[0].name}</span>
+          <span className="split__pct">{pcts.passive}%</span>
+        </div>
+
+        {/* divider 1|2 — trades between Passive and Trading */}
+        <div
+          className="split__div"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Passive vs Trading split"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={div1Now}
+          aria-valuetext={`Passive ${pcts.passive}%, Trading ${pcts.degen}%`}
+          tabIndex={0}
+          onPointerDown={onDividerPointerDown(0)}
+          onKeyDown={onDividerKeyDown(0)}
+        />
+
+        {/* Trading segment (data-seg stays "degen" — the persisted/CSS key). */}
+        <div
+          className="split__seg"
+          data-seg="degen"
+          style={{ flexBasis: `${pcts.degen}%`, flexGrow: 0, flexShrink: 0 }}
+        >
+          <span className="split__name">{TIERS[1].name}</span>
+          <span className="split__pct">{pcts.degen}%</span>
+        </div>
+
+        {/* divider 2|3 — trades between Trading and GameFi */}
+        <div
+          className="split__div"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Trading vs GameFi split"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={div2Now}
+          aria-valuetext={`Trading ${pcts.degen}%, GameFi ${pcts.gamefi}%`}
+          tabIndex={0}
+          onPointerDown={onDividerPointerDown(1)}
+          onKeyDown={onDividerKeyDown(1)}
+        />
+
+        {/* GameFi segment */}
+        <div
+          className="split__seg"
+          data-seg="gamefi"
+          style={{ flexBasis: `${pcts.gamefi}%`, flexGrow: 0, flexShrink: 0 }}
+        >
+          <span className="split__name">{TIERS[2].name}</span>
+          <span className="split__pct">{pcts.gamefi}%</span>
+        </div>
+      </div>
+
+      {/* Current positions — one detail row per tier: dot + what it does + the
+          honest position line. In production the loop that opens positions is a
+          documented stub, so we report "$X allocated · waiting for your AI" — never a
+          synthesized open position / bet count / P&L (see positionText). */}
+      <div className="strat-detail">
+        <div className="sd-head">Current positions</div>
+        {TIERS.map((t) => (
+          <div className="sd-row" key={t.key}>
+            <span className="sd-dot" data-seg={t.key} />
+            <span className="sd-desc">{t.desc}</span>
+            <span className="sd-pos">
+              {positionText(t.key, pcts[t.key], investingUsd, demo)}
+            </span>
+            {t.key === 'gamefi' ? (
+              /* 🚩 GameFi → Crash: links out to the sister app (no on-chain GameFi this pass). */
+              <a
+                className="crashlink"
+                href={CRASH_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                <b>Crash</b>
+                <span>by Suize · BTC up or down, every round</span>
+              </a>
+            ) : null}
+          </div>
+        ))}
+      </div>
+
+      {/* footer — "Split evenly" reset then "Confirm" (gated on exactly 100%),
+          right-grouped with a small gap by .invest__foot. Order matters. */}
+      <div className="invest__foot">
+        <button className="btn btn--ghost" type="button" onClick={splitEvenly}>
+          Split evenly
+        </button>
+        <button
+          className="btn btn--cy"
+          type="button"
+          onClick={() => void confirm()}
+          disabled={!exact || busy}
+        >
+          {busy ? 'Saving…' : 'Confirm'}
+        </button>
+      </div>
+
+      {error ? (
+        <p className="note" role="alert" style={{ marginTop: 14 }}>
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

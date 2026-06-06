@@ -41,6 +41,28 @@ export const fmt_usd = (units: bigint): string =>
 export const fmt_signed_usd = (n: number): string =>
   (n < 0 ? '−' : '+') + '$' + fmt_amount(n)
 
+// ----- CENTS variants — KEEP 2 DECIMALS for small values (the "+0.0$" fix) -----
+// The money rule above rounds sub-$10 to ONE decimal, so a real +$0.04 P&L
+// collapsed to "+$0.0" and a +$0.03 win read as "+$0.00"→"+$0.0"... ZERO. For
+// realized P&L rows + the toast + the live position figures (often a few cents on
+// a small wager) we show 2 DECIMALS under $10 so the cents always read; at/above
+// $10 we defer to the whole-dollar + separators rule. Display ONLY — never touches
+// bet math. The history row + the settle toast both use fmt_signed_cents so they
+// agree to the cent for the same outcome.
+export const cents_amount = (n: number): string => {
+  const v = Math.abs(n)
+  if (v < 10) return v.toFixed(2)
+  return Math.round(v).toLocaleString('en-US')
+}
+// dUSDC base units -> "$0.04" / "$5.04" / "$1,234" (cents kept under $10).
+export const fmt_usd_cents = (units: bigint): string =>
+  (units < 0n ? '−' : '') +
+  '$' +
+  cents_amount(Number(units) / Number(DUSDC_SCALE))
+// Signed P&L with cents: "+$0.04" / "−$0.12" / "+$53" (sign always shown).
+export const fmt_signed_cents = (n: number): string =>
+  (n < 0 ? '−' : '+') + '$' + cents_amount(n)
+
 // A [0,1] fraction -> "12%" style percent string (0 decimals by default).
 export const fmt_pct = (frac: number, digits = 0): string =>
   `${(frac * 100).toFixed(digits)}%`
@@ -69,6 +91,24 @@ export const fmt_compact = (n: number): string => {
 // Compact USD with a leading "$" (e.g. 150000 -> "$150k"). Convenience wrapper
 // for the bet WIN headline, balance couplet and any value chip that can overflow.
 export const fmt_usd_compact = (n: number): string => '$' + fmt_compact(n)
+
+// THE BALANCE — cents-visible so any realized change (e.g. a +$0.45 win bumping a
+// $148 balance) is VISIBLE, while a fat testnet balance still never clips. Below
+// the k collapse we show 2 DECIMALS ("$148.45", "$5.04", "$0.30") so a sub-dollar
+// settle change reads; thousands collapse to k/M ("$12.5k", "$1.25M") to fit the
+// couplet box. dUSDC base units in. Display only — never touches bet math.
+export const fmt_balance = (units: bigint): string => {
+  const n = Number(units) / Number(DUSDC_SCALE)
+  if (!Number.isFinite(n)) return '$0.00'
+  const sign = n < 0 ? '−' : ''
+  const v = Math.abs(n)
+  const trim = (s: string): string =>
+    s.includes('.') ? s.replace(/\.?0+$/, '') : s
+  if (v >= 1_000_000) return `${sign}$${trim((v / 1_000_000).toFixed(2))}M`
+  if (v >= 10_000) return `${sign}$${trim((v / 1_000).toFixed(1))}k`
+  // below the k collapse: full cents + thousands separators ("$1,234.56").
+  return `${sign}$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
 
 // Truncate a 0x… address to "0x12ab…cd34" for compact display. Returns '' for
 // a missing address so callers can render a placeholder.

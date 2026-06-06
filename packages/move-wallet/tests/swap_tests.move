@@ -96,10 +96,32 @@ fun create_default_mandate(scenario: &mut Scenario, clock: &Clock): ID {
     id
 }
 
-/// As OWNER, create + share a SwapVault<BASE, QUOTE> linked to `mandate_id`.
-fun create_swap_vault_for(scenario: &mut Scenario, mandate_id: ID) {
+/// A POSITIVE slippage floor used by every stub call (C1: `min_out > 0` is now
+/// enforced in the shared gate, so the stubs must pass a non-zero floor). The stub
+/// swap ignores the value beyond the floor check — it dictates its own outputs — so
+/// any positive number works.
+const MIN_OUT: u64 = 1;
+
+/// Fabricate a throwaway object ID to stand in for the pinned DeepBook pool's ID
+/// (C1). The real `Pool` is uncreatable in a unit test, but the pin is an `ID`
+/// comparison, so a fresh `UID`'s ID is a faithful stand-in. We delete the UID
+/// immediately; only the `ID` value is retained for the vault's pin.
+fun fresh_pool_id(scenario: &mut Scenario): ID {
     scenario.next_tx(OWNER);
-    swap::create_swap_vault<BASE, QUOTE>(mandate_id, scenario.ctx());
+    let uid = object::new(scenario.ctx());
+    let id = uid.to_inner();
+    uid.delete();
+    id
+}
+
+/// As OWNER, create + share a SwapVault<BASE, QUOTE> linked to `mandate_id`, pinned
+/// to a freshly-minted throwaway pool ID. Returns that pinned ID so a test can
+/// assert against it or build a mismatching one.
+fun create_swap_vault_for(scenario: &mut Scenario, mandate_id: ID): ID {
+    let pool_id = fresh_pool_id(scenario);
+    scenario.next_tx(OWNER);
+    swap::create_swap_vault<BASE, QUOTE>(mandate_id, pool_id, scenario.ctx());
+    pool_id
 }
 
 fun deposit_base_as_owner(scenario: &mut Scenario, amount: u64) {
@@ -212,6 +234,7 @@ fun test_agent_swap_base_to_quote_full_custody() {
             SCOPE_SWAP,
             amount_in,
             deep_fee,
+            MIN_OUT,
             out_amount,
             deep_leftover,
             input_leftover,
@@ -274,6 +297,7 @@ fun test_agent_swap_quote_to_base_full_custody() {
             SCOPE_SWAP,
             amount_in,
             deep_fee,
+            MIN_OUT,
             out_amount,
             deep_leftover,
             input_leftover,
@@ -326,7 +350,7 @@ fun test_agent_swap_below_min_size_noop_conserves_funds() {
 
         swap::agent_swap_base_to_quote_stub<BASE, QUOTE>(
             &mut vault, &mut mandate, &cap, SCOPE_SWAP,
-            amount_in, deep_fee, out_amount, deep_leftover, input_leftover,
+            amount_in, deep_fee, MIN_OUT, out_amount, deep_leftover, input_leftover,
             &clock, scenario.ctx(),
         );
 
@@ -365,7 +389,7 @@ fun test_multiple_swaps_accumulate() {
         let cap = scenario.take_from_sender<AgentCap>();
         swap::agent_swap_base_to_quote_stub<BASE, QUOTE>(
             &mut vault, &mut mandate, &cap, SCOPE_SWAP,
-            200, 10, 190, 8, 0, &clock, scenario.ctx(),
+            200, 10, MIN_OUT, 190, 8, 0, &clock, scenario.ctx(),
         );
         scenario.return_to_sender(cap);
         ts::return_shared(mandate);
@@ -380,7 +404,7 @@ fun test_multiple_swaps_accumulate() {
         let cap = scenario.take_from_sender<AgentCap>();
         swap::agent_swap_quote_to_base_stub<BASE, QUOTE>(
             &mut vault, &mut mandate, &cap, SCOPE_SWAP,
-            100, 10, 98, 7, 0, &clock, scenario.ctx(),
+            100, 10, MIN_OUT, 98, 7, 0, &clock, scenario.ctx(),
         );
 
         // Base: −200 (swap1 in) +98 (swap2 out) = DEPOSIT_BASE − 102.
@@ -424,7 +448,7 @@ fun test_no_coin_leaks_to_agent_after_swap() {
         // three should be caged, none handed to the agent.
         swap::agent_swap_base_to_quote_stub<BASE, QUOTE>(
             &mut vault, &mut mandate, &cap, SCOPE_SWAP,
-            300, 10, 290, 8, 5, &clock, scenario.ctx(),
+            300, 10, MIN_OUT, 290, 8, 5, &clock, scenario.ctx(),
         );
         scenario.return_to_sender(cap);
         ts::return_shared(mandate);
@@ -503,7 +527,7 @@ fun test_swap_over_budget_aborts() {
         // BUDGET + 1 (both sides hold 5_000, so budget fails first).
         swap::agent_swap_base_to_quote_stub<BASE, QUOTE>(
             &mut vault, &mut mandate, &cap, SCOPE_SWAP,
-            BUDGET + 1, 10, 0, 10, BUDGET + 1, &clock, scenario.ctx(),
+            BUDGET + 1, 10, MIN_OUT, 0, 10, BUDGET + 1, &clock, scenario.ctx(),
         );
         scenario.return_to_sender(cap);
         ts::return_shared(mandate);
@@ -537,7 +561,7 @@ fun test_swap_insufficient_input_aborts() {
         // 500 <= BUDGET (gate OK) but 500 > base(100) → EInsufficientBalance.
         swap::agent_swap_base_to_quote_stub<BASE, QUOTE>(
             &mut vault, &mut mandate, &cap, SCOPE_SWAP,
-            500, 10, 490, 8, 0, &clock, scenario.ctx(),
+            500, 10, MIN_OUT, 490, 8, 0, &clock, scenario.ctx(),
         );
         scenario.return_to_sender(cap);
         ts::return_shared(mandate);
@@ -570,7 +594,7 @@ fun test_swap_insufficient_deep_aborts() {
         // deep_fee = 10 > deep(1) → EInsufficientDeep (base 300 <= base 5_000 OK).
         swap::agent_swap_base_to_quote_stub<BASE, QUOTE>(
             &mut vault, &mut mandate, &cap, SCOPE_SWAP,
-            300, 10, 290, 8, 0, &clock, scenario.ctx(),
+            300, 10, MIN_OUT, 290, 8, 0, &clock, scenario.ctx(),
         );
         scenario.return_to_sender(cap);
         ts::return_shared(mandate);
@@ -614,7 +638,7 @@ fun test_swap_after_revoke_aborts() {
         let cap = scenario.take_from_sender<AgentCap>();
         swap::agent_swap_base_to_quote_stub<BASE, QUOTE>(
             &mut vault, &mut mandate, &cap, SCOPE_SWAP,
-            100, 10, 95, 8, 0, &clock, scenario.ctx(),
+            100, 10, MIN_OUT, 95, 8, 0, &clock, scenario.ctx(),
         );
         scenario.return_to_sender(cap);
         ts::return_shared(mandate);
@@ -645,7 +669,7 @@ fun test_swap_after_expiry_aborts() {
         let cap = scenario.take_from_sender<AgentCap>();
         swap::agent_swap_base_to_quote_stub<BASE, QUOTE>(
             &mut vault, &mut mandate, &cap, SCOPE_SWAP,
-            100, 10, 95, 8, 0, &clock, scenario.ctx(),
+            100, 10, MIN_OUT, 95, 8, 0, &clock, scenario.ctx(),
         );
         scenario.return_to_sender(cap);
         ts::return_shared(mandate);
@@ -675,7 +699,7 @@ fun test_swap_out_of_scope_aborts() {
         let cap = scenario.take_from_sender<AgentCap>();
         swap::agent_swap_base_to_quote_stub<BASE, QUOTE>(
             &mut vault, &mut mandate, &cap, SCOPE_NOT_ALLOWED,
-            100, 10, 95, 8, 0, &clock, scenario.ctx(),
+            100, 10, MIN_OUT, 95, 8, 0, &clock, scenario.ctx(),
         );
         scenario.return_to_sender(cap);
         ts::return_shared(mandate);
@@ -725,7 +749,7 @@ fun test_swap_wrong_mandate_aborts() {
         assert!(swap::mandate_id<BASE, QUOTE>(&vault) != object::id(&mandate_b), 1);
         swap::agent_swap_base_to_quote_stub<BASE, QUOTE>(
             &mut vault, &mut mandate_b, &cap_b, SCOPE_SWAP,
-            100, 10, 95, 8, 0, &clock, scenario.ctx(),
+            100, 10, MIN_OUT, 95, 8, 0, &clock, scenario.ctx(),
         );
         ts::return_shared(mandate_b);
         ts::return_shared(vault);
@@ -815,6 +839,104 @@ fun test_withdraw_base_over_balance_aborts() {
         let mut vault = scenario.take_shared<SwapVault<BASE, QUOTE>>();
         let coin = swap::withdraw_base<BASE, QUOTE>(&mut vault, 1_001, scenario.ctx());
         transfer::public_transfer(coin, OWNER);
+        ts::return_shared(vault);
+    };
+
+    cleanup(scenario, clock);
+}
+
+// ============================================================================
+// C1 — POOL PIN + SLIPPAGE FLOOR (the cage-escape fixes)
+// ============================================================================
+//
+// COVERAGE NOTE on the pool-pin (`EWrongPool`): the assert lives in the PRODUCTION
+// `agent_swap_*`, which takes a real `&mut Pool<Base, Quote>`. DeepBook's `Pool` is
+// `key`-only and uncreatable in a Move unit test (the same constraint that forces
+// the whole `*_stub` seam), so we CANNOT drive a wrong-pool `agent_swap_*` here —
+// that path needs a live localnet/testnet `Pool` and is part of the integration
+// run. What IS unit-tested below: the pin is stored at creation, the owner can
+// re-pin it, and non-owners cannot. The `min_out > 0` floor lives in the SHARED
+// gate and IS exercised end-to-end through the stub.
+
+#[test]
+/// The vault records the `allowed_pool_id` it was created with, and the owner can
+/// re-pin it via `set_allowed_pool`. Proves the C1 binding exists + is rotatable.
+fun test_pool_pin_set_at_creation_and_rotatable() {
+    let (mut scenario, clock) = begin();
+
+    let mandate_id = create_default_mandate(&mut scenario, &clock);
+    let pinned = create_swap_vault_for(&mut scenario, mandate_id);
+
+    scenario.next_tx(OWNER);
+    {
+        let vault = scenario.take_shared<SwapVault<BASE, QUOTE>>();
+        assert!(swap::allowed_pool_id<BASE, QUOTE>(&vault) == pinned, 0);
+        ts::return_shared(vault);
+    };
+
+    // Owner re-pins to a different pool ID.
+    let new_pool = fresh_pool_id(&mut scenario);
+    scenario.next_tx(OWNER);
+    {
+        let mut vault = scenario.take_shared<SwapVault<BASE, QUOTE>>();
+        swap::set_allowed_pool<BASE, QUOTE>(&mut vault, new_pool, scenario.ctx());
+        assert!(swap::allowed_pool_id<BASE, QUOTE>(&vault) == new_pool, 0);
+        assert!(swap::allowed_pool_id<BASE, QUOTE>(&vault) != pinned, 1);
+        ts::return_shared(vault);
+    };
+
+    cleanup(scenario, clock);
+}
+
+#[test]
+#[expected_failure(abort_code = suize::swap::ENotOwner)]
+/// A non-owner cannot re-pin the vault's allowed pool → `ENotOwner`. The agent must
+/// never be able to point the cage at a pool of its own choosing via this path.
+fun test_non_owner_set_allowed_pool_aborts() {
+    let (mut scenario, clock) = begin();
+
+    let mandate_id = create_default_mandate(&mut scenario, &clock);
+    create_swap_vault_for(&mut scenario, mandate_id);
+    let attacker_pool = fresh_pool_id(&mut scenario);
+
+    scenario.next_tx(STRANGER);
+    {
+        let mut vault = scenario.take_shared<SwapVault<BASE, QUOTE>>();
+        swap::set_allowed_pool<BASE, QUOTE>(&mut vault, attacker_pool, scenario.ctx());
+        ts::return_shared(vault);
+    };
+
+    cleanup(scenario, clock);
+}
+
+#[test]
+#[expected_failure(abort_code = suize::swap::EZeroMinOut)]
+/// THE SLIPPAGE-FLOOR PROOF (C1, defense-in-depth): a swap with `min_out == 0` is
+/// rejected by the shared gate with `EZeroMinOut` — BEFORE any budget is debited or
+/// custody touched. Without this, a jailbroken agent could round-trip the vault
+/// through even the pinned pool and accept dust back. Everything else here is
+/// fully funded so the zero floor is unambiguously the binding constraint.
+fun test_swap_zero_min_out_aborts() {
+    let (mut scenario, clock) = begin();
+
+    let mandate_id = create_default_mandate(&mut scenario, &clock);
+    create_swap_vault_for(&mut scenario, mandate_id);
+    fund_vault(&mut scenario);
+    issue_cap_to_agent(&mut scenario);
+
+    scenario.next_tx(AGENT);
+    {
+        let mut vault = scenario.take_shared<SwapVault<BASE, QUOTE>>();
+        let mut mandate = scenario.take_shared<Mandate>();
+        let cap = scenario.take_from_sender<AgentCap>();
+        // min_out = 0 (the 7th arg) → EZeroMinOut, even though budget + balances
+        // would all allow the trade.
+        swap::agent_swap_base_to_quote_stub<BASE, QUOTE>(
+            &mut vault, &mut mandate, &cap, SCOPE_SWAP,
+            300, 10, 0, 290, 8, 5, &clock, scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        ts::return_shared(mandate);
         ts::return_shared(vault);
     };
 

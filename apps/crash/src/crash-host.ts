@@ -20,7 +20,11 @@ export type CrashSide = {
   multiple: number | null // win / wager (the dopamine number); null until quoted
   costUsd: number | null // the WAGER in $ — the SAME constant on both sides; null until quoted
   double: boolean // true when the multiple sits in the ~2x "double your money" band
-  enabled: boolean // false when locked / unaffordable / no quote / market not active
+  // DUAL-SIDE MODEL: BOTH sides are always tappable — a tap folds into its own
+  // bucket (UP and DOWN never net on chain). false only when locked / unaffordable
+  // / no quote / market not active / a write is in flight (serialization). NO
+  // lopsidedness gating — a near-1.0x favorite and a 1.7x longshot are both bettable.
+  enabled: boolean
 }
 
 // One row of the live "Placing now" tape (ambient social proof; ZERO gameplay).
@@ -36,28 +40,101 @@ export type CrashTapeRow = {
 // the side, whether it won, and the realized P&L in plain USD (signed). Rendered
 // most-recent-first, capped to a few rows. Pure presentation — never feeds a tx.
 export type CrashResult = {
-  id: number // monotonic key for dedupe/render (epoch ms of capture)
+  id: number // monotonic render key (epoch ms of capture)
+  // STABLE bucket key (oracle|side|strike|expiry) for dedup across the live session
+  // capture + the reload seed + a sweep/auto-claim double-fire, so ONE settled
+  // bucket is ONE row. Optional only for back-compat; every producer now sets it.
+  key?: string
   isUp: boolean
   won: boolean
   pnlUsd: number // signed realized P&L in dollars (+win / −loss)
 }
 
-// The held position cluster (replaces the bet controls while a bet is live).
+// ONE side of the held position, presented as its OWN distinct position card —
+// "The Exit Ticket": an OUTLINED LEDGER/RECEIPT (vs the filled, side-coloured WAGER
+// posters). The card's CHROME (verdict rail / border / fill / glow / hero colour) is
+// driven by the SIGN OF THE LIVE P&L (`liveNet`), NOT by the side — a DOWN bet
+// that's winning right now renders a GREEN card. The side (UP/DOWN) is only a tiny
+// mono glyph that NEVER tints chrome.
+//
+// TWO-DISTINCT-POSITIONS MODEL: UP and DOWN are separate on-chain buckets under
+// distinct MarketKeys that settle independently, so the UI shows each as its own
+// card with its OWN cash-out button. There is NO merged/netted number — every
+// figure here is for THIS side alone, honest by construction.
+export type SideVM = {
+  side: 'UP' | 'DOWN'
+  // This side's contract count: "3.2 contracts" (qty / ONE_CONTRACT_QTY).
+  contractsStr: string
+  // ----- LIVE P&L (drives the card chrome + the hero) -----
+  // The signed live net in DOLLARS = exit-now value − cost. The CHROME state binds
+  // to sign(liveNet) ONLY, so a losing position is structurally incapable of
+  // rendering green. (Carried for completeness; the render uses `state`/`liveNetStr`.)
+  liveNet: number
+  // The hero string with caret: "▴ +$0.31" (winning) / "▾ −$0.74" (losing) /
+  // "+$0.00" (neutral). Coloured by `state` in the render.
+  liveNetStr: string
+  // The verdict from liveNet + a $0.02 deadband (kills strobe at break-even).
+  // 'neutral' ALSO when there is no live quote yet (pre-quote → no phantom).
+  state: 'winning' | 'losing' | 'neutral'
+  // Plain-word sublabel matching `state`: "winning now" / "losing now" / "about even".
+  nowSublabel: string
+  // The MATH line proving the hero: "value now $2.12" + the paid basis below.
+  exitValueStr: string
+  // This side's cost basis, muted: "paid $0.50" (cents-aware).
+  paidStr: string
+  // ----- conditional settle figures (ALWAYS grey, ALWAYS "IF"-prefixed) -----
+  // The net profit IF this side wins at settle = (qty × $1) − cost. "+$2.09".
+  // NEVER tinted — it can never green a loser. Deterministic (no live quote needed).
+  profitIfRightStr: string
+  // The FULL gross payout you'd hold if right = qty × $1. "pays $3.90 total".
+  totalIfSettledStr: string
+  // ----- cash-out CTA -----
+  // Signed real exit net, agreeing with the hero: "Cash out · take +$0.31" (green) /
+  // "...take −$0.74" (honest red). Plain "Cash out" until the first live quote.
+  cashoutCtaStr: string
+  cashoutPositive: boolean // the signed exit net on the button is >= 0
+  canCashout: boolean // this side firable (confirmed quote, no write in flight)
+  busyCashout: boolean // THIS side's cash-out tx is in flight
+  // ----- LOCKED / SETTLING (the held round is settling — neutral, outcome unknown) -
+  // True once the held round is settling (keyed off the App-level held_settling /
+  // settling_now flag). When set the card goes NEUTRAL grey (NEVER fake-tinted), the
+  // NOW block is replaced by "SETTLING ROUND… / payout pending", and BOTH honest
+  // outcomes are shown below the hairline; the cash-out button is disabled.
+  settling: boolean
+  // The two honest outcome strings shown while settling: "IF DOWN WINS → you get
+  // $3.90" and "IF DOWN LOSES → you get $0".
+  ifWinsStr: string
+  ifLosesStr: string
+}
+
+// The held position cluster (replaces/accompanies the bet controls while a bet is
+// live). TWO-DISTINCT-POSITIONS MODEL: a SHARED header (entry + time-to-settle)
+// plus a per-side map — each present side renders its own card with its own
+// cash-out button. A side with 0 contracts is simply absent from `sides` (its
+// column shows the pre-bet wager selector instead, for opening/growing).
 export type CrashHeld = {
-  isUp: boolean
-  entryStr: string // "ENTRY $67,000"
-  label: string // "CASH OUT FOR" | "SETTLING…" | "FINAL PAYOUT"
-  cashoutStr: string | null // "$0.74" live bid, null when not quoteable yet
-  deltaStr: string // "+0.24 · PAID $0.50"
-  winning: boolean
-  meterPct: number // 0..100 fill of the cash-out meter (payout vs $1)
+  // The shared round strike, relabelled "LINE $67,000" (it is the round's locked
+  // settlement line — fixed for the whole round, NOT a cost basis; "ENTRY" read as
+  // a cost and confused users). Shown once above/between the two cards.
+  entryStr: string
+  // The two distinct positions; a side is present only when its qty > 0.
+  sides: { up?: SideVM; down?: SideVM }
+  // ----- shared settle/round state (drives the masthead + per-card CTA mode) -----
   pending: boolean // oracle pending_settlement (trading frozen)
-  settled: boolean // oracle settled -> auto-claim path (button shows CLAIMING…)
-  countdownText: string // mm:ss for the held round (or special "DONE"/"…")
-  countdownSpecial: 'done' | 'pending' | null
-  busyCashout: boolean
-  busyClaim: boolean
-  canCashout: boolean
+  settled: boolean // oracle settled -> auto-claim path (cards show CLAIMING…)
+  // True from expiry until the position resolves (pending OR settled OR past
+  // expiry): the masthead shows the SETTLING treatment (hairline loader, no "…")
+  // and the held numbers freeze. The held analogue of CrashData.validating.
+  settling: boolean
+  countdownText: string // mm:ss for the held round (live) — real remaining time
+  // Special masthead state for a held round: 'settling' once the round is past
+  // expiry / settling (masthead shows SETTLING + the hairline loader, NOT "…").
+  // null while the round is still live (the real mm:ss timer shows).
+  countdownSpecial: 'settling' | null
+  // Seconds left in the ~15s on-chain settlement/validation window for a HELD
+  // position (position.expiry + 15s − now), or null once it elapses.
+  settlingSecs: number | null
+  busyClaim: boolean // a settled-round auto-claim is in flight (shared)
 }
 
 export type CrashData = {
@@ -153,7 +230,10 @@ export type CrashData = {
     hasPosition: boolean
     // deposit sheet
     walletDusdcUsd: number | null
-    positionValueStr: string | null // "$120.00" when has position
+    // The user's REAL stake value (shares × live share price), e.g. "$120.00" — the
+    // PROMINENT house number while holding ("Your stake") AND the deposit-sheet
+    // figure. null when no position.
+    positionValueStr: string | null
     supplyBusy: boolean
     redeemBusy: boolean
     canSupply: (usd: number) => boolean
@@ -192,7 +272,9 @@ export type CrashActions = {
   selectStake: (usd: number) => void
   setCustomStake: (usd: number) => void
   placeBet: (side: 'UP' | 'DOWN') => void
-  cashOutBet: () => void
+  // Cash out ONE side only (its own router::cash_out leg); the other bucket stays
+  // open. The two distinct positions exit independently.
+  cashOutSide: (side: 'UP' | 'DOWN') => void
   claimBet: () => void
   becomeHouse: () => void // open the deposit sheet (focus the house)
   supply: (usd: number) => void

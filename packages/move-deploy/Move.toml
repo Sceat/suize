@@ -1,0 +1,15 @@
+[package]
+name = "deploy_sui"
+edition = "2024.beta"
+version = "0.0.1"
+
+# Framework-only package: `deploy_sui` calls NOTHING beyond the Sui framework
+# (object / transfer / event / table). No vendored protocol deps (unlike
+# move-crash, which vendors DeepBook Predict). MoveStdlib is auto-injected as a
+# transitive dep of Sui. Both are pinned to `framework/testnet` to match our
+# deployment target, exactly like move-wallet's framework pin.
+[dependencies]
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/testnet" }
+
+[addresses]
+deploy_sui = "0x0"

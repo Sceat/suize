@@ -44,6 +44,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   useSignTransaction,
   useSuiClient,
+  useSuiClientQueries,
   useSuiClientQuery,
 } from '@mysten/dapp-kit';
 import { Transaction } from '@mysten/sui/transactions';
@@ -66,7 +67,7 @@ import type {
 } from './types';
 import { strategyFromAllocations } from './types';
 import { SUI, SUPPORTED, SPONSORED_COINS } from './coins';
-import { priceUsd } from './prices';
+import { priceOf, usePrices } from './prices';
 import { requestSponsorship, executeSponsored } from './suins';
 import { onBalanceUpdate, onLivechatMessage } from './ws';
 import { AGENT_ADDRESS } from '../lib/env';
@@ -151,11 +152,77 @@ function accountView(
   };
 }
 
+/** The fully-qualified types of every curated SUPPORTED coin (fast membership test). */
+const SUPPORTED_TYPES = new Set(SUPPORTED.map((c) => c.type));
+
+/**
+ * The trailing struct name of a coin type, used as an honest fallback symbol when
+ * on-chain metadata is missing — e.g. "0x…::usdc::USDC" -> "USDC". Falls back to a
+ * short type prefix only if the type is malformed (never blank).
+ */
+function structName(coinType: string): string {
+  const tail = coinType.split('::').pop();
+  return tail && tail.length > 0 ? tail : coinType.slice(0, 8);
+}
+
+/**
+ * A DETERMINISTIC neutral disc color for an unknown coin — a desaturated slate hue
+ * derived from the coin type's hash. NEVER a brand color (those are reserved for the
+ * curated SUPPORTED set); kept low-saturation so it reads "neutral / unverified".
+ */
+function neutralColor(coinType: string): string {
+  let h = 0;
+  for (let i = 0; i < coinType.length; i++) h = (h * 31 + coinType.charCodeAt(i)) >>> 0;
+  const hue = h % 360;
+  return `hsl(${hue} 14% 52%)`;
+}
+
+/** On-chain coin metadata we actually consume (subset of CoinMetadata). */
+interface UnknownMeta {
+  symbol?: string | null;
+  name?: string | null;
+  decimals?: number | null;
+}
+
+/**
+ * Build an UNKNOWN currency from a held balance + (optional) on-chain metadata.
+ *
+ * HONEST by construction: `usd` is ALWAYS 0 (no price for unknown coins — never
+ * fabricated), the disc is a neutral derived hue (no brand color), `known:false`,
+ * `displayOnly:false` (it's a real held coin). When metadata is missing/null we fall
+ * back to the type's struct name and mark `decimalsUnknown` rather than guessing a
+ * decimal count that would render a misleading amount.
+ */
+function unknownCurrency(coinType: string, raw: string, meta: UnknownMeta | null): Currency {
+  const sym = meta?.symbol && meta.symbol.length > 0 ? meta.symbol : structName(coinType);
+  const name = meta?.name && meta.name.length > 0 ? meta.name : sym;
+  const hasDecimals = typeof meta?.decimals === 'number';
+  const decimals = hasDecimals ? (meta!.decimals as number) : 0;
+  // With known decimals → the true human amount. Without → the raw base-unit count
+  // (best-effort, flagged) rather than a wrong scaled figure.
+  const ui = hasDecimals ? Number(raw) / 10 ** decimals : Number(raw);
+  return {
+    sym,
+    name,
+    type: coinType,
+    decimals,
+    color: neutralColor(coinType),
+    raw,
+    ui,
+    usd: 0,
+    displayOnly: false,
+    known: false,
+    decimalsUnknown: !hasDecimals,
+  };
+}
+
 /**
  * Merge live `getAllBalances` rows onto SUPPORTED, then re-sort OWNED-FIRST (held
- * balances by USD descending, then the rest in SUPPORTED order).
+ * balances by USD descending, then the rest in SUPPORTED order). KNOWN coins only —
+ * unknown held coins are appended separately (see `useHome`) so the USD totals (this
+ * set) stay honest. Every row is `known:true`.
  */
-function mergeBalances(balances: Map<string, string>): Currency[] {
+function mergeBalances(balances: Map<string, string>, prices: Record<string, number>): Currency[] {
   const merged: Currency[] = SUPPORTED.map((coin) => {
     const raw = balances.get(coin.type) ?? '0';
     const ui = Number(raw) / 10 ** coin.decimals;
@@ -167,8 +234,9 @@ function mergeBalances(balances: Map<string, string>): Currency[] {
       color: coin.color,
       raw,
       ui,
-      usd: ui * priceUsd(coin.type),
+      usd: ui * priceOf(coin.type, prices),
       displayOnly: coin.displayOnly,
+      known: true,
     };
   });
 
@@ -214,10 +282,19 @@ export function useHome(ownerAddress?: string | null, handle?: string): HomeApi 
 
   const owner = ownerAddress ?? '';
 
+  // LIVE Pyth prices (Hermes) merged over the hard-coded fallback, keyed by coin
+  // type. Always a full, sane map (falls back per-coin on a fetch miss) — drives
+  // every USD figure below: the per-coin value, the balance hero, the account totals.
+  const prices = usePrices();
+
   // User-controlled state (immediate UI feedback; reconciled with chain on read).
+  // AI Investing is OFF by default — the founder's call: an unset/fresh account must
+  // not have the agent live until the user explicitly turns it on. A genuinely-active
+  // funded account is reflected by its own on-chain refs; this is only the DEFAULT.
+  // (spendingPaused stays false — AI Spending is on-demand, no kill switch.)
   const [controls, setControls] = useState<Controls>({
     spendingPaused: false,
-    investingPaused: false,
+    investingPaused: true,
     investingStrategy: 'safe',
   });
   // Which role is mid-mutation (disables that account's controls).
@@ -241,12 +318,63 @@ export function useHome(ownerAddress?: string | null, handle?: string): HomeApi 
     { enabled: owner.length > 0, staleTime: 10_000 },
   );
 
-  const liveCurrencies = useMemo<Currency[] | null>(() => {
+  // The KNOWN (SUPPORTED) coins, merged onto live balances + sorted owned-first.
+  // Null until the first successful balances read (drives the loading/empty UI).
+  const knownCurrencies = useMemo<Currency[] | null>(() => {
     if (!owner || balancesQuery.status !== 'success' || !balancesQuery.data) return null;
     const map = new Map<string, string>();
     for (const b of balancesQuery.data) map.set(b.coinType, b.totalBalance);
-    return mergeBalances(map);
-  }, [owner, balancesQuery.status, balancesQuery.data]);
+    return mergeBalances(map, prices);
+  }, [owner, balancesQuery.status, balancesQuery.data, prices]);
+
+  // The HELD unknown coins (in getAllBalances but NOT in SUPPORTED) with a NON-zero
+  // balance, as [coinType, rawBalance] pairs. These are the ones we describe via
+  // on-chain metadata and surface as honest UNKNOWN rows (never dropped). Empty until
+  // the balances read settles. A coinType only joins this list once owned (>0), so we
+  // never fetch metadata for the user's curated zeroes.
+  const unknownHeld = useMemo<Array<[string, string]>>(() => {
+    if (!balancesQuery.data) return [];
+    return balancesQuery.data
+      .filter((b) => !SUPPORTED_TYPES.has(b.coinType) && b.totalBalance !== '0')
+      .map((b) => [b.coinType, b.totalBalance] as [string, string]);
+  }, [balancesQuery.data]);
+
+  // The stable list of unknown coin TYPES to fetch metadata for (the query keys).
+  const unknownTypes = useMemo(() => unknownHeld.map(([type]) => type), [unknownHeld]);
+
+  // BATCH on-chain metadata for every held unknown coin: one getCoinMetadata query
+  // per type (dapp-kit dedupes + caches by [method, params]; metadata is immutable so
+  // a long staleTime keeps it cheap). `combine` collapses the per-type results into a
+  // single type->meta map (null while a given type is still loading or has no
+  // metadata) so the merge memo below has one stable dependency.
+  const metaByType = useSuiClientQueries({
+    queries: unknownTypes.map((coinType) => ({
+      method: 'getCoinMetadata' as const,
+      params: { coinType },
+      options: { staleTime: 5 * 60_000, enabled: owner.length > 0 },
+    })),
+    combine: (results): Map<string, UnknownMeta | null> => {
+      const map = new Map<string, UnknownMeta | null>();
+      unknownTypes.forEach((coinType, i) => {
+        const data = results[i]?.data as UnknownMeta | null | undefined;
+        map.set(coinType, data ?? null);
+      });
+      return map;
+    },
+  });
+
+  // KNOWN rows first (owned-first, the existing behavior + the displayOnly markers),
+  // then the UNKNOWN held rows described from metadata (usd:0 — they don't touch the
+  // total). Null only before the FIRST balances read so the UI can show its loading/
+  // empty state; once known is ready we always render (unknowns append as their
+  // metadata resolves — a row never blocks on its metadata, it just refines).
+  const liveCurrencies = useMemo<Currency[] | null>(() => {
+    if (!knownCurrencies) return null;
+    const unknown = unknownHeld.map(([coinType, raw]) =>
+      unknownCurrency(coinType, raw, metaByType.get(coinType) ?? null),
+    );
+    return [...knownCurrencies, ...unknown];
+  }, [knownCurrencies, unknownHeld, metaByType]);
 
   // Server-push augmentation: a `main` BalanceUpdate triggers an immediate refetch.
   const refetchBalances = balancesQuery.refetch;
@@ -377,14 +505,15 @@ export function useHome(ownerAddress?: string | null, handle?: string): HomeApi 
           : Promise.resolve(0n),
       ]);
 
-      const budgetUsd = budgetRaw != null ? (Number(budgetRaw) / 10 ** SUI.decimals) * priceUsd(SUI.type) : 0;
+      const suiUsd = priceOf(SUI.type, prices);
+      const budgetUsd = budgetRaw != null ? (Number(budgetRaw) / 10 ** SUI.decimals) * suiUsd : 0;
       const expiryDays =
         expiryRaw != null ? Math.max(0, Math.round((Number(expiryRaw) - Date.now()) / DAY_MS)) : 0;
-      const usd = idleRaw != null ? (Number(idleRaw) / 10 ** SUI.decimals) * priceUsd(SUI.type) : 0;
+      const usd = idleRaw != null ? (Number(idleRaw) / 10 ** SUI.decimals) * suiUsd : 0;
 
       setLive((l) => ({ ...l, [role]: { budgetUsd, expiryDays, usd } }));
     },
-    [owner, readU64],
+    [owner, readU64, prices],
   );
 
   // Read live state for any already-created accounts on mount / owner change.
@@ -556,8 +685,12 @@ export function useHome(ownerAddress?: string | null, handle?: string): HomeApi 
           await runSponsored(buildPause({ mandateId: refs.mandateId, capId: refs.capId }));
         } else {
           // RESUME: mint + allow-list a FRESH cap; persist the new cap id.
+          // SECURITY: issue the cap to the TRUSTED build-time agent address, never the
+          // localStorage-persisted refs.agentAddress (attacker-writable). getAccountRefs
+          // already pins it, but we read the constant directly here too — the agent
+          // recipient must never originate from untrusted storage.
           const { events } = await runSponsoredWithEvents(
-            buildResume({ mandateId: refs.mandateId, agentAddress: refs.agentAddress }),
+            buildResume({ mandateId: refs.mandateId, agentAddress: AGENT_ADDRESS }),
           );
           const newCapId = eventField(events, '::mandate::AgentCapIssued', 'cap_id');
           if (newCapId) {
@@ -614,7 +747,9 @@ export function useHome(ownerAddress?: string | null, handle?: string): HomeApi 
         if (!newMandateId) throw new Error('Strategy change failed: no new mandate id.');
 
         // PHASE 2 — issue a fresh cap for the new mandate.
-        const phase2 = buildResume({ mandateId: newMandateId, agentAddress: refs.agentAddress });
+        // SECURITY: issue to the TRUSTED build-time agent address, never the
+        // localStorage-persisted refs.agentAddress (attacker-writable).
+        const phase2 = buildResume({ mandateId: newMandateId, agentAddress: AGENT_ADDRESS });
         const { events: e2 } = await runSponsoredWithEvents(phase2);
         const newCapId = eventField(e2, '::mandate::AgentCapIssued', 'cap_id');
         if (!newCapId) throw new Error('Strategy change failed: no new cap id.');

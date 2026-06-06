@@ -1,0 +1,37 @@
+# Suize Deploy — serving worker.
+# Resolves *.deploy.suize.io (and linked custom domains) to an on-chain `Site`
+# object, then streams the site's files from the Walrus aggregator with serve-time
+# integrity verification (manifest hash + per-blob re-hash). See ./README.md.
+
+name = "suize-deploy-worker"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+# Wildcard subdomain route. The zone `deploy.suize.io` must exist on the Cloudflare
+# account and have a wildcard DNS record (`*.deploy.suize.io`) pointing at the worker
+# (proxied / orange-cloud). Linked custom domains are added as additional routes
+# (or via Cloudflare for SaaS custom hostnames) by the operator — the same worker
+# code resolves them via the on-chain DomainRegistry.
+routes = [
+  { pattern = "*.deploy.suize.io/*", zone_name = "deploy.suize.io" },
+]
+
+# Plaintext, non-secret operator config. These are PUBLIC on-chain ids + public
+# endpoints — safe to commit. The two `…_ID` values are PLACEHOLDERS until the
+# `deploy_sui` package is published to testnet (see §13 of docs/deploy/SPEC.md).
+[vars]
+# Sui testnet fullnode JSON-RPC (network is locked to testnet repo-wide).
+SUI_RPC_URL = "https://fullnode.testnet.sui.io:443"
+
+# Walrus testnet aggregator — serves blobs + quilt patches.
+WALRUS_AGGREGATOR = "https://aggregator.walrus-testnet.walrus.space"
+
+# PLACEHOLDER — the `deploy_sui` Move package id (write after publish). Currently
+# unused at runtime by the worker (it reads the shared `Site`/`DomainRegistry`
+# objects by id), but kept here so the operator records the published id alongside
+# the other deploy config and a future type-checked resolve can use it.
+DEPLOY_PACKAGE_ID = "0xDEPLOY_PACKAGE_ID_PLACEHOLDER"
+
+# PLACEHOLDER — the shared `DomainRegistry` object id (created at publish). Required
+# for custom-domain resolution; subdomain serving works without it.
+DOMAIN_REGISTRY_ID = "0xDOMAIN_REGISTRY_ID_PLACEHOLDER"

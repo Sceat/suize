@@ -1,129 +1,101 @@
-/// Crash Sui router — the single, non-bypassable wrapper around DeepBook
-/// Predict that every user action flows through.
+/// Crash Sui router — the single, non-bypassable wrapper around DeepBook Predict
+/// that every user action flows through.
 ///
-/// Why a router for EVERYTHING (not just bets): the app sponsors gas via Enoki,
-/// and Enoki's sponsorship is scoped by an `allowedMoveCallTargets` allowlist
-/// (one entry per `{pkg}::module::function` that a sponsored PTB may invoke).
-/// By folding every user action — manager creation, betting, cashing out,
-/// claiming, withdrawing, and providing/redeeming LP ("being the house") — into
-/// a `crash_sui::router::*` wrapper, the Enoki allowlist need only contain OUR
-/// seven targets. Sponsored gas can therefore
-/// never flow to a raw `predict::mint` (which would skip the rake) or any other
-/// off-path call, because those targets are simply not on the allowlist.
+/// WHY a router for EVERYTHING (not just bets): the app sponsors gas via Enoki,
+/// whose sponsorship is scoped by an `allowedMoveCallTargets` allowlist (one
+/// entry per `{pkg}::module::function`). By folding every user action — manager
+/// creation, betting, cashing out, claiming, withdrawing, and providing/redeeming
+/// LP — into `crash_sui::router::*`, the allowlist holds only OUR seven targets.
+/// Sponsored gas can therefore never reach a raw `predict::mint` (which would
+/// skip the rake) or any off-path call: those targets simply are not allowlisted.
 ///
-/// The rake is still enforced atomically and on-chain inside `bet`: it is
-/// skimmed in the SAME Move call that places the bet, so it is unavoidable for
-/// anyone using the router, and the treasury + rate live in an on-chain shared
-/// `Config` that only our `AdminCap` can mutate. No treasury address ever lives
-/// in client code.
+/// THE RAKE is enforced atomically on-chain inside `bet`: skimmed in the SAME
+/// Move call that places the bet, so it is unavoidable for anyone using the
+/// router. The rate + treasury live in the shared `Config`, mutable only by our
+/// `AdminCap`; no treasury address ever lives in client code.
 ///
-/// All user-facing functions are `public` (NOT `entry`): `entry` forbids
-/// non-object structs by value and our PTBs pass `ID` arguments via
-/// `tx.pure.id`. A `public` function is fully PTB-callable, which is the shape
-/// the frontend needs, and Enoki gates on the move-call TARGET regardless of
-/// the function's `entry`-ness.
+/// THE VERSION GATE: every user function takes `&Version` and asserts it first,
+/// so a stale code path can be locked out after an upgrade and admin can freeze
+/// all user actions at once. `init` creates + shares the singleton at publish
+/// time, so the seven functions are gated from block one.
 ///
-/// Lint notes (the build emits a few benign, intentional warnings): `withdraw`
-/// deliberately `public_transfer`s the manager's coin back to the caller's own
-/// wallet (the product behavior, not an accidental self-transfer), and the admin
-/// setters are `public entry` so they are callable both from PTBs and as plain
-/// CLI/entry calls.
+/// All user functions are `public` (NOT `entry`): `entry` forbids non-object
+/// structs by value, but our PTBs pass `ID` args via `tx.pure.id`. `public` is
+/// fully PTB-callable, and Enoki gates on the move-call TARGET regardless.
 module crash_sui::router;
 
+use crash_sui::version::Version;
 use deepbook_predict::market_key;
 use deepbook_predict::oracle::OracleSVI;
 use deepbook_predict::plp::PLP;
 use deepbook_predict::predict::{Self, Predict};
 use deepbook_predict::predict_manager::{Self, PredictManager};
 use sui::clock::Clock;
-use sui::coin::Coin;
+use sui::coin::{Self, Coin};
 
-// === Errors ===
-
-/// Sanity cap: a fee above 10% (1000 bps) is almost certainly a mistake.
+/// A fee above 10% (1000 bps) is almost certainly a mistake.
 const EFEE_TOO_HIGH: u64 = 1;
-
-// === Constants ===
 
 /// Basis-point denominator (10_000 bps == 100%).
 const BPS_DENOMINATOR: u64 = 10_000;
-/// Default platform rake at publish time: 300 bps == 3%.
+/// Default platform rake at publish: 300 bps == 3%.
 const DEFAULT_FEE_BPS: u64 = 300;
 /// Hard ceiling for the configurable fee: 1000 bps == 10%.
 const MAX_FEE_BPS: u64 = 1_000;
 
-// === Structs ===
-
-/// Shared, mutable-by-admin configuration. Holds the rake rate and the treasury
-/// address that receives skimmed fees. Shared so any `bet` caller can read it.
+/// Shared config holding the rake rate + treasury that receives skimmed fees.
+/// Shared so any `bet` caller can read it; only `AdminCap` can mutate it.
 public struct Config has key {
     id: UID,
     /// Platform rake in basis points (300 == 3%).
     fee_bps: u64,
-    /// Address that receives the skimmed rake coins.
+    /// Address that receives the skimmed rake.
     fee_recipient: address,
 }
 
-/// Capability gating all admin mutations of `Config`. Held off-chain by us
-/// (the deployer); never exposed to clients.
+/// Capability gating every admin mutation. Held by the deployer; never exposed
+/// to clients. Authority is the cap itself — no address check.
 public struct AdminCap has key, store {
     id: UID,
 }
 
-// === Init ===
-
-/// Publish-time setup: create and share the `Config` (3% rake, treasury = the
-/// deployer), and hand the `AdminCap` to the deployer.
+/// Publish-time setup: create + share `Config` (3% rake, treasury = deployer),
+/// create + share the version singleton, and hand `AdminCap` to the deployer.
 fun init(ctx: &mut TxContext) {
-    let config = Config {
+    transfer::share_object(Config {
         id: object::new(ctx),
         fee_bps: DEFAULT_FEE_BPS,
         fee_recipient: ctx.sender(),
-    };
-    transfer::share_object(config);
-
-    let admin_cap = AdminCap { id: object::new(ctx) };
-    transfer::transfer(admin_cap, ctx.sender());
+    });
+    crash_sui::version::create_and_share(ctx);
+    transfer::transfer(AdminCap { id: object::new(ctx) }, ctx.sender());
 }
 
 // === User actions (the ONLY sponsored move-call targets) ===
 
-/// Create a fresh `PredictManager` for the caller. Thin pass-through to
-/// `predict::create_manager`, which shares the manager internally and returns
-/// its `ID` (the frontend reads the created shared-object id from
-/// `objectChanges` and persists it).
-///
-/// One-time per user. No bet exists yet, so there is no rake to skim and
-/// nothing to bypass — this is the single rake-free sponsored call, which is
-/// acceptable because it is one-shot per address and Enoki budget-limited.
-public fun create_manager(ctx: &mut TxContext): ID {
+/// Create a fresh `PredictManager` for the caller (shared internally; its `ID`
+/// is returned and read from `objectChanges`). One-time per user, no bet exists
+/// yet, so there is nothing to rake or bypass.
+public fun create_manager(version: &Version, ctx: &mut TxContext): ID {
+    version.assert_latest();
     predict::create_manager(ctx)
 }
 
-/// Place a Predict bet through the router, atomically skimming `fee_bps` of the
-/// mint cost to the treasury in the SAME transaction. This is the ONE top-level
-/// move-call the frontend makes per bet — deposit, key-build, rake, and mint are
-/// all folded inside.
+/// Place a bet, atomically skimming `fee_bps` of the mint cost to the treasury in
+/// the SAME tx. The single top-level call per bet — deposit, key-build, rake, and
+/// mint are folded inside.
 ///
-/// Flow:
-/// 1. Deposit the caller's `payment` coin fully into the manager. The client
-///    sizes `payment` to cover `cost + rake` (~108% of quoted cost) by splitting
-///    exactly the shortfall via a native `SplitCoins` command in the same PTB;
-///    if the manager already holds enough from prior winnings/leftovers the
-///    client may pass a zero-value coin, which deposits harmlessly.
-/// 2. Build the `MarketKey` internally from the (oracle_id, expiry, strike,
-///    is_up) tuple — `MarketKey` has `copy`, so the same value is reused for the
-///    quote and the mint.
-/// 3. Quote the mint cost for `quantity` via `predict::get_trade_amounts`.
-/// 4. Skim `cost * fee_bps / 10_000` from the manager balance
-///    (`predict_manager::withdraw` asserts caller == manager owner, satisfied
-///    because the user signs this tx) and `public_transfer` it to the treasury.
-/// 5. Place the bet via `predict::mint`, which pulls `cost` from the manager's
-///    internal balance.
-///
-/// After step 1 the manager must hold >= `cost + rake`; the ~8% client headroom
-/// covers the 3% rake plus quote-vs-execution price drift.
+/// 1. Deposit the caller's `payment` into the manager (client sizes it to cover
+///    `cost + rake`; a zero-value coin deposits harmlessly if the manager already
+///    holds enough).
+/// 2. Build the `MarketKey` once (it has `copy`, reused for quote + mint).
+/// 3. Quote `cost` for `quantity`.
+/// 4. Skim `cost * fee_bps / 10_000` from the manager and route it to the
+///    treasury via `coin::send_funds` (Sui Address Balances), not a fresh owned
+///    Coin object.
+/// 5. Mint, which pulls `cost` from the manager's internal balance.
 public fun bet<Quote>(
+    version: &Version,
     config: &Config,
     predict: &mut Predict,
     manager: &mut PredictManager,
@@ -137,30 +109,26 @@ public fun bet<Quote>(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    // 1. Fund the manager with the caller's coin (may be zero-value).
+    version.assert_latest();
+
     predict_manager::deposit<Quote>(manager, payment, ctx);
 
-    // 2. Build the key once; reused for quote + mint (MarketKey has `copy`).
     let key = market_key::new(oracle_id, expiry, strike, is_up);
-
-    // 3. Quote the cost (dUSDC base units, already multiplied by quantity).
     let (cost, _payout) = predict::get_trade_amounts(predict, oracle, key, quantity, clock);
 
-    // 4. Skim the rake from the user's own manager balance to the treasury.
     let rake = cost * config.fee_bps / BPS_DENOMINATOR;
     if (rake > 0) {
         let rake_coin = predict_manager::withdraw<Quote>(manager, rake, ctx);
-        transfer::public_transfer(rake_coin, config.fee_recipient);
+        coin::send_funds(rake_coin, config.fee_recipient);
     };
 
-    // 5. Place the bet. `mint` withdraws `cost` from the manager internally.
     predict::mint<Quote>(predict, manager, oracle, key, quantity, clock, ctx);
 }
 
-/// Early cash-out of a live position. Builds the key internally and calls
-/// `predict::redeem`, whose payout lands in the manager's internal balance.
-/// No rake (product decision); sponsored anyway, so it lives on the allowlist.
+/// Early cash-out of a live position; payout lands in the manager balance. No
+/// rake (product decision); sponsored, so it is on the allowlist.
 public fun cash_out<Quote>(
+    version: &Version,
     predict: &mut Predict,
     manager: &mut PredictManager,
     oracle: &OracleSVI,
@@ -172,14 +140,15 @@ public fun cash_out<Quote>(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    version.assert_latest();
     let key = market_key::new(oracle_id, expiry, strike, is_up);
     predict::redeem<Quote>(predict, manager, oracle, key, quantity, clock, ctx);
 }
 
-/// Claim a settled position permissionlessly. Builds the key internally and
-/// calls `predict::redeem_permissionless`, whose payout lands in the manager's
-/// internal balance. No rake.
+/// Claim a settled position permissionlessly; payout lands in the manager
+/// balance. No rake.
 public fun claim<Quote>(
+    version: &Version,
     predict: &mut Predict,
     manager: &mut PredictManager,
     oracle: &OracleSVI,
@@ -191,44 +160,85 @@ public fun claim<Quote>(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    version.assert_latest();
     let key = market_key::new(oracle_id, expiry, strike, is_up);
     predict::redeem_permissionless<Quote>(predict, manager, oracle, key, quantity, clock, ctx);
 }
 
-/// Pull `amount` of the manager's internal balance back to the caller's wallet.
-/// `predict_manager::withdraw` asserts caller == manager owner. No rake.
-public fun withdraw<Quote>(manager: &mut PredictManager, amount: u64, ctx: &mut TxContext) {
+/// Pull `amount` of the manager's internal balance back to the caller's wallet
+/// (`predict_manager::withdraw` asserts caller == owner). No rake.
+public fun withdraw<Quote>(
+    version: &Version,
+    manager: &mut PredictManager,
+    amount: u64,
+    ctx: &mut TxContext,
+) {
+    version.assert_latest();
     let coin = predict_manager::withdraw<Quote>(manager, amount, ctx);
     transfer::public_transfer(coin, ctx.sender());
 }
 
-// === Be the House (liquidity provision) ===
+/// Sweep the caller's ENTIRE manager dUSDC balance back to their wallet. Bundled
+/// client-side after `cash_out` / `claim` so payouts never pile up in the manager
+/// (which a block explorer can't surface as a wallet balance). Owner-only via
+/// `predict_manager::withdraw` (asserts caller == owner); no-op when the balance
+/// is zero. No rake — sweeping settled funds is not a bet.
+public fun withdraw_all<Quote>(
+    version: &Version,
+    manager: &mut PredictManager,
+    ctx: &mut TxContext,
+) {
+    version.assert_latest();
+    let bal = predict_manager::balance<Quote>(manager);
+    if (bal > 0) {
+        let coin = predict_manager::withdraw<Quote>(manager, bal, ctx);
+        transfer::public_transfer(coin, ctx.sender());
+    };
+}
 
-/// Supply `payment` (dUSDC) into Predict's shared LP vault and hand the minted
-/// `PLP` LP-share tokens back to the supplier. Folded into the router solely so
-/// it is sponsorable via Enoki alongside the betting calls. No rake: providing
-/// liquidity ("being the house") is not a bet, so nothing is skimmed.
+/// "Be the house": supply `payment` (dUSDC) into Predict's LP vault; the minted
+/// `PLP` shares go to the supplier. Routed here only to be Enoki-sponsorable. No
+/// rake — providing liquidity is not a bet.
 public fun supply<Quote>(
+    version: &Version,
     predict: &mut Predict,
     payment: Coin<Quote>,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    version.assert_latest();
     let lp = predict::supply<Quote>(predict, payment, clock, ctx);
     transfer::public_transfer(lp, ctx.sender());
 }
 
-/// Burn `lp_coin` (PLP LP shares) and return the underlying quote (dUSDC) to the
-/// LP. Named `redeem_lp` to avoid colliding with `withdraw` (which pulls dUSDC
-/// from a `PredictManager`). No rake — unwinding a house position is not a bet.
+/// Burn `lp_coin` (PLP shares) and return the underlying dUSDC to the LP. Named
+/// `redeem_lp` to avoid colliding with `withdraw` (manager balance). No rake.
 public fun redeem_lp<Quote>(
+    version: &Version,
     predict: &mut Predict,
     lp_coin: Coin<PLP>,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    version.assert_latest();
     let quote = predict::withdraw<Quote>(predict, lp_coin, clock, ctx);
     transfer::public_transfer(quote, ctx.sender());
+}
+
+// === Version lifecycle (AdminCap-gated; deliberately NOT version-gated) ===
+//
+// These live in `router` (it owns `AdminCap`; `version` cannot import it without
+// a dependency cycle). NOT version-gated so admin recovery — notably `migrate`
+// after a freeze — always works.
+
+/// Lift the shared `Version` to the code's `PACKAGE_VERSION` after an upgrade.
+public fun migrate(_: &AdminCap, version: &mut Version) {
+    crash_sui::version::do_migrate(version);
+}
+
+/// Emergency freeze: disable every version-gated user function at once.
+public fun freeze_all(_: &AdminCap, version: &mut Version) {
+    crash_sui::version::do_freeze(version);
 }
 
 // === Admin setters (AdminCap-gated) ===
@@ -238,7 +248,7 @@ public entry fun set_fee_recipient(_: &AdminCap, config: &mut Config, recipient:
     config.fee_recipient = recipient;
 }
 
-/// Change the rake rate (basis points). Capped at 10% as a sanity guard.
+/// Change the rake rate (basis points). Capped at 10%.
 public entry fun set_fee_bps(_: &AdminCap, config: &mut Config, bps: u64) {
     assert!(bps <= MAX_FEE_BPS, EFEE_TOO_HIGH);
     config.fee_bps = bps;
@@ -246,26 +256,23 @@ public entry fun set_fee_bps(_: &AdminCap, config: &mut Config, bps: u64) {
 
 // === Read accessors ===
 
-/// Current rake rate in basis points.
 public fun fee_bps(config: &Config): u64 {
     config.fee_bps
 }
 
-/// Current treasury address.
 public fun fee_recipient(config: &Config): address {
     config.fee_recipient
 }
 
 // === Tests ===
 //
-// NOTE on LP round-trip coverage: a `supply -> redeem_lp` unit test would need a
-// live `Predict` object and an enabled `Currency<Quote>`. Predict's only
-// constructors for these (`create_test_predict`, `enable_quote_asset`) are
-// `#[test_only] public(package)` to `deepbook_predict`, so they are unreachable
-// from this `crash_sui` test module. There is no public test scaffolding to
-// build them either. As with `bet`, the LP path is therefore exercised on-chain
-// (publish + live supply/withdraw against the testnet vault), not in unit tests
-// — see README/INTEGRATION. We deliberately do NOT fake a test here.
+// The full `bet` / `supply` / `redeem_lp` paths need a live `Predict` + enabled
+// `Currency<Quote>`, whose only constructors are `#[test_only] public(package)`
+// to `deepbook_predict` and thus unreachable here — so those paths are exercised
+// on-chain (publish + live calls), not faked. Likewise `withdraw` / `withdraw_all`
+// need a funded `PredictManager` (constructed only by `deepbook_predict::predict_manager::new`,
+// `public(package)` — unreachable here), so its sweep is verified on-chain. We
+// unit-test the rake arithmetic, admin setters + cap, and the version gate.
 
 #[test_only]
 use sui::test_scenario;
@@ -275,12 +282,8 @@ fun test_init_defaults_and_admin_setters() {
     let admin = @0xA;
     let mut scenario = test_scenario::begin(admin);
 
-    // Run init.
-    {
-        init(scenario.ctx());
-    };
+    { init(scenario.ctx()); };
 
-    // Verify defaults and exercise admin setters.
     scenario.next_tx(admin);
     {
         let mut config = scenario.take_shared<Config>();
@@ -292,12 +295,10 @@ fun test_init_defaults_and_admin_setters() {
         set_fee_bps(&cap, &mut config, 500);
         assert!(config.fee_bps() == 500, 2);
 
-        let new_treasury = @0xBEEF;
-        set_fee_recipient(&cap, &mut config, new_treasury);
-        assert!(config.fee_recipient() == new_treasury, 3);
+        set_fee_recipient(&cap, &mut config, @0xBEEF);
+        assert!(config.fee_recipient() == @0xBEEF, 3);
 
-        // restore default
-        set_fee_bps(&cap, &mut config, DEFAULT_FEE_BPS);
+        set_fee_bps(&cap, &mut config, DEFAULT_FEE_BPS); // restore default
         assert!(config.fee_bps() == DEFAULT_FEE_BPS, 4);
 
         scenario.return_to_sender(cap);
@@ -325,34 +326,25 @@ fun test_set_fee_bps_rejects_over_cap() {
     scenario.end();
 }
 
-/// The rake skimmed by `bet` is exactly `cost * fee_bps / 10_000`. We assert the
-/// arithmetic the `bet` body uses on a representative quote cost so a future
-/// refactor that changes the formula trips this test. (A full `bet` execution
-/// needs a funded manager + live oracle + dUSDC, which is exercised on-chain,
-/// not in unit tests — see README/INTEGRATION.)
+/// `bet` skims exactly `cost * fee_bps / 10_000`. We assert that arithmetic so a
+/// refactor changing the formula trips this test (a full `bet` needs a funded
+/// manager + live oracle + dUSDC, exercised on-chain).
 #[test]
 fun test_bet_rake_math() {
-    // Default 3% (300 bps).
     let fee_bps = DEFAULT_FEE_BPS;
 
-    // Representative mint cost: $0.62 of dUSDC at 1e6 scaling == 620_000 units.
+    // $0.62 of dUSDC at 1e6 scaling == 620_000 -> 3% == 18_600.
     let cost: u64 = 620_000;
-    let rake = cost * fee_bps / BPS_DENOMINATOR;
-    // 620_000 * 300 / 10_000 = 18_600 (== $0.0186).
-    assert!(rake == 18_600, 0);
+    assert!(cost * fee_bps / BPS_DENOMINATOR == 18_600, 0);
 
-    // A whole-dollar cost: $1.00 == 1_000_000 units -> 3% == 30_000.
+    // $1.00 == 1_000_000 -> 3% == 30_000.
     let cost2: u64 = 1_000_000;
-    let rake2 = cost2 * fee_bps / BPS_DENOMINATOR;
-    assert!(rake2 == 30_000, 1);
+    assert!(cost2 * fee_bps / BPS_DENOMINATOR == 30_000, 1);
 
-    // Sub-rake-threshold cost rounds the rake DOWN toward zero (integer div):
-    // 33 * 300 / 10_000 = 9900 / 10_000 = 0.
-    let tiny: u64 = 33;
-    let rake3 = tiny * fee_bps / BPS_DENOMINATOR;
-    assert!(rake3 == 0, 2);
+    // Sub-threshold cost rounds the rake DOWN to zero (integer div):
+    // 33 * 300 / 10_000 == 0.
+    assert!(33 * fee_bps / BPS_DENOMINATOR == 0, 2);
 
-    // A configured 5% (500 bps) on $1.00 -> 50_000.
-    let rake4 = cost2 * 500 / BPS_DENOMINATOR;
-    assert!(rake4 == 50_000, 3);
+    // 5% (500 bps) on $1.00 -> 50_000.
+    assert!(cost2 * 500 / BPS_DENOMINATOR == 50_000, 3);
 }

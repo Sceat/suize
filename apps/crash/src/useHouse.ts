@@ -9,7 +9,7 @@ import {
   type ReadClient,
 } from './sui'
 import { DUSDC_SCALE } from './config'
-import { dusdc_to_usd, fmt_pct, fmt_usd } from './format'
+import { dusdc_to_usd, fmt_amount, fmt_pct, fmt_usd } from './format'
 
 // The TVL hero is the SINGLE LARGEST number on the page (e05's blue dominant
 // figure). It must read like the target — WHOLE dollars, comma-grouped, NO cents
@@ -47,6 +47,8 @@ export type HouseVM = {
   ctaLabel: string
   hasPosition: boolean
   walletDusdcUsd: number | null
+  // The user's REAL stake value (shares × live share price), e.g. "$5.00" — the
+  // PROMINENT house number while holding, labeled "Your stake". null otherwise.
   positionValueStr: string | null
   supplyBusy: boolean
   redeemBusy: boolean
@@ -78,7 +80,6 @@ export function useHouse({
   client,
   signAndExecute,
   on_balance_change,
-  balance_usd,
 }: {
   address: string | null
   client: ReadClient
@@ -86,10 +87,8 @@ export function useHouse({
     transaction: Transaction
   }) => Promise<{ digest: string }>
   on_balance_change: () => void
-  balance_usd?: number | null
 }): { vm: HouseVM; actions: HouseActions } {
   const [vault, set_vault] = useState<VaultSummary | null>(null)
-  const [, set_vault_failed] = useState(false)
 
   const [shares, set_shares] = useState<bigint | null>(null)
   const [plp_coin_ids, set_plp_coin_ids] = useState<string[]>([])
@@ -108,9 +107,8 @@ export function useHouse({
     try {
       const v = await fetch_vault_summary()
       set_vault(v)
-      set_vault_failed(false)
     } catch {
-      set_vault_failed(true)
+      // keep last known vault summary; the next poll retries
     }
   }, [])
 
@@ -259,15 +257,12 @@ export function useHouse({
     address,
     shares,
     plp_coin_ids,
-    position_value,
     signAndExecute,
     client,
     refresh_position,
     load_vault,
     on_balance_change,
   ])
-
-  const signed_in = Boolean(address)
 
   // The REAL, on-chain yield — NOTHING invented or projected.
   // PLP share price starts at $1.0000 and ticks UP as the house pockets the
@@ -281,10 +276,20 @@ export function useHouse({
 
   const tvl_str =
     vault != null ? fmt_usd_whole(BigInt(Math.round(vault.vault_value))) : null
-  const bal = balance_usd ?? 0
-  const proj_earn = bal * (return_pct / 100)
-  const proj_earn_str = `${proj_earn >= 0 ? '+' : ''}$${Math.abs(proj_earn).toFixed(2)}`
+  // PROJECTION (NON-holders only): "if you deposited $X → earn $Y" — based on the
+  // user's DEPOSITABLE funds (their wallet dUSDC, which is what `supply` actually
+  // spends), NOT the betting wallet (manager+wallet). It is a clearly-labeled
+  // projection of depositable funds; the e05 layer only shows it when the user
+  // holds NO house position.
+  const depositable = wallet_dusdc != null ? dusdc_to_usd(wallet_dusdc) : 0
+  const proj_earn = depositable * (return_pct / 100)
+  const proj_earn_str = `${proj_earn >= 0 ? '+' : ''}$${fmt_amount(proj_earn)}`
   const cta_label = has_position ? 'Add to the house' : 'Become the house'
+  // The user's REAL stake value = shares × the live share price (dUSDC). This is
+  // the prominent house number while HOLDING (labeled "Your stake"), NOT the
+  // betting wallet balance. Exposed once as `positionValueStr` (the deposit sheet
+  // + the "Your stake" block both read it).
+  const position_value_str = has_position ? fmt_usd(position_value ?? 0n) : null
 
   const vm: HouseVM = useMemo(
     () => ({
@@ -294,9 +299,10 @@ export function useHouse({
         vault != null ? `Share price $${share_price.toFixed(4)} · live` : ' ',
       yieldStr: vault != null ? return_str : '—',
       yieldUnit: 'all-time',
-      projFromStr: `Your $${Math.round(bal).toLocaleString('en-US')}`,
+      // Projection FROM the user's depositable wallet funds (non-holders only).
+      projFromStr: `Deposit $${Math.round(depositable).toLocaleString('en-US')}`,
       projEarnStr: proj_earn_str,
-      projTierStr: `${return_pct >= 0 ? '+' : ''}$${Math.abs(1000 * (return_pct / 100)).toFixed(2)}`,
+      projTierStr: `${return_pct >= 0 ? '+' : ''}$${fmt_amount(1000 * (return_pct / 100))}`,
       utilizationStr: vault != null ? fmt_pct(vault.utilization, 1) : '—',
       yourStakeStr: has_position
         ? `${fmt_usd(position_value ?? 0n)} · ${fmt_pct(ownership, 2)}`
@@ -304,7 +310,7 @@ export function useHouse({
       ctaLabel: cta_label,
       hasPosition: has_position,
       walletDusdcUsd: wallet_dusdc != null ? dusdc_to_usd(wallet_dusdc) : null,
-      positionValueStr: has_position ? fmt_usd(position_value ?? 0n) : null,
+      positionValueStr: position_value_str,
       supplyBusy: busy === 'supply',
       redeemBusy: busy === 'redeem',
       canSupply: can_supply,
@@ -316,12 +322,13 @@ export function useHouse({
       vault,
       share_price,
       return_str,
-      bal,
+      depositable,
       proj_earn_str,
       return_pct,
       has_position,
       position_value,
       ownership,
+      position_value_str,
       cta_label,
       wallet_dusdc,
       busy,
@@ -331,7 +338,6 @@ export function useHouse({
     ],
   )
 
-  void signed_in
   return { vm, actions: { supply, redeem: redeem_all } }
 }
 

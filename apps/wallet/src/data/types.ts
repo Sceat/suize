@@ -70,6 +70,20 @@ export interface Currency {
    * (read as 0) and the UI marks them. SUI/USDC are live (false). See coins.ts.
    */
   displayOnly: boolean;
+  /**
+   * true => a curated SUPPORTED coin (coins.ts) with a brand color + a reference
+   * price. false => an UNKNOWN coin the user actually holds, detected live from
+   * `getAllBalances` and described from on-chain `getCoinMetadata` — shown with a
+   * neutral disc, NO price (usd:0), and an honest "unverified" marker in the UI.
+   */
+  known: boolean;
+  /**
+   * UNKNOWN coins only: true when on-chain metadata gave no decimals, so `ui` is a
+   * best-effort/raw figure rather than a trustworthy human amount. The UI renders a
+   * "decimals unknown" hint instead of a misleading precise balance. Always false
+   * for `known` coins (their decimals come from coins.ts).
+   */
+  decimalsUnknown?: boolean;
 }
 
 // ───────────────────────────────────────────────────────────────────────────

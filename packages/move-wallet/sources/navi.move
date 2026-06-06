@@ -160,6 +160,21 @@ const ETicketVaultMismatch: u64 = 4;
 /// The vault's `AccountCap` slot is empty — the NAVI account was never set (or was
 /// already taken out). Owner must `set_account_cap` before the agent can supply.
 const ENoAccountCap: u64 = 5;
+/// THE TICKET BIND FIX (C2). The `Coin<CoinType>` presented to
+/// `agent_absorb_withdrawn` is a DIFFERENT type than the asset the `WithdrawTicket`
+/// recorded at request time. Without this, a jailbroken agent could request a
+/// withdraw of USDC (NAVI returns real `Coin<USDC>` it keeps), then discharge the
+/// hot-potato ticket with a `coin::zero<JUNK>()` of the wrong type — satisfying the
+/// no-abilities obligation while pocketing the real USDC. The ticket's recorded
+/// `asset` is now matched against the absorbed coin's type.
+const ETicketAssetMismatch: u64 = 6;
+/// THE TICKET BIND FIX (C2, value leg). The absorbed coin is worth LESS than the
+/// principal the ticket recorded as requested. Pairs with the type check: even with
+/// the right TYPE, the agent must re-absorb at least what it asked NAVI to redeem,
+/// so it cannot discharge the ticket with a `coin::zero<CoinType>()` and keep the
+/// redeemed principal. (Accrued interest can make the coin worth MORE — that surplus
+/// is welcome and lands in custody; only an under-value is rejected.)
+const ETicketUndervalued: u64 = 7;
 
 // === Structs ===
 
@@ -211,8 +226,10 @@ public struct WithdrawTicket {
     /// The vault that issued this ticket; `agent_absorb_withdrawn` asserts the coin
     /// is re-absorbed into the SAME vault.
     vault_id: ID,
-    /// The `TypeName` of the asset being redeemed — pins the coin type that may be
-    /// absorbed against this ticket (defense-in-depth for the UI/agent).
+    /// The `TypeName` of the asset being redeemed. ENFORCED (C2): the coin presented
+    /// to `agent_absorb_withdrawn` MUST be of this exact type (`ETicketAssetMismatch`)
+    /// — the ticket cannot be discharged with a wrong-type coin while the agent keeps
+    /// the redeemed funds.
     asset: TypeName,
     /// The principal the agent asked NAVI to redeem (the activity-log figure).
     amount: u64,
@@ -496,9 +513,16 @@ public fun agent_withdraw_request<AccountCapT: key + store, CoinType>(
 /// Step 2 of the redeem: consume the `WithdrawTicket` and JOIN the redeemed coin
 /// back into the vault's idle pot. This is the custody SEAL of the withdraw leg —
 /// the coin NAVI returned is re-absorbed in full, so nothing is left free-floating
-/// for the agent. Aborts `ETicketVaultMismatch` if the ticket was minted by a
-/// different vault. `absorbed` (the coin's value) can exceed the ticket's
-/// `requested` by accrued interest; that surplus simply lands in custody too.
+/// for the agent.
+///
+/// Three binds make the seal real (the C2 fix closes the last two):
+///   1. `vault_id == object::id(vault)`        → `ETicketVaultMismatch` (right vault).
+///   2. ticket `asset == CoinType`             → `ETicketAssetMismatch` (right TYPE —
+///      no discharging a USDC ticket with a `coin::zero<JUNK>()`).
+///   3. `absorbed >= requested`                → `ETicketUndervalued` (right VALUE —
+///      no discharging with a same-type zero/short coin).
+/// `absorbed` can EXCEED `requested` by accrued interest; that surplus simply lands
+/// in custody too (allowed — only a type mismatch or a shortfall aborts).
 public fun agent_absorb_withdrawn<AccountCapT: key + store, CoinType>(
     vault: &mut MultiAssetVault<AccountCapT>,
     ticket: WithdrawTicket,
@@ -509,6 +533,16 @@ public fun agent_absorb_withdrawn<AccountCapT: key + store, CoinType>(
 
     let absorbed = coin::value(&coin);
     let key = type_name::with_defining_ids<CoinType>();
+
+    // C2 — BIND THE TICKET TO THE ABSORBED COIN. Both checks are load-bearing:
+    //   • TYPE: the coin's type must equal the asset the ticket recorded, so a
+    //     wrong-type `coin::zero<JUNK>()` can't discharge a USDC ticket while the
+    //     agent keeps the real USDC.
+    //   • VALUE: the coin must cover the requested principal, so a same-type but
+    //     zero/short coin can't either. (Interest makes `absorbed > requested` —
+    //     allowed; only a shortfall is rejected.)
+    assert!(asset == key, ETicketAssetMismatch);
+    assert!(absorbed >= requested, ETicketUndervalued);
 
     // Re-absorb into the per-asset idle pot (create it if the asset had none idle).
     if (vault.idle.contains(key)) {

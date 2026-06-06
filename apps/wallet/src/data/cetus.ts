@@ -6,8 +6,8 @@
  * call is a pure HTTP `GET …/find_routes` against Cetus's router service (no signer,
  * no on-chain read) — so we construct a quote-only client (the internal grpc client
  * it builds is never touched by `findRouters`). One concern per file: this module
- * QUOTES; the actual swap PTB + sponsor/sign/execute live in the sheet (reusing
- * `ptb.buildSwap` + the WS sponsor seam), exactly mirroring `useHome.convert`.
+ * QUOTES; the actual convert swap PTB (built when the agent loop lands) + the WS
+ * sponsor seam live in the sheet, mirroring `useHome.convert`.
  *
  * HONESTY (the brand): testnet liquidity is thin/absent, so `findRouters` very often
  * returns `null` (or a router error / zero out). That is the REAL, honest "no route"

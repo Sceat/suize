@@ -16,7 +16,7 @@
  *   where result: OnboardingResult = { name, strategy }
  */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { Strategy } from '../../data/types';
 import { StepHello } from './StepHello';
 import { StepName } from './StepName';
@@ -55,16 +55,11 @@ export function OnboardingShell({
   const [name, setName] = useState(initialName);
   const [strategy, setStrategy] = useState<Strategy>('safe'); // Safe is the default selection
 
-  // hello auto-advances to the name field after a calm beat — unless we're
-  // holding a single beat for an isolated `?mock=` capture.
-  useEffect(() => {
-    if (hold || beat !== 'hello') return;
-    const t = setTimeout(() => setBeat('name'), 2400);
-    return () => clearTimeout(t);
-  }, [hold, beat]);
-
+  // hello advances to the name field on a user gesture (the "Next →" affordance or
+  // a deliberate scroll-down) — never on a timer. `hold` still freezes the beat for
+  // an isolated `?preview=`/`?mock=` capture, so there `onNext` is a no-op.
   if (beat === 'hello') {
-    return <StepHello />;
+    return <StepHello onNext={hold ? undefined : () => setBeat('name')} />;
   }
 
   if (beat === 'name') {
@@ -74,7 +69,9 @@ export function OnboardingShell({
         onChange={setName}
         onNext={(n) => {
           setName(n);
-          setBeat('strategy');
+          // The real flow skips strategy — straight to setup. The 'strategy' beat
+          // branch below is kept so `?preview=strategy` still renders the card.
+          setBeat('setup');
         }}
       />
     );

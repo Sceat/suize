@@ -17,6 +17,8 @@ export { Logo } from './Logo';
 export type { LogoProps } from './Logo';
 export { GradText } from './GradText';
 export type { GradTextProps } from './GradText';
+export { Wordmark } from './Wordmark';
+export type { WordmarkProps } from './Wordmark';
 
 // theme
 export { ThemeProvider, useTheme, ThemeToggle } from './theme';
@@ -42,12 +44,11 @@ export type {
 } from './primitives';
 
 // journal shell (THE shell — replaces the old WalletShell/HomeSimple/HomeAdvanced UI)
-export { JournalShell, Masthead, StateRibbon } from './JournalShell';
+export { JournalShell, Masthead } from './JournalShell';
 export type {
   JournalShellProps,
   JournalSlots,
   JournalPresence,
-  JournalDemoMode,
 } from './JournalShell';
 
 // journal home (the wiring container that composes the leaves into the shell slots)

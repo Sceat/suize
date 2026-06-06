@@ -192,8 +192,11 @@ export const fetch_btc_history = async (
 export const strike_interval_of = (o: Oracle): number =>
   o.tick_size ?? o.strike_interval ?? 0
 
-// Pick the BTC active oracle with the nearest FUTURE expiry. A small guard
-// (15s) keeps us from selecting one that is about to expire mid-bet.
+// Pick the BTC active oracle with the SOONEST FUTURE expiry — i.e. the current
+// round to bet on. We DELIBERATELY do NOT skip a round in its final 15s: it's
+// shown through its whole life (the last 15s are just LOCKED, not skipped). The
+// caller advances to the next round only once the current one has expired / left
+// 'active'.
 export const pick_live_btc_oracle = (
   oracles: Oracle[],
   now = Date.now(),
@@ -203,7 +206,7 @@ export const pick_live_btc_oracle = (
       o =>
         o.underlying_asset === 'BTC' &&
         o.status === 'active' &&
-        o.expiry > now + 15_000,
+        o.expiry > now,
     )
     .sort((a, b) => a.expiry - b.expiry)
   return candidates[0] ?? null

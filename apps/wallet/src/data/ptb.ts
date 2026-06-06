@@ -377,66 +377,12 @@ export function buildTransferSuiSponsored(opts: {
 // Convert / swap (investing RISKY, agent-gated DeepBook swap).
 // ───────────────────────────────────────────────────────────────────────────
 
-/** A direction for the swap vault: which side of SUI/USDC goes in. */
-export type SwapDirection = 'base_to_quote' | 'quote_to_base';
-
 /**
- * Build an agent-gated DeepBook swap on a `SwapVault<SUI,USDC>`. This is the RISKY
- * convert path: SUI->USDC (`base_to_quote`) or USDC->SUI (`quote_to_base`), gated by
- * the mandate (scope_tag = DeepbookSwap = 2, budget-checked on-chain).
+ * A direction for the swap vault: which side of SUI/USDC goes in. SUI->USDC is
+ * `base_to_quote`; USDC->SUI is `quote_to_base`. Consumed by `ConvertSheet.tsx`.
  *
- * swap::agent_swap_base_to_quote<Base,Quote>(vault, mandate, cap, pool, scope_tag,
- *   amount_in, deep_fee, min_quote_out, &Clock, ctx) — and the mirror direction.
- *
- * SIGNER: in production this is signed by the AGENT keypair (via the helm), NOT the
- * owner — only the agent holds the AgentCap and can satisfy the gate. The builder is
- * the same regardless of signer; the transport differs (the helm signs, not the
- * zkLogin session). The owner CANNOT drive this (they don't hold the cap) — a
- * deliberate part of the cage.
- *
- * HONEST CAVEAT: testnet DeepBook liquidity may be thin/absent. A real call reverts
- * `EMinimumQuantityOutNotMet` when the pool can't fill `minOut` — that's the honest
- * "no route" signal, NOT a stub. Surface it; do not fabricate a fallback route.
- *
- * @param direction   base_to_quote (SUI->USDC) or quote_to_base (USDC->SUI).
- * @param swapVaultId the shared SwapVault<SUI,USDC> id.
- * @param mandateId   the investing mandate id (must allow DeepbookSwap scope).
- * @param capId       the AgentCap id bound to the mandate (held by the agent).
- * @param poolId      the live DeepBook SUI/USDC Pool object id (resolved on-chain).
- * @param amountInRaw amount of the input side, in its smallest unit.
- * @param deepFeeRaw  DEEP fee to pay the pool, in DEEP's smallest unit (6 decimals).
- * @param minOutRaw   minimum acceptable output (slippage guard). Reverts below this.
+ * The agent-gated DeepBook swap PTB itself is NOT built here yet — it lands with the
+ * agent loop (the convert path rebuilds it then, mirroring `useHome.convert`). This
+ * type is the stable seam the sheet uses to pick a direction in the meantime.
  */
-export function buildSwap(opts: {
-  direction: SwapDirection;
-  swapVaultId: string;
-  mandateId: string;
-  capId: string;
-  poolId: string;
-  amountInRaw: bigint | number;
-  deepFeeRaw: bigint | number;
-  minOutRaw: bigint | number;
-}): Transaction {
-  const target =
-    opts.direction === 'base_to_quote'
-      ? TARGETS.SWAP_AGENT_BASE_TO_QUOTE
-      : TARGETS.SWAP_AGENT_QUOTE_TO_BASE;
-
-  const tx = new Transaction();
-  tx.moveCall({
-    target,
-    arguments: [
-      tx.object(opts.swapVaultId),
-      tx.object(opts.mandateId),
-      tx.object(opts.capId),
-      tx.object(opts.poolId),
-      tx.pure.u8(ScopeTag.DeepbookSwap),
-      tx.pure.u64(BigInt(opts.amountInRaw)),
-      tx.pure.u64(BigInt(opts.deepFeeRaw)),
-      tx.pure.u64(BigInt(opts.minOutRaw)),
-      tx.object(CLOCK_ID),
-    ],
-    typeArguments: [SUI.type, USDC.type],
-  });
-  return tx;
-}
+export type SwapDirection = 'base_to_quote' | 'quote_to_base';

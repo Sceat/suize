@@ -31,7 +31,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { checkHandleAvailable } from '../../data/suins';
 import { SUINS_PARENT } from '../../lib/env';
-import { Button, Check, Eyebrow, GradText, ICON_STROKE, X } from '../../system';
+import { Button, Check, Eyebrow, ICON_STROKE, X } from '../../system';
 
 type Avail = 'idle' | 'checking' | 'free' | 'taken' | 'invalid';
 
@@ -194,7 +194,7 @@ export function StepName({
       >
         {/* the input itself — gradient-clipped hero mono text */}
         <input
-          className="suize-handle__input grad"
+          className="suize-handle__input"
           autoFocus
           value={value}
           onChange={(e) => onChange(clean(e.target.value))}
@@ -217,6 +217,8 @@ export function StepName({
             outline: 'none',
             width: inputWidth,
             minWidth: '2ch',
+            color: 'var(--cyan)',
+            WebkitTextFillColor: 'var(--cyan)',
             caretColor: 'var(--cyan)',
           }}
         />
@@ -267,13 +269,7 @@ export function StepName({
           onClick={() => onNext(value)}
           style={{ width: '100%' }}
         >
-          {ready ? (
-            <>
-              Claim&nbsp;<GradText variant="mark">{handle}</GradText>
-            </>
-          ) : (
-            'Pick a name'
-          )}
+          {ready ? `Claim ${handle}` : 'Pick a name'}
         </Button>
       </div>
     </div>

@@ -12,8 +12,9 @@
    The shared backdrop + chart come from crash-base.mount (also ported).
    ========================================================================== */
 import * as base from './crash-base'
-import { fmt_amount, fmt_compact, fmt_signed_usd } from './format'
-import type { CrashHost } from './crash-host'
+import * as sfx from './sfx'
+import { fmt_amount, fmt_compact, fmt_signed_cents } from './format'
+import type { CrashHost, SideVM } from './crash-host'
 
 export function mount(root: HTMLElement, host: CrashHost): () => void {
   const reduceMotion =
@@ -46,6 +47,12 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
       'm11.293 17.293 1.414 1.414L19.414 12l-6.707-6.707-1.414 1.414L15.586 11H6v2h9.586z',
     check: 'm10 15.586-3.293-3.293-1.414 1.414L10 18.414l9.707-9.707-1.414-1.414z',
     x: 'm16.192 6.344-4.243 4.242-4.242-4.242-1.414 1.414L10.535 12l-4.242 4.242 1.414 1.414 4.242-4.242 4.243 4.242 1.414-1.414L13.364 12l4.242-4.242z',
+    // speaker WITH waves — "sound on" (tap to mute). Boxicons bxs-volume-full.
+    volume:
+      'M16 21c3.527-1.547 5.999-4.909 5.999-9S19.527 4.547 16 3v2c2.387 1.386 3.999 4.047 3.999 7S18.387 17.614 16 19v2z M16 7v10c1.225-1.1 2-3.229 2-5s-.775-3.9-2-5zM4 17h2.697L14 21.488V2.512L6.697 7H4c-1.103 0-2 .897-2 2v6c0 1.103.897 2 2 2z',
+    // speaker with an X — "muted" (tap to unmute). Boxicons bxs-volume-mute.
+    volumeMute:
+      'M4 17h2.697L14 21.488V2.512L6.697 7H4c-1.103 0-2 .897-2 2v6c0 1.103.897 2 2 2zm12.71-9.293-1.42 1.42L17.59 12l-2.3 2.293 1.42 1.414L19 13.41l2.29 2.297 1.42-1.414L20.41 12l2.3-2.293-1.42-1.414L19 10.59z',
   } as const
   // Build an inline SVG string. `em` scales the icon to its line; currentColor
   // makes it inherit the surrounding ink. focusable=false keeps it out of tab
@@ -124,6 +131,26 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     gap: clamp(14px, 1.8vw, 22px);
   }
   .e05 .e05-acct-main:empty { display: none; }
+
+  /* ---------- SOUND MUTE TOGGLE — borderless speaker icon ----------
+     Same unobtrusive treatment as the theme toggle: borderless, ink-3, a small
+     ink icon that swaps speaker ↔ muted-speaker on click. Sits left of the theme
+     toggle in the header cluster. */
+  .e05 .e05-mute {
+    appearance: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px;
+    border: 0; border-radius: 50%;
+    background: transparent;
+    color: var(--ink-3); cursor: pointer;
+    padding: 0; line-height: 0; flex: 0 0 auto;
+    transition: color 0.12s ease;
+  }
+  .e05 .e05-mute:hover { color: var(--ink); }
+  .e05 .e05-mute:focus-visible { outline: 1px solid var(--blue); outline-offset: 3px; border-radius: 4px; }
+  .e05 .e05-mute svg { display: block; }
+  /* muted state reads quieter (decorative ink) so the "off" is legible at a glance */
+  .e05 .e05-mute.is-muted { color: var(--ink-4); }
 
   /* ---------- DARK / LIGHT THEME TOGGLE — borderless morphing icon ----------
      No border, no box, no background — just an ink-coloured icon that morphs
@@ -733,6 +760,12 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   }
   .e05 .e05-bet--up .e05-bet-win { color: var(--bull-ink); }
   .e05 .e05-bet--down .e05-bet-win { color: var(--bear-ink); }
+  /* D12: "Pricing…" placeholder before a real per-side quote loads — muted, smaller,
+     no side tint, so it never reads as a fake headline payout. */
+  .e05 .e05-bet-win > [data-win-up].is-pricing,
+  .e05 .e05-bet-win > [data-win-down].is-pricing {
+    color: var(--ink-4); font-size: 0.5em; font-weight: 500; letter-spacing: 0.04em;
+  }
   /* THE PROTECTED MULTIPLE — short, compact, ALWAYS fully visible. Absolute font
      size (decoupled from the giant win clamp) + flex:0 0 auto + no shrink + a
      max-content min so flexbox can never squeeze a digit off ("· 12x" / "· 1.9x"
@@ -822,7 +855,7 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   .e05.e05-is-pending .e05-bet,
   .e05.e05-is-pending .e05-chip,
   .e05.e05-is-pending .e05-chip-max,
-  .e05.e05-is-pending .e05-held-cta,
+  .e05.e05-is-pending .e05-pos-cta,
   .e05.e05-is-pending .e05-cta,
   .e05.e05-is-pending .e05-house-withdraw,
   .e05.e05-is-pending .e05-sheet-cta,
@@ -839,93 +872,205 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
      its "Cash out" CTA must NOT render when there is no open bet). */
   .e05 [hidden] { display: none !important; }
 
-  /* ===== HELD-BET CLUSTER — replaces the bet controls while a bet is live ===== */
-  /*  (new state the prototype lacked; same light editorial language)            */
+  /* ===== HELD — TWO DISTINCT POSITIONS (per-side cards) ===== */
+  /*  Shared header (entry + lock countdown) then up to two side cards, mirroring
+      the pre-bet UP/DOWN cards: UP left/green, DOWN right/red. Each card is its OWN
+      position with its OWN cash-out button — no merged number.                    */
   .e05 .e05-held {
-    text-align: center;
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
-    /* the held column is a real flex stack: every child (status block + CTA)
-       takes its own row with gap, so the Cash-out CTA can NEVER ride up under
-       the live cash-out number / meter above it. */
+    display: flex; flex-direction: column; align-items: stretch; gap: 10px;
     width: 100%;
   }
-  .e05 .e05-held-tag {
-    display: inline-flex; align-items: baseline; gap: 10px;
-    margin-bottom: 2px;
+  .e05 .e05-held-head {
+    display: flex; flex-direction: column; justify-content: center;
+    align-items: center; gap: 1px;
   }
-  .e05 .e05-held-tag .e05-tag {
+  /* the round's locked settlement LINE (was "ENTRY") + a subtle directional hint */
+  .e05 .e05-held-head .e05-line {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em;
+    font-weight: 600; color: var(--ink-2);
+  }
+  .e05 .e05-held-head .e05-line-hint {
+    font-family: var(--sans); font-size: 9px; font-weight: 500;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-4);
+  }
+  /* TWO-UP grid identical to .e05-bets so the held cards line up under the bet
+     cards. FIXED POSITIONAL SLOTS: the UP card is PINNED to column 1 (LEFT, green)
+     and the DOWN card to column 2 (RIGHT, red) via explicit grid-column — so a
+     single held side stays in ITS slot and never auto-flows into the empty column
+     (a DOWN-only position must render RIGHT, mirroring the top wager cards). A
+     hidden card leaves its slot empty without collapsing the other side's half. */
+  .e05 .e05-held-cards {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px;
+  }
+  .e05 .e05-held-cards [data-pos-up] { grid-column: 1; }
+  .e05 .e05-held-cards [data-pos-down] { grid-column: 2; }
+  /* ===== POSITION CARD — "The Exit Ticket": an OUTLINED LEDGER/RECEIPT, distinct
+     from the filled WAGER posters. Transparent paper, a hairline divider + math row,
+     present-tense status language. Its whole chrome (state GRADIENT / border / glow)
+     binds to the P&L SIGN via the .is-winning / .is-losing / .is-neutral / .is-lock
+     state class — NOT the side. The at-a-glance signal is a soft state-tinted
+     gradient that GLOWS from beneath the hero P&L number outward (no left rail).
+     ONLY the small ghost button taps (the tile itself is inert). ===== */
+  .e05 .e05-pos {
+    position: relative; border-radius: 3px; min-width: 0; overflow: hidden;
+    padding: 12px clamp(11px, 2.4vw, 15px) 12px;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    transition: border-color 0.14s ease, box-shadow 0.14s ease, filter 0.14s ease;
+  }
+  /* STATE GRADIENT — a soft, low-alpha wash anchored at the upper-left (beneath the
+     hero number) that fades into the card paper, so the card "glows" its verdict
+     from the hero outward. Lives on ::before so it composites over the base paper
+     and cross-fades on state change. Replaces the old left verdict rail entirely. */
+  .e05 .e05-pos::before {
+    content: ''; position: absolute; inset: 0; z-index: 0;
+    pointer-events: none; opacity: 0; transition: opacity 0.16s ease;
+    background:
+      radial-gradient(120% 78% at 16% 30%,
+        var(--pos-glow, transparent) 0%, transparent 62%);
+  }
+  /* keep the card's own content above the gradient wash */
+  .e05 .e05-pos > * { position: relative; z-index: 1; }
+  /* WINNING (live net >= +$0.02): green glow gradient + faint fill + lift glow */
+  .e05 .e05-pos.is-winning {
+    background: var(--bull-fill); border: 1px solid var(--bull-edge);
+    box-shadow: 0 0 16px rgba(52, 211, 153, 0.12);
+    --pos-glow: rgba(52, 211, 153, 0.20);
+  }
+  .e05 .e05-pos.is-winning::before { opacity: 1; }
+  /* LOSING (live net <= -$0.02): red glow gradient + DASHED border + sunken inset
+     (no outer glow) + slight desaturate — structurally unmissable as a loss, and
+     NEVER green. The base fill stays neutral paper; the red lives in the gradient. */
+  .e05 .e05-pos.is-losing {
+    background: var(--paper-3); border: 1px dashed var(--bear-edge);
+    box-shadow: inset 0 1px 3px rgba(10, 27, 46, 0.10);
+    filter: saturate(0.82) brightness(0.96);
+    --pos-glow: rgba(255, 111, 99, 0.18);
+  }
+  .e05 .e05-pos.is-losing::before { opacity: 1; }
+  /* NEUTRAL (|net| < $0.02, or no live quote): no gradient, plain raised paper */
+  .e05 .e05-pos.is-neutral {
+    background: var(--paper-2); border: 1px solid var(--hair);
+  }
+  /* LOCKED / SETTLING (outcome unknown — NEVER fake-tint): no gradient, flat paper */
+  .e05 .e05-pos.is-lock {
+    background: var(--paper-2); border: 1px solid var(--hair);
+  }
+  /* top row: ● POSITION tag (left) + tiny mono side badge (right, NEVER tints) */
+  .e05 .e05-pos-top {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; width: 100%; min-width: 0; margin-bottom: 3px;
+  }
+  .e05 .e05-pos-tag {
     display: inline-flex; align-items: center; gap: 5px;
+    font-family: var(--sans); font-size: 9px; font-weight: 700;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-3);
+  }
+  .e05 .e05-pos-tag .e05-pos-dot {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--ink-4);
+    flex: 0 0 auto;
+  }
+  /* side badge — tiny neutral mono, the ONLY place UP/DOWN appears; never tints */
+  .e05 .e05-pos-badge {
+    display: inline-flex; align-items: center; gap: 3px; min-width: 0;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.02em;
+    color: var(--ink-4); font-variant-numeric: tabular-nums;
+    white-space: nowrap; flex: 0 0 auto;
+  }
+  .e05 .e05-pos-badge .e05-arrow {
+    display: inline-flex; flex: 0 0 auto; width: 1em; height: 1em; line-height: 1;
+  }
+  .e05 .e05-pos-badge .e05-arrow svg { width: 100%; height: 100%; display: block; }
+  /* eyebrow — "NOW · if you exit" / "Settling round…" */
+  .e05 .e05-pos-eyebrow {
+    font-family: var(--sans); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3);
+  }
+  /* HERO — the ONLY large number: the signed live P&L, coloured by sign */
+  .e05 .e05-pos-hero {
+    font-family: var(--mono); font-weight: 700; line-height: 0.94;
+    font-size: clamp(30px, 6.6vw, 44px);
+    font-variant-numeric: tabular-nums; color: var(--ink-2);
+  }
+  .e05 .e05-pos-hero.is-winning { color: var(--bull-ink); }
+  .e05 .e05-pos-hero.is-losing { color: var(--bear-ink); }
+  .e05 .e05-pos-hero.is-neutral, .e05 .e05-pos-hero.is-lock { color: var(--ink-2); }
+  /* plain-word status — "winning now" / "losing now" / "about even" */
+  .e05 .e05-pos-sub {
     font-family: var(--sans); font-size: 11px; font-weight: 600;
-    letter-spacing: 0.2em; text-transform: uppercase;
+    letter-spacing: 0.02em; color: var(--ink-3); margin-top: 1px;
   }
-  .e05 .e05-held-tag .e05-tag svg { width: 1.05em; height: 1.05em; }
-  .e05 .e05-held-tag .e05-tag.up { color: var(--bull-ink); }
-  .e05 .e05-held-tag .e05-tag.down { color: var(--bear-ink); }
-  .e05 .e05-held-tag .e05-entry {
-    font-family: var(--mono); font-size: 11px; letter-spacing: 0.02em;
-    color: var(--ink-3);
+  .e05 .e05-pos-sub.is-winning { color: var(--bull-ink); }
+  .e05 .e05-pos-sub.is-losing { color: var(--bear-ink); }
+  .e05 .e05-pos-sub.is-neutral, .e05 .e05-pos-sub.is-lock { color: var(--ink-3); }
+  /* MATH line — "value now $2.12 · paid $1.81" (proves the hero) */
+  .e05 .e05-pos-math {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.01em;
+    color: var(--ink-3); font-variant-numeric: tabular-nums; margin-top: 1px;
   }
-  .e05 .e05-held-lbl {
-    font-family: var(--sans); font-size: 10px; font-weight: 500;
-    letter-spacing: 0.24em; text-transform: uppercase; color: var(--ink-3);
+  .e05 .e05-pos-pending {
+    font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); margin-top: 1px;
   }
-  .e05 .e05-held-num {
-    font-family: var(--mono); font-weight: 700;
-    font-size: clamp(48px, 8vw, 84px); line-height: 0.94;
-    color: var(--ink);
+  /* hairline divider between the NOW block and the conditional settle block */
+  .e05 .e05-pos-rule {
+    align-self: stretch; height: 1px; background: var(--hair); margin: 7px 0 6px;
   }
-  .e05 .e05-held-num.win { color: var(--bull-ink); }
-  .e05 .e05-held-num.lose { color: var(--bear-ink); }
-  .e05 .e05-held-delta {
-    font-family: var(--mono); font-size: 12px; letter-spacing: 0.02em;
-    color: var(--ink-3); min-height: 14px;
+  /* conditional settle line — the "IF … WINS AT SETTLE" LABEL stays quiet grey;
+     NEVER tinted green/red (it's the conditional prize, not live P&L). The
+     settling-loss line shares the same quiet register. */
+  .e05 .e05-pos-if, .e05 .e05-pos-iflose {
+    font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.01em;
+    color: var(--ink-3); font-variant-numeric: tabular-nums; line-height: 1.3;
   }
-  .e05 .e05-held-delta.pos { color: var(--bull-ink); }
-  .e05 .e05-held-delta.neg { color: var(--bear-ink); }
-  .e05 .e05-held-meter {
-    width: min(360px, 70%); height: 4px; margin: 4px auto 6px;
-    background: var(--hair); border-radius: 2px; overflow: hidden;
+  /* the PRIZE NUMBER — high-contrast bright NEUTRAL (--ink), heavier + larger so it
+     POPS as the thing you're playing for, but unmistakably the conditional: it is
+     labeled, neutral-coloured (never green/red), and sits below the hairline. */
+  .e05 .e05-pos-if .e05-pos-if-num {
+    color: var(--ink); font-weight: 700; font-size: 15px;
+    margin-left: 2px;
   }
-  .e05 .e05-held-meter i {
-    display: block; height: 100%; width: 0%;
-    background: linear-gradient(90deg, var(--blue-bright), var(--blue-deep));
-    transition: width 0.4s ease;
+  /* gross total — "pays $3.90 total" (smallest, most muted) */
+  .e05 .e05-pos-gross {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.01em;
+    color: var(--ink-4); font-variant-numeric: tabular-nums; margin-top: 1px;
   }
-  .e05 .e05-held-meter i.win {
-    background: linear-gradient(90deg, var(--bull-line), var(--bull-ink));
-  }
-  .e05 .e05-held-hint {
-    font-family: var(--sans); font-size: 11px; color: var(--ink-3);
-    margin: 0 0 4px;
-  }
-  .e05 .e05-held-cta {
-    appearance: none;
+  /* ===== CASH-OUT (EXIT) button — GHOST/OUTLINED secondary, subordinate to the
+     filled WAGER primaries. Transparent fill, hairline border, lighter weight. The
+     signed live net colours it green (.net-pos) / red (.net-neg); .is-inert renders
+     the disabled "settling" look. ===== */
+  .e05 .e05-pos-cta {
+    appearance: none; align-self: stretch; margin-top: 8px;
     display: inline-flex; align-items: center; justify-content: center;
-    /* clear separation from the status block above (meter/delta), so the CTA
-       always reads as its own affordance and never overlaps the numbers. */
-    margin-top: 4px;
-    min-width: min(360px, 70%);
-    max-width: 100%;
-    background: var(--blue);
-    border: 1px solid var(--blue-deep); border-radius: 3px;
-    color: #fff;
-    font-family: var(--sans); font-size: 13px; font-weight: 600;
-    letter-spacing: 0.14em; text-transform: uppercase;
-    /* never let a long label (e.g. "Cash out · $1,250.00") spill the button: it
-       WRAPS centered onto a second line rather than clipping, padding scales down
-       on narrow widths, and the value digits stay even (tabular-nums). As a flex
-       container the text node is centered on every line. */
-    padding: 14px clamp(14px, 4vw, 22px); cursor: pointer;
-    text-align: center; line-height: 1.25;
+    border-radius: 3px; cursor: pointer; background: transparent;
+    border: 1px solid var(--hair-strong); color: var(--ink-2);
+    font-family: var(--sans); font-size: 11px; font-weight: 500;
+    letter-spacing: 0.06em;
+    padding: 8px clamp(9px, 2.6vw, 14px);
+    text-align: center; line-height: 1.2;
     white-space: normal; overflow-wrap: anywhere;
     font-variant-numeric: tabular-nums;
-    transition: background-color 0.15s ease, transform 0.15s ease, opacity 0.2s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease,
+      color 0.15s ease, transform 0.15s ease, opacity 0.2s ease;
   }
-  .e05 .e05-held-cta:hover { background: var(--blue-deep); }
-  .e05 .e05-held-cta:active { transform: translateY(1px); }
-  .e05 .e05-held-cta:disabled { opacity: 0.55; cursor: not-allowed; }
-  .e05 .e05-held-cta.win { background: var(--bull-solid); border-color: var(--bull-ink); }
-  .e05 .e05-held-cta.win:hover { background: var(--bull-ink); }
+  .e05 .e05-pos-cta.net-pos {
+    border-color: var(--bull-edge); color: var(--bull-ink);
+  }
+  .e05 .e05-pos-cta.net-pos:hover { background: var(--bull-fill-hot); border-color: var(--bull-ink); }
+  .e05 .e05-pos-cta.net-neg {
+    border-color: var(--bear-edge); color: var(--bear-ink);
+  }
+  .e05 .e05-pos-cta.net-neg:hover { background: var(--bear-fill-hot); border-color: var(--bear-ink); }
+  .e05 .e05-pos-cta.is-inert {
+    color: var(--ink-4); border-color: var(--hair); cursor: not-allowed;
+    text-transform: none; letter-spacing: 0.04em;
+  }
+  .e05 .e05-pos-cta:active { transform: translateY(1px); }
+  .e05 .e05-pos-cta:disabled { opacity: 0.55; cursor: not-allowed; }
+  /* shared settling / trading-frozen note under both cards */
+  .e05 .e05-held-note {
+    font-family: var(--serif); font-size: 12px; line-height: 1.35;
+    color: var(--ink-3); max-width: min(440px, 92%);
+    margin: 2px auto 0; text-align: center;
+  }
 
   /* ===== BET TAPE — floats bottom-LEFT in the seam above the footer ===== */
   .e05 .e05-tape {
@@ -1114,8 +1259,35 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   .e05 .e05-yield-apy .e05-yield-num {
     font-family: var(--mono);
     font-weight: 700;
-    font-size: clamp(26px, 3.2vw, 38px);
+    /* MORE PROMINENT yield (UX item #6) — a touch larger so the real all-time
+       return reads as a hero figure of the house panel. */
+    font-size: clamp(30px, 3.8vw, 46px);
     line-height: 0.92;
+    color: var(--blue-deep);
+  }
+  /* HOLDER: the user's REAL stake, prominent + labeled "Your stake" (UX item #6).
+     This REPLACES the deposit projection while a position is held — the prominent
+     house number for a holder is their stake value, never the betting wallet. */
+  .e05 .e05-yield-stake {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 2px;
+  }
+  .e05 .e05-yield-stake:empty { display: none; }
+  .e05 .e05-yield-stake .e05-yield-stake-lbl {
+    font-family: var(--sans);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .e05 .e05-yield-stake .e05-yield-stake-val {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: clamp(18px, 2.2vw, 24px);
+    line-height: 1;
     color: var(--blue-deep);
   }
   .e05 .e05-yield-apy .e05-yield-unit {
@@ -1587,41 +1759,152 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     .e05 .e05-results { top: calc(var(--e05-pad) + 56px); max-width: 44vw; }
   }
 
-  /* ---- PHONE (≤560px): single editorial column, stacked footer ----
-     The bet ritual stays a single non-scroll column; the tape moves out of the
-     centre's way; the toast goes full-width-centred ABOVE the held cluster so it
-     can never sit on the Cash-out CTA (the overlap fix on phone). */
+  /* ---- PHONE (≤560px): SCROLLING STACKED COLUMN ----
+     The desktop layout is a single full-viewport "Fold & Footer": every region
+     (logo, acct, masthead, chart+bet ritual, tape, house footer) is absolutely
+     positioned inside the viewport-pinned .e05 stage. That cannot fit on a phone
+     and the stage does not scroll, so content was clipped. Here we DISSOLVE the
+     fold into normal document flow: .e05 / .e05-fg become a flex COLUMN, each
+     region drops back to static flow and STACKS top-to-bottom (masthead → chart
+     hero → bet ritual → house panel), and the whole thing SCROLLS with the page
+     (the scroll lock is released in styles.css). The chart canvas stays a FIXED
+     hero backdrop behind the scrolling foreground so the live line is always
+     visible without ballooning the scroll height (crash-base clamps its height
+     to the viewport). Safe-area insets keep content clear of notches / home bars. */
   @media (max-width: 560px) {
-    .e05 { --e05-pad: clamp(12px, 4vw, 18px); --e05-col: 92vw; }
-    /* logo + acct each take a row at the top; masthead pushed below them */
-    .e05 .e05-acct {
-      max-width: calc(100vw - var(--e05-pad) * 2);
-      gap: 8px;
+    .e05 {
+      --e05-pad: clamp(12px, 4vw, 18px);
+      --e05-col: 100%;
+      /* BLOCK flow — the document grows to fit all stacked regions and scrolls
+         with the page. (Not flex: a flex column here was getting height-trapped
+         by the ancestor chain and overflowing instead of extending the scroll
+         height. Plain block flow grows the page naturally.) */
+      position: relative;
+      inset: auto;
+      display: block;
+      min-height: 100dvh;
     }
-    .e05 .e05-masthead { top: clamp(86px, 15vh, 120px); }
+
+    /* CHART BACKDROP — pin the canvas + paper backdrop to the VIEWPORT as a
+       fixed hero so the live line stays put behind the scrolling foreground
+       (instead of stretching down the full scroll height). crash-base clamps
+       the canvas height to window.innerHeight so the chart band stays anchored.
+       !important overrides the inline cssText (position:absolute) crash-base
+       sets on these nodes — inline styles otherwise beat a class rule. */
+    .e05 .crashbase-backdrop,
+    .e05 .crashbase-chart,
+    .e05 .crashbase-marker,
+    .e05 .crashbase-pricetag {
+      position: fixed !important;
+    }
+
+    /* FOREGROUND becomes the scrolling stacked column. position:relative (not
+       static) so its z-index:3 actually applies — it must sit ABOVE the fixed
+       chart canvas (z1) so opaque sections (the house panel) cover the line
+       rather than letting it bleed through. Height is its NATURAL content height
+       (no forced 100dvh — that would push the footer below the fold and make it
+       unreachable); .e05's min-height:100dvh still fills the screen on short
+       content. The side padding frames the whole column; the footer reclaims the
+       horizontal padding so it can read as a full-bleed band. */
+    .e05 .e05-fg {
+      position: relative;
+      z-index: 3;
+      display: block;
+      padding:
+        calc(env(safe-area-inset-top, 0px) + var(--e05-pad))
+        calc(env(safe-area-inset-right, 0px) + var(--e05-pad))
+        0
+        calc(env(safe-area-inset-left, 0px) + var(--e05-pad));
+      pointer-events: auto;
+    }
+
+    /* HEADER ROW — logo left, account cluster right, on one flow row. */
+    .e05 .e05-logo {
+      position: static;
+      top: auto; left: auto;
+      display: inline-flex;
+    }
+    .e05 .e05-acct {
+      position: static;
+      top: auto; right: auto;
+      width: fit-content;
+      max-width: 100%;
+      gap: 8px;
+      margin-top: -26px;          /* sit the cluster on the logo's baseline row */
+      margin-left: auto;          /* push the cluster to the right edge */
+      justify-content: flex-end;
+    }
+    /* results log stays hidden on phones (session still records settles) */
+    .e05 .e05-results { display: none; }
+
+    /* MASTHEAD — countdown clock, in flow under the header. */
+    .e05 .e05-masthead {
+      position: static;
+      top: auto; left: auto;
+      transform: none;
+      width: 100%;
+      margin-top: clamp(18px, 5vh, 40px);
+    }
+    /* the masthead frost quad assumed an absolute parent; neutralise it. */
+    .e05 .e05-masthead::before { display: none; }
+
+    /* CHART HERO + BET RITUAL — the centre column in flow. We give it a real,
+       bounded height so the live chart shows through above the bet cards, then
+       the cards sit at the bottom of that band (the original look). */
+    .e05 .e05-center {
+      position: static;
+      left: auto; top: auto; bottom: auto;
+      transform: none;
+      width: 100%;
+      min-height: clamp(360px, 56vh, 540px);
+      margin-top: clamp(14px, 3vh, 28px);
+      padding-bottom: clamp(14px, 3vh, 26px);
+      justify-content: flex-end;
+    }
+    /* the ambient bet-zone veil tracked the absolute parent's bottom — keep it
+       confined to the lower half of the (now in-flow) centre. */
+    .e05 .e05-betzone-bg { height: 62%; }
+
     /* stake chips wrap instead of overflowing the column edge */
     .e05 .e05-stakes { flex-wrap: wrap; row-gap: 7px; }
-    /* tape shrinks + lifts clear of the footer band on the left seam */
-    .e05 .e05-tape { width: min(180px, 46vw); }
-    /* the acct cluster takes its own wrapping row(s) at phone width, so the
-       results log would crowd / overlap the masthead — hide it here. The session
-       still captures settles (data side), it just isn't surfaced on tiny screens. */
-    .e05 .e05-results { display: none; }
-    /* toast: centred, full-width, ABOVE the held cluster (never over the CTA) */
+
+    /* TAPE — illustrative ticker; in the stacked flow it has no clear home and
+       is already hidden ≤480px. Hide it here too so the column stays clean. */
+    .e05 .e05-tape { display: none; }
+
+    /* TOAST — pin to the bottom of the VIEWPORT (fixed) so it's always visible
+       above whatever is scrolled, never riding on the Cash-out CTA. */
     .e05 .e05-toast {
+      position: fixed;
       left: 50%; right: auto;
       transform: translateX(-50%);
-      bottom: calc(var(--e05-footer-h) + 8px);
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+      top: auto;
       max-width: calc(100vw - var(--e05-pad) * 2);
       white-space: normal; text-align: center;
+      z-index: 12;
     }
-    /* footer: stack into rows so columns never overlap at phone width */
-    .e05 { --e05-footer-h: clamp(200px, 40vh, 260px); }
+    /* settle flash covers the visible viewport, not the tall scroll page. */
+    .e05 .e05-flash { position: fixed; }
+
+    /* HOUSE FOOTER — now a normal stacked, OPAQUE band at the BOTTOM of the
+       column (reachable by scrolling), single-column rows, no fixed height. The
+       opaque --paper-2 background (set on the base rule) covers the fixed chart
+       behind it. Negative side margins reclaim .e05-fg's horizontal padding so
+       the band runs full-bleed to the screen edges, with its own top hairline. */
     .e05 .e05-footer {
+      position: static;
+      left: auto; right: auto; bottom: auto;
+      height: auto;
       grid-template-columns: 1fr;
       align-content: center;
       gap: 10px;
-      padding-top: 14px; padding-bottom: 14px;
+      margin: clamp(20px, 5vh, 40px)
+              calc(-1 * (env(safe-area-inset-right, 0px) + var(--e05-pad)))
+              0
+              calc(-1 * (env(safe-area-inset-left, 0px) + var(--e05-pad)));
+      padding: 22px clamp(16px, 4vw, 24px)
+               calc(env(safe-area-inset-bottom, 0px) + 28px);
     }
     .e05 .e05-house-yield { display: none; }
     .e05 .e05-house-yield::before { display: none; }
@@ -1632,8 +1915,6 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   @media (max-width: 480px) {
     .e05 .e05-stake-lbl { display: none; }
     .e05 .e05-steps { display: none; }
-    /* the big held cash-out number scales down so the cluster fits the column */
-    .e05 .e05-held-num { font-size: clamp(40px, 13vw, 64px); }
     .e05 .e05-cd-time { font-size: clamp(34px, 13vw, 64px); }
     /* the tape can crowd the bottom-left of the column on tiny screens; hide it
        so the bet ritual + footer stay uncluttered and overlap-free. */
@@ -1674,6 +1955,27 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   // ---------------------------------------------------------------- //
   //  3) FOREGROUND DOM
   // ---------------------------------------------------------------- //
+  // ONE position card = "The Exit Ticket": an outlined LEDGER (vs the filled WAGER
+  // posters). All live tinting (rail/border/fill/glow/hero) is applied at render
+  // time from the P&L sign — the markup is chrome-neutral. `k` is 'up'|'down', used
+  // only for the data-attr keys + the tiny side glyph (NEVER for chrome).
+  const posCard = (k: 'up' | 'down', glyph: string, word: string): string => `
+    <div class="e05-pos" data-pos-${k} hidden>
+      <div class="e05-pos-top">
+        <span class="e05-pos-tag"><i class="e05-pos-dot"></i> Position</span>
+        <span class="e05-pos-badge tnum" data-pos-${k}-badge><span class="e05-arrow">${glyph}</span> ${word} · <span data-pos-${k}-ctr></span></span>
+      </div>
+      <span class="e05-pos-eyebrow" data-pos-${k}-eyebrow>Now · if you exit</span>
+      <span class="e05-pos-hero tnum" data-pos-${k}-hero>—</span>
+      <span class="e05-pos-sub" data-pos-${k}-sub></span>
+      <span class="e05-pos-math tnum" data-pos-${k}-math></span>
+      <span class="e05-pos-pending" data-pos-${k}-pending hidden>payout pending</span>
+      <div class="e05-pos-rule"></div>
+      <span class="e05-pos-if tnum" data-pos-${k}-if></span>
+      <span class="e05-pos-gross tnum" data-pos-${k}-gross></span>
+      <span class="e05-pos-iflose tnum" data-pos-${k}-iflose hidden></span>
+      <button type="button" class="e05-pos-cta" data-pos-${k}-cta>Cash out</button>
+    </div>`
   const fg = document.createElement('div')
   fg.className = 'e05-fg'
   fg.innerHTML = `
@@ -1691,6 +1993,10 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
            rebuilt [data-acct] region (far right of the header cluster). It is
            created once here and never re-parented, so acctEl.innerHTML='' can't
            destroy it and there is no insertBefore cycle. -->
+      <!-- SOUND MUTE TOGGLE — a small speaker icon (sound-on / muted). Like the
+           theme toggle it's a STABLE PERMANENT header sibling; its glyph swaps on
+           toggle and persists via sfx.set_muted -> localStorage. -->
+      <button type="button" class="e05-mute" data-mute aria-label="Toggle sound" aria-pressed="false" title="Toggle sound"></button>
       <button type="button" class="e05-theme" data-theme-toggle aria-label="Toggle dark mode" aria-pressed="false" title="Toggle dark mode">
         <svg class="e05-theme-svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
           <!-- SUN: a core disc + 8 rays. Shown in DARK mode (tap to go light). -->
@@ -1776,24 +2082,32 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
         <div class="e05-betstatus" data-betstatus>Locked — reopens next round</div>
       </div>
 
+      <!-- HELD — TWO DISTINCT POSITIONS. A shared header (entry + lock countdown)
+           then up to two per-side cards (UP left/green, DOWN right/red), each its
+           OWN position with its OWN cash-out button. A side with 0 contracts is
+           absent (its column shows the pre-bet wager selector for opening/growing).
+           The settling note appears once, under both cards. -->
       <div class="e05-held e05-veil" data-held hidden>
-        <div class="e05-held-tag">
-          <span class="e05-tag" data-held-side>${ico('up')} UP</span>
-          <span class="e05-entry" data-held-entry>ENTRY $0</span>
+        <div class="e05-held-head">
+          <span class="e05-line" data-held-entry>LINE $0</span>
+          <span class="e05-line-hint">up wins above · down wins below</span>
         </div>
-        <div class="e05-held-lbl" data-held-lbl>Cash out for</div>
-        <div class="e05-held-num tnum" data-held-num>—</div>
-        <div class="e05-held-delta tnum" data-held-delta></div>
-        <div class="e05-held-meter"><i data-held-meter></i></div>
-        <div class="e05-held-hint" data-held-hint hidden></div>
-        <button type="button" class="e05-held-cta" data-held-cta>Cash out</button>
+        <div class="e05-held-cards">
+          ${posCard('up', ico('up'), 'UP')}
+          ${posCard('down', ico('down'), 'DOWN')}
+        </div>
+        <div class="e05-held-note" data-held-note hidden></div>
       </div>
     </div>
 
+    <!-- ILLUSTRATIVE ticker — NOT real-time on-chain activity. No global per-bet
+         feed exists in the indexer yet, so these rows are simulated sample bets.
+         Labeled "Sample bets" (no live pulse) so it never implies real on-chain
+         data. Swap the emitter for a real global-feed poller to make it live. -->
     <div class="e05-tape">
       <div class="e05-tape-head">
-        <span class="e05-dot ed-pulse"></span>
-        <span class="e05-lbl">Placing now</span>
+        <span class="e05-dot"></span>
+        <span class="e05-lbl">Sample bets · illustrative</span>
       </div>
       <div class="e05-tape-rows" data-tape></div>
     </div>
@@ -1818,18 +2132,24 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
           <span class="e05-yield-num tnum" data-yield-num>—</span>
           <span class="e05-yield-unit" data-yield-unit>all-time</span>
         </span>
-        <div class="e05-yield-proj">
+        <!-- HOLDER: the user's REAL stake, prominent + labeled "Your stake". -->
+        <div class="e05-yield-stake" data-stake-block hidden>
+          <span class="e05-yield-stake-lbl">Your stake</span>
+          <span class="e05-yield-stake-val tnum" data-stake-val>$0</span>
+        </div>
+        <!-- NON-HOLDER: a clearly-labeled projection of DEPOSITABLE funds. -->
+        <div class="e05-yield-proj" data-proj-block>
           <span class="e05-proj">
-            <span class="e05-proj-from tnum" data-proj-from>Your $0</span>
+            <span class="e05-proj-from tnum" data-proj-from>Deposit $0</span>
             <span class="e05-proj-arrow">${ico('right', 0.9)}</span>
             <span class="e05-proj-earn tnum" data-proj-earn>+$0</span>
-            <span class="e05-proj-per">at current rate</span>
+            <span class="e05-proj-per">projected · at current rate</span>
           </span>
           <span class="e05-proj e05-proj--tier">
-            <span class="e05-proj-from tnum">$1,000</span>
+            <span class="e05-proj-from tnum">Deposit $1,000</span>
             <span class="e05-proj-arrow">${ico('right', 0.9)}</span>
             <span class="e05-proj-earn tnum" data-proj-tier>+$0</span>
-            <span class="e05-proj-per">at current rate</span>
+            <span class="e05-proj-per">projected · at current rate</span>
           </span>
         </div>
       </div>
@@ -1865,7 +2185,7 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
         <button type="button" class="e05-house-withdraw e05-hit" data-house-withdraw aria-label="Withdraw from house" hidden>
           Withdraw from house
         </button>
-        <span class="e05-disclaimer">Win USDC every time a player loses a bet. Withdraw anytime.</span>
+        <span class="e05-disclaimer">You take the other side of every bet: you earn when players lose, but lose when they win. The house edge is statistical, not guaranteed. Withdraw anytime.</span>
       </div>
     </footer>
 
@@ -1940,19 +2260,45 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
 
   const prebetEl = $('[data-prebet]') as HTMLElement
   const heldEl = $('[data-held]') as HTMLElement
-  const heldSideEl = $('[data-held-side]')
   const heldEntryEl = $('[data-held-entry]')
-  const heldLblEl = $('[data-held-lbl]')
-  const heldNumEl = $('[data-held-num]') as HTMLElement
-  const heldDeltaEl = $('[data-held-delta]') as HTMLElement
-  const heldMeterEl = $('[data-held-meter]') as HTMLElement
-  const heldHintEl = $('[data-held-hint]') as HTMLElement
-  const heldCtaEl = $('[data-held-cta]') as HTMLButtonElement
+  const heldNoteEl = $('[data-held-note]') as HTMLElement
+  // Per-side position cards ("Exit Tickets"). One bundle of refs per side.
+  type PosRefs = {
+    card: HTMLElement
+    ctr: HTMLElement
+    eyebrow: HTMLElement
+    hero: HTMLElement
+    sub: HTMLElement
+    math: HTMLElement
+    pending: HTMLElement
+    ifWin: HTMLElement
+    gross: HTMLElement
+    ifLose: HTMLElement
+    cta: HTMLButtonElement
+  }
+  const posRefs = (k: 'up' | 'down'): PosRefs => ({
+    card: $(`[data-pos-${k}]`) as HTMLElement,
+    ctr: $(`[data-pos-${k}-ctr]`) as HTMLElement,
+    eyebrow: $(`[data-pos-${k}-eyebrow]`) as HTMLElement,
+    hero: $(`[data-pos-${k}-hero]`) as HTMLElement,
+    sub: $(`[data-pos-${k}-sub]`) as HTMLElement,
+    math: $(`[data-pos-${k}-math]`) as HTMLElement,
+    pending: $(`[data-pos-${k}-pending]`) as HTMLElement,
+    ifWin: $(`[data-pos-${k}-if]`) as HTMLElement,
+    gross: $(`[data-pos-${k}-gross]`) as HTMLElement,
+    ifLose: $(`[data-pos-${k}-iflose]`) as HTMLElement,
+    cta: $(`[data-pos-${k}-cta]`) as HTMLButtonElement,
+  })
+  const posUpRefs = posRefs('up')
+  const posDownRefs = posRefs('down')
 
   const tvlEl = $('[data-tvl]')
   const chgEl = $('[data-chg]')
   const yieldNumEl = $('[data-yield-num]')
   const yieldUnitEl = $('[data-yield-unit]')
+  const projBlockEl = $('[data-proj-block]') as HTMLElement
+  const stakeBlockEl = $('[data-stake-block]') as HTMLElement
+  const stakeValEl = $('[data-stake-val]')
   const projFromEl = $('[data-proj-from]')
   const projEarnEl = $('[data-proj-earn]')
   const projTierEl = $('[data-proj-tier]')
@@ -1996,6 +2342,7 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   const customMax = $('[data-custom-max]') as HTMLButtonElement
   const logoEl = $('[data-logo]') as HTMLAnchorElement
   const themeToggleEl = $('[data-theme-toggle]') as HTMLButtonElement
+  const muteToggleEl = $('[data-mute]') as HTMLButtonElement
 
   // ---------------------------------------------------------------- //
   //  5) interaction state
@@ -2067,22 +2414,33 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   fg.querySelectorAll('[data-bet]').forEach(btn => {
     btn.addEventListener('click', () => {
       if (gateSignIn()) return
-      // GLOBAL lock: ignore a click while a sponsored write is in flight.
-      if (host.data.txPending) return
+      // DUAL-SIDE + SERIALIZED: a tap routes to App's placeBet, which opens or GROWS
+      // the matching side's bucket. While a BET is in flight the tap is QUEUED (never
+      // a second concurrent bet tx); a conflicting write (cash-out / claim / supply /
+      // redeem / withdraw) blocks the tap in App's placeBet. The disabled state
+      // already greys an unavailable side; gate on `locked` AND on a non-bet write
+      // holding the lock (txPending) here as belt-and-suspenders against SF7
+      // equivocation (a multi-touch tap mid-supply reusing the same wallet coins).
       if (host.data.locked) return
+      if (host.data.txPending) return
       host.actions.placeBet(
         (btn as HTMLElement).dataset.bet === 'UP' ? 'UP' : 'DOWN',
       )
     })
   })
 
-  heldCtaEl.addEventListener('click', () => {
+  // Per-side cash-out / claim. Each side's CTA exits ONLY that bucket (or, once the
+  // round is settled, fires the shared auto-claim path). The two cards resolve
+  // independently — cashing out UP leaves DOWN open.
+  const onPosCta = (side: 'UP' | 'DOWN') => () => {
     if (host.data.txPending) return
     const h = host.data.held
     if (!h) return
     if (h.settled) host.actions.claimBet()
-    else host.actions.cashOutBet()
-  })
+    else host.actions.cashOutSide(side)
+  }
+  posUpRefs.cta.addEventListener('click', onPosCta('UP'))
+  posDownRefs.cta.addEventListener('click', onPosCta('DOWN'))
 
   logoEl.addEventListener('click', e => {
     e.preventDefault()
@@ -2135,6 +2493,25 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     } catch {
       /* noop — private mode etc. */
     }
+  })
+
+  // SOUND MUTE — reflect sfx.is_muted() (persisted in localStorage by sfx) into the
+  // header speaker icon; clicking toggles + persists via sfx.set_muted (which rides
+  // the master gain to 0 AND every cue early-returns while muted, so this silences
+  // EVERYTHING — taps, ticks, tension, heartbeat, win/loss). Independent of the
+  // settling-bip gate: muted == always silent; settling == silent regardless.
+  const renderMute = (): void => {
+    const m = sfx.is_muted()
+    muteToggleEl.innerHTML = ico(m ? 'volumeMute' : 'volume', 1.05)
+    muteToggleEl.classList.toggle('is-muted', m)
+    muteToggleEl.setAttribute('aria-pressed', m ? 'true' : 'false')
+    muteToggleEl.setAttribute('aria-label', m ? 'Unmute sound' : 'Mute sound')
+    muteToggleEl.title = m ? 'Sound off — tap to unmute' : 'Sound on — tap to mute'
+  }
+  renderMute()
+  muteToggleEl.addEventListener('click', () => {
+    sfx.toggle_mute()
+    renderMute()
   })
 
   // ---------------------------------------------------------------- //
@@ -2240,9 +2617,11 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   //  row reads "+$2.00  UP ✓" (green) / "−$1.00  DOWN ✗" (red). Re-rendered only
   //  when the newest entry's id changes (cheap; rows are otherwise immutable).
   let lastResultId = -1
-  // A signed P&L under the ONE money rule: "+$53" / "−$5.3" (Unicode minus for
-  // the loss sign; whole + separators at/above $10, 1 decimal below).
-  const fmtPnl = (usd: number): string => fmt_signed_usd(usd)
+  // A signed P&L in CENTS — "+$0.03" / "−$0.12" / "+$53" — matching the settle
+  // TOAST (announce_outcome) to the cent so a +$0.43 win never reads "+$0.4" and a
+  // +$0.03 win never reads "+$0.0" (ZERO). 2 decimals under $10, whole + separators
+  // above. The history ledger row and the toast share fmt_signed_cents now.
+  const fmtPnl = (usd: number): string => fmt_signed_cents(usd)
   function renderResults(): void {
     const rows = host.data.results
     const newest = rows[0]
@@ -2266,6 +2645,9 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
         )
       })
       .join('')
+    // D2: history now sources realized rows (wins INCLUDED) from the on-chain
+    // PositionRedeemed events, so the old "Past wins may not show after a refresh"
+    // apology no longer applies and was DELETED.
     resultsEl.innerHTML = `<div class="e05-results-head">Recent</div>${body}`
   }
 
@@ -2385,7 +2767,7 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
       const inBtn = document.createElement('button')
       inBtn.className = 'e05-link is-accent'
       if (d.connecting) inBtn.innerHTML = LOADING('Signing in')
-      else inBtn.textContent = 'Sign in with Google'
+      else inBtn.textContent = 'Sign in'
       inBtn.disabled = d.connecting
       inBtn.addEventListener('click', () => host.actions.signInGoogle())
       acctEl.appendChild(inBtn)
@@ -2409,7 +2791,23 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   //  12) ONE rAF — sync all foreground text from host.data
   // ---------------------------------------------------------------- //
   let raf = 0
+  // RAF ROBUSTNESS: a per-frame throw must NEVER permanently kill this loop while
+  // the React side keeps updating host.data (the screen would silently freeze). We
+  // run the body in a try, log ONCE, and ALWAYS reschedule from the finally.
+  let tickErrored = false
   function tick(): void {
+    try {
+      tickBody()
+    } catch (err) {
+      if (!tickErrored) {
+        tickErrored = true
+        console.error('[crash-e05] tick() frame error (loop kept alive):', err)
+      }
+    } finally {
+      raf = requestAnimationFrame(tick)
+    }
+  }
+  function tickBody(): void {
     const d = host.data
 
     // root locked class
@@ -2433,51 +2831,71 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     // the masthead reads "VALIDATING ROUND" with the hairline loader sweeping as a
     // motion cue, plus a small "Ns" settlement-window countdown when derivable.
     const validating = d.validating && !held
-    cdEyebrowEl.textContent = held
-      ? 'Round locks at settle'
-      : validating
-        ? 'Settling on-chain'
-        : d.cdWarn
-          ? 'Waiting for next round'
-          : 'Round locks in'
-    cdEyebrowEl.classList.toggle('is-warn', (d.cdWarn || validating) && !held)
-    cdTimeEl.classList.toggle('urgent', d.cdClass === 'urgent' && !validating)
-    // .validating shrinks the giant mono clock to fit the "VALIDATING ROUND" words
+    // HELD-BET SETTLING — the held analogue of `validating`: the held round is
+    // past expiry / settling, so the masthead must show the SAME editorial
+    // SETTLING treatment (shrunk "SETTLING ROUND" clock + the hairline loader
+    // sweep as the motion cue) instead of the old "…". The real mm:ss timer
+    // keeps showing the true remaining time for the WHOLE live round; only once
+    // the round is over does this settling treatment take over.
+    const heldSettling = Boolean(held && held.countdownSpecial === 'settling')
+    // The masthead reads the editorial settling state whenever EITHER the pre-bet
+    // validation window OR a held-bet settles — both swap the giant clock for the
+    // words + the sweeping hairline (no "…").
+    const settlingMasthead = validating || heldSettling
+    cdEyebrowEl.textContent = heldSettling
+      ? 'Settling on-chain'
+      : held
+        ? 'Round locks at settle'
+        : validating
+          ? 'Settling on-chain'
+          : d.cdWarn
+            ? 'Waiting for next round'
+            : 'Round locks in'
+    cdEyebrowEl.classList.toggle(
+      'is-warn',
+      heldSettling || ((d.cdWarn || validating) && !held),
+    )
+    cdTimeEl.classList.toggle('urgent', d.cdClass === 'urgent' && !settlingMasthead)
+    // .validating shrinks the giant mono clock to fit the "SETTLING ROUND" words
     // and the hairline loader animates an indeterminate sweep as the motion cue.
-    cdTimeEl.classList.toggle('validating', validating)
-    lockbarEl.parentElement?.classList.toggle('is-loading', validating)
-    if (validating) {
-      cdMmEl.textContent = 'VALIDATING ROUND'
-      // small settlement-window countdown when a deadline is derivable, else blank
-      // (the label + sweeping hairline carry the state on their own).
-      cdSsEl.textContent =
-        d.validatingSecs != null ? ' ' + d.validatingSecs + 's' : ''
-    } else if (held && held.countdownSpecial === 'done') {
-      cdMmEl.textContent = 'DONE'
-      cdSsEl.textContent = ''
-    } else if (held && held.countdownSpecial === 'pending') {
-      cdMmEl.textContent = '…'
-      cdSsEl.textContent = ''
+    cdTimeEl.classList.toggle('validating', settlingMasthead)
+    lockbarEl.parentElement?.classList.toggle('is-loading', settlingMasthead)
+    if (settlingMasthead) {
+      // Held-settling and pre-bet validation share the editorial treatment. BOTH
+      // show the live ~15s settlement-window "Ns" counter (item #5): held-settling
+      // derives it from the position's expiry (held.settlingSecs), pre-bet from the
+      // oracle's expiry (d.validatingSecs). Blank only once the window elapses (the
+      // label + sweeping hairline then carry the state on their own).
+      cdMmEl.textContent = heldSettling ? 'SETTLING ROUND' : 'VALIDATING ROUND'
+      const secs = heldSettling
+        ? (held ? held.settlingSecs : null)
+        : d.validatingSecs
+      cdSsEl.textContent = secs != null ? ' ' + secs + 's' : ''
     } else if (held) {
+      // LIVE held round — show the REAL remaining mm:ss (never "…").
       cdMmEl.textContent = held.countdownText.split(':')[0]
       cdSsEl.textContent = ':' + (held.countdownText.split(':')[1] ?? '00')
     } else {
       cdMmEl.textContent = d.countdownMm
       cdSsEl.textContent = ':' + d.countdownSs
     }
-    // While validating the hairline sweeps indeterminately (CSS animation), so the
-    // inline width is irrelevant; otherwise it drives the lock-drain fill.
-    lockbarEl.style.width = validating ? '' : (d.lockFrac * 100).toFixed(1) + '%'
+    // While the settling treatment is on the hairline sweeps indeterminately (CSS
+    // animation), so the inline width is irrelevant; otherwise it drives the
+    // lock-drain fill.
+    lockbarEl.style.width = settlingMasthead
+      ? ''
+      : (d.lockFrac * 100).toFixed(1) + '%'
 
     // pre-bet vs held. Belt-and-suspenders: the held cluster (and its cash-out /
     // claim CTA) ONLY renders when signed in AND a live bet is held. `held` is
     // already null when signed-out (App clears the bet on disconnect), but gate
     // on d.signedIn too so NO cash-out control can ever paint logged-out.
     const showHeld = Boolean(held) && d.signedIn
-    // ACCUMULATION (Bug 4): keep the bet controls LIVE alongside the held cluster
-    // while the held round is STILL BETTABLE (not locked / pending / settled), so
-    // the user can ADD to the same-key position. Once the round locks or starts
-    // settling, hide the controls (no more bets possible) and show held only.
+    // DUAL-SIDE MODEL: keep the UP/DOWN bet buttons LIVE alongside the held cluster
+    // while the round is STILL BETTABLE (not locked / pending / settled), so the
+    // user can keep GROWING the position on EITHER side (both are enabled via
+    // d.up/down.enabled — a tap folds into that side's bucket). Once the round locks
+    // or starts settling, hide the controls and show the held cluster only.
     const heldStillBettable =
       showHeld && !d.locked && !held!.pending && !held!.settled
     const showPrebet = !showHeld || heldStillBettable
@@ -2501,11 +2919,23 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
       // is the WAGER — the SAME constant on both buttons (the selected stake = what
       // you pay, silently incl. the on-chain 3% rake; the wager never varies by
       // side). The multiple (win / wager) is the secondary number next to the WIN.
-      winUp.textContent = fmtC(d.up.win)
-      winDown.textContent = fmtC(d.down.win)
-      multUp.textContent = d.up.multiple != null ? ' · ' + fmtMult(d.up.multiple) : ''
+      // NO GATING (owner): both sides ALWAYS render their REAL numbers — a near-1.0x
+      // favorite shows ~1.0x, a 1.7x longshot shows 1.7x, both bettable. The WIN is
+      // real once a per-side quote has loaded (costUsd != null == quoted); before
+      // that the number would be the static stake×2 fallback, so render MUTED
+      // "Pricing…" (the .is-pricing class greys the headline). "DOUBLE YOUR MONEY"
+      // only when the REAL multiple is genuinely ~2x (d.up.double), never slapped on
+      // a 1.0x/1.7x side.
+      const upQuoted = d.up.costUsd != null
+      const downQuoted = d.down.costUsd != null
+      winUp.textContent = upQuoted ? fmtC(d.up.win) : 'Pricing…'
+      winDown.textContent = downQuoted ? fmtC(d.down.win) : 'Pricing…'
+      winUp.classList.toggle('is-pricing', !upQuoted)
+      winDown.classList.toggle('is-pricing', !downQuoted)
+      multUp.textContent =
+        upQuoted && d.up.multiple != null ? ' · ' + fmtMult(d.up.multiple) : ''
       multDown.textContent =
-        d.down.multiple != null ? ' · ' + fmtMult(d.down.multiple) : ''
+        downQuoted && d.down.multiple != null ? ' · ' + fmtMult(d.down.multiple) : ''
       costUp.textContent =
         d.up.costUsd != null ? 'Wager ' + fmtC(d.up.costUsd) : ' '
       costDown.textContent =
@@ -2513,9 +2943,11 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
       doubleUp.classList.toggle('is-on', d.up.double)
       doubleDown.classList.toggle('is-on', d.down.double)
       // When NOT signed in, keep controls ENABLED so a click can fire and route
-      // to the Google sign-in (gateSignIn). The affordability/enabled gating
-      // only applies once the user is in. The GLOBAL lock (pending) disables both
-      // sides outright so no second bet can start while a write is in flight.
+      // to the Google sign-in (gateSignIn). The affordability/enabled gating only
+      // applies once the user is in. STACKABLE: bet taps do NOT set `pending`, so
+      // the buttons stay tappable while bets are mid-flight (the optimistic stack).
+      // `pending` is the CONFLICTING-action lock (cash out / claim / house) — it
+      // freezes betting only while the position is being settled, which is correct.
       ;(fg.querySelector('[data-bet="UP"]') as HTMLButtonElement).disabled =
         d.signedIn && (pending || !d.up.enabled || d.busyUp)
       ;(fg.querySelector('[data-bet="DOWN"]') as HTMLButtonElement).disabled =
@@ -2561,52 +2993,112 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     }
 
     // Held cluster renders whenever a live bet is held — independently of the
-    // pre-bet controls, which may be shown SIMULTANEOUSLY while the round is
-    // still bettable (accumulation, Bug 4).
+    // pre-bet controls, which may be shown SIMULTANEOUSLY while the round is still
+    // bettable (accumulation). TWO DISTINCT POSITIONS: a shared header + up to two
+    // per-side cards, each with its OWN cash-out button.
     if (showHeld && held) {
-      // breathe the chart ONCE when the held side first appears (a fresh bet)
-      const s = held.isUp ? 'UP' : 'DOWN'
-      if (s !== lastBetSide) {
+      heldEntryEl.textContent = held.entryStr
+
+      // Chart breathe: when exactly ONE side is held, breathe that side (the chart
+      // tint already follows chartWinning). When both are held, don't flap the
+      // breathe — leave the last side cue in place.
+      const onlyUp = held.sides.up && !held.sides.down
+      const onlyDown = held.sides.down && !held.sides.up
+      const s: 'UP' | 'DOWN' | null = onlyUp ? 'UP' : onlyDown ? 'DOWN' : null
+      if (s != null && s !== lastBetSide) {
         baseHandle.breathe(s)
         lastBetSide = s
       }
 
-      // innerHTML (not textContent) so the inline boxicon arrow renders. The
-      // value is fully app-controlled (boolean -> fixed string), never user text.
-      heldSideEl.innerHTML = held.isUp ? `${ico('up')} UP` : `${ico('down')} DOWN`
-      heldSideEl.className = 'e05-tag ' + (held.isUp ? 'up' : 'down')
-      heldEntryEl.textContent = held.entryStr
-      heldLblEl.textContent = held.label
-      heldNumEl.textContent = held.cashoutStr ?? '—'
-      heldNumEl.className =
-        'e05-held-num tnum ' +
-        (held.cashoutStr == null ? '' : held.winning ? 'win' : 'lose')
-      heldDeltaEl.textContent = held.deltaStr
-      heldDeltaEl.className =
-        'e05-held-delta tnum ' + (held.winning ? 'pos' : held.cashoutStr ? 'neg' : '')
-      heldMeterEl.style.width = held.meterPct + '%'
-      heldMeterEl.className = held.winning ? 'win' : ''
-      heldHintEl.hidden = !held.pending
-      if (held.pending)
-        heldHintEl.textContent =
-          'Trading frozen until the oracle settles — payout auto-claims.'
+      // Render ONE "Exit Ticket". The card CHROME (state gradient / border / glow /
+      // hero colour) binds to the P&L SIGN via vm.state — NOT the side — re-skinning
+      // ATOMICALLY here on the same tick that sets the hero digit. While SETTLING the
+      // card is forced NEUTRAL grey (outcome unknown — never fake-tint) and the NOW
+      // block is swapped for the two honest IF→get outcomes.
+      const renderPos = (vm: SideVM | undefined, r: PosRefs) => {
+        if (!vm) {
+          r.card.hidden = true
+          return
+        }
+        r.card.hidden = false
+        r.ctr.textContent = vm.contractsStr.replace(' contracts', ' ctr')
+        // CARD STATE class — drives ALL chrome (see .e05-pos.is-* rules). While
+        // settling we force 'lock' (neutral, outcome unknown).
+        const stateCls = vm.settling ? 'lock' : vm.state
+        r.card.className = 'e05-pos is-' + stateCls
 
-      // CTA: CLAIM (settled) vs CASH OUT (live)
-      heldCtaEl.className = 'e05-held-cta' + (held.winning ? ' win' : '')
-      if (held.settled) {
-        heldCtaEl.innerHTML = held.busyClaim
-          ? LOADING('Claiming')
-          : 'Claiming winnings…'
-        // GLOBAL lock: block the claim CTA while ANY write is pending (unless it
-        // is THIS claim, which keeps its spinner via busyClaim).
-        heldCtaEl.disabled = pending || held.busyClaim
+        if (vm.settling) {
+          // LOCKED — outcome unknown. Swap the NOW block for "SETTLING ROUND…" +
+          // payout pending, show BOTH honest outcomes, disable the cash-out. The
+          // rail/chrome stay NEUTRAL grey (never fake-tint an unknown outcome).
+          r.eyebrow.textContent = 'Settling round…'
+          r.hero.textContent = '—'
+          r.hero.className = 'e05-pos-hero tnum is-lock'
+          r.sub.textContent = 'payout pending'
+          r.sub.className = 'e05-pos-sub is-lock'
+          r.math.hidden = true
+          r.pending.hidden = true
+          r.ifWin.textContent = vm.ifWinsStr
+          r.gross.hidden = true
+          r.ifLose.hidden = false
+          r.ifLose.textContent = vm.ifLosesStr
+          r.cta.className = 'e05-pos-cta is-inert'
+          // While the oracle has SETTLED, the shared auto-claim is in flight — show
+          // that motion; otherwise the round is still settling (no cash-out).
+          r.cta.innerHTML = held.settled
+            ? LOADING('Claiming')
+            : 'Cash out closed · settling'
+          r.cta.disabled = true
+          return
+        }
+
+        // LIVE — NOW block reflects the live P&L.
+        r.eyebrow.textContent = 'Now · if you exit'
+        r.hero.textContent = vm.liveNetStr
+        r.hero.className = 'e05-pos-hero tnum is-' + vm.state
+        r.sub.textContent = vm.nowSublabel
+        r.sub.className = 'e05-pos-sub is-' + vm.state
+        r.math.hidden = false
+        r.math.textContent = `${vm.exitValueStr} · ${vm.paidStr}`
+        r.pending.hidden = true
+        // The conditional settle line — label stays quiet/grey; the PRIZE NUMBER is
+        // bright high-contrast NEUTRAL (never green/red — it is the conditional, not
+        // live P&L). label + number are app-controlled strings (no user input).
+        r.ifWin.innerHTML =
+          `IF ${vm.side} WINS AT SETTLE ` +
+          `<span class="e05-pos-if-num">${vm.profitIfRightStr}</span>`
+        r.gross.hidden = false
+        r.gross.textContent = vm.totalIfSettledStr
+        r.ifLose.hidden = true
+
+        // Cash-out button — signed live net, green/red, agreeing with the hero.
+        r.cta.className =
+          'e05-pos-cta ' + (vm.cashoutPositive ? 'net-pos' : 'net-neg')
+        if (held.settled) {
+          r.cta.innerHTML = LOADING('Claiming')
+          r.cta.disabled = pending || held.busyClaim
+        } else {
+          r.cta.innerHTML = vm.busyCashout
+            ? LOADING('Cashing out')
+            : vm.cashoutCtaStr
+          r.cta.disabled =
+            pending || vm.busyCashout || held.pending || !vm.canCashout
+        }
+      }
+      renderPos(held.sides.up, posUpRefs)
+      renderPos(held.sides.down, posDownRefs)
+
+      // Shared note: trading-frozen (pending) or the settling auto-claim line.
+      if (held.pending) {
+        heldNoteEl.hidden = false
+        heldNoteEl.textContent =
+          'Trading frozen until the oracle settles — your payout auto-claims if you’re right.'
+      } else if (held.settling) {
+        heldNoteEl.hidden = false
+        heldNoteEl.textContent =
+          'Round over — settling on-chain. Each side resolves on its own; winners auto-claim.'
       } else {
-        heldCtaEl.innerHTML = held.busyCashout
-          ? LOADING('Cashing out')
-          : 'Cash out' +
-            (held.cashoutStr != null ? ' · ' + held.cashoutStr : '')
-        heldCtaEl.disabled =
-          pending || held.busyCashout || held.pending || !held.canCashout
+        heldNoteEl.hidden = true
       }
     }
 
@@ -2628,9 +3120,20 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     chgEl.textContent = hs.shareChgStr
     yieldNumEl.textContent = hs.yieldStr
     yieldUnitEl.textContent = hs.yieldUnit
-    projFromEl.textContent = hs.projFromStr
-    projEarnEl.textContent = hs.projEarnStr
-    projTierEl.textContent = hs.projTierStr
+    // UX item #6: while HOLDING, the prominent house figure is the user's REAL
+    // stake (labeled "Your stake") — NOT the betting wallet. The depositable-funds
+    // PROJECTION is shown to NON-holders only. Toggle the two blocks accordingly.
+    if (hs.hasPosition && hs.positionValueStr != null) {
+      stakeBlockEl.hidden = false
+      projBlockEl.hidden = true
+      stakeValEl.textContent = hs.positionValueStr
+    } else {
+      stakeBlockEl.hidden = true
+      projBlockEl.hidden = false
+      projFromEl.textContent = hs.projFromStr
+      projEarnEl.textContent = hs.projEarnStr
+      projTierEl.textContent = hs.projTierStr
+    }
     utilEl.textContent = hs.utilizationStr
     sharePriceEl.textContent = hs.sharePriceStr
     yourStakeRow.hidden = hs.yourStakeStr == null
@@ -2709,8 +3212,7 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     } else {
       toastEl.hidden = true
     }
-
-    raf = requestAnimationFrame(tick)
+    // (the reschedule lives in tick()'s finally — keeps the loop alive on a throw)
   }
   function fmtMult(m: number): string {
     return (m >= 10 ? m.toFixed(0) : m.toFixed(1)).replace(/\.0$/, '') + 'x'

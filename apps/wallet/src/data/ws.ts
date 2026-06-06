@@ -106,6 +106,12 @@ let reconnect_timeout: ReturnType<typeof setTimeout> | null = null;
 let reconnect_delay = 1000;
 /** Set when the server explicitly rejected/replaced us → suppress reconnect. */
 let was_rejected = false;
+/** Consecutive reconnect attempts; reset on a successful open. Capped so a dead
+ *  backend can't pin the login on an infinite "signing you in" spinner. */
+let reconnect_attempts = 0;
+/** After this many consecutive failures we stop cleanly and leave the socket
+ *  closed (status 'disconnected') so the app-level safety net can redirect. */
+const MAX_RECONNECT_ATTEMPTS = 8;
 
 /** The bridged signer + address (registered by `useWsLifecycle` from React). */
 let signer: PersonalMessageSigner | null = null;
@@ -375,7 +381,10 @@ function connect(address: string): void {
 
   ws.onopen = () => {
     clearTimeout(connect_timeout);
+    // The transport reached the server — reset backoff AND the attempt cap so a
+    // post-open drop (auth/network) still gets the full retry budget afresh.
     reconnect_delay = 1000;
+    reconnect_attempts = 0;
     // Server sends `signatureRequest` next; we move to 'connected' on accept.
     setState({ status: 'authenticating' });
   };
@@ -394,7 +403,6 @@ function connect(address: string): void {
 
   ws.onclose = () => {
     clearTimeout(connect_timeout);
-    const was_active = state.status === 'connected' || state.status === 'authenticating';
     failAllPending('Connection closed.');
     setState({ status: 'disconnected', ws: null, address: null });
 
@@ -403,15 +411,31 @@ function connect(address: string): void {
       return; // explicit rejection/replacement → no reconnect
     }
 
-    // Exponential backoff reconnect (1s → 30s), reset to 1s on a successful accept.
-    // Only if we still have a signed-in address (cleared on explicit disconnect).
-    if (was_active && connect_address) {
-      reconnect_timeout = setTimeout(() => {
-        reconnect_timeout = null;
-        if (connect_address) connect(connect_address);
-      }, reconnect_delay);
-      reconnect_delay = Math.min(reconnect_delay * 2, 30_000);
+    // Reconnect on ANY non-rejected close while a connect target is set — including
+    // a FIRST-connect failure (refused/timed-out, where onopen never fired and status
+    // stayed 'connecting'). `was_rejected` is the SOLE suppressor; `connect_address`
+    // is cleared only on explicit disconnect / sign-out.
+    if (!connect_address) return;
+
+    // Cap consecutive failures so a dead backend can't pin the login on a permanent
+    // "signing you in" spinner: after the cap we stop cleanly and leave the socket
+    // closed (status 'disconnected') for the app-level safety net to redirect.
+    if (reconnect_attempts >= MAX_RECONNECT_ATTEMPTS) {
+      console.warn(
+        `[ws] giving up after ${reconnect_attempts} reconnect attempts — backend unreachable.`,
+      );
+      reconnect_attempts = 0;
+      reconnect_delay = 1000;
+      return;
     }
+
+    // Exponential backoff reconnect (1s → 30s); reset on a successful open (onopen).
+    reconnect_attempts += 1;
+    reconnect_timeout = setTimeout(() => {
+      reconnect_timeout = null;
+      if (connect_address) connect(connect_address);
+    }, reconnect_delay);
+    reconnect_delay = Math.min(reconnect_delay * 2, 30_000);
   };
 }
 
@@ -422,6 +446,7 @@ function disconnect(): void {
     reconnect_timeout = null;
   }
   reconnect_delay = 1000;
+  reconnect_attempts = 0; // fresh retry budget for the next sign-in
   connect_address = null;
   was_rejected = true; // suppress the reconnect onclose would otherwise queue
   failAllPending('Disconnected.');

@@ -48,6 +48,8 @@
 
 **Loss is bounded to the sandbox at the Move layer — on BOTH tiers** (idle/NAVI lend-as-is + DEGEN spot swap both route through `agent_consume`; funds never leave Move custody). The cage caps loss to the sandbox, **never the main wallet**, but does **not** guarantee the sandbox is preserved (markets can move against a spot position). **No margin leg = no un-caged custody anywhere.**
 
+> **In-flight hardening (don't claim BOTH tiers as fully caged yet).** The `idle/deployed` and **NAVI-supply** paths are caged today; the **swap leg and the NAVI-*withdraw* leg are being hardened** (pinned pool + asset-bound tickets). **Until the wallet republishes, treat those two legs as not-yet-fully-VM-caged** — the "funds never leave Move custody" invariant is the target on those paths, not yet the shipped guarantee.
+
 ---
 
 ## 1. Two balances, per-user cages (the trust model)
@@ -145,7 +147,7 @@ Per-user custody. **Generic `Vault<phantom T>`** over one primary coin type: one
 
 **Coin-type decision (built):** the core proves structure + gate end-to-end over a single test coin (`TUSD`) with **zero external deps**. Multi-coin reality (per-asset NAVI supply; SUI/USDC for the DeepBook spot leg) is handled when adapters land — **one `Vault<T>` per coin** and/or new `Balance` slots (adapter TODOs mark exactly where). Generic core means adapters *specialize/extend*, they don't reshape the primitive.
 
-> **The pattern every adapter follows** (the invariant that makes the cage safe — **on both tiers**): `vault↔mandate check` → `consume_budget` 5-assert gate → **real protocol round-trip (funds never leave Move)** → emit the log event. Step 4 of `agent_consume` is the only thing that changes. **The invariant holds for both MVP venues (NAVI lend-as-is + DeepBook spot swap) — both are object-cap / Coin-in/Coin-out compositions.** (Margin would break it — sender-owned ops sit outside the gate — which is exactly why it's excluded, §10.)
+> **The pattern every adapter follows** (the invariant that makes the cage safe — **on both tiers**): `vault↔mandate check` → `consume_budget` 5-assert gate → **real protocol round-trip (funds never leave Move)** → emit the log event. Step 4 of `agent_consume` is the only thing that changes. **The invariant is the intended shape for both MVP venues (NAVI lend-as-is + DeepBook spot swap) — both are object-cap / Coin-in/Coin-out compositions.** (Margin would break it — sender-owned ops sit outside the gate — which is exactly why it's excluded, §10.) **In flight:** the **swap leg and the NAVI-withdraw leg are being hardened** (pinned pool + asset-bound tickets); until the wallet republishes, treat those two legs as not-yet-fully-caged — the "funds never leave Move" round-trip is verified today for `idle/deployed` + NAVI-supply, and is the target (not yet the shipped guarantee) for swap + NAVI-withdraw.
 
 ### 2.3 NAVI adapter (SAFE dial — lend-as-is, multi-asset) — ✅ BUILT & TESTED (24) · `sources/navi.move`
 

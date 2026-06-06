@@ -42,6 +42,12 @@ export interface AuthState {
   sponsored: boolean;
   /** whether real Enoki OAuth is wired. When false, signInWithGoogle throws. */
   enokiEnabled: boolean;
+  /** true once Enoki is wired AND the Google zkLogin wallet has registered into the
+   *  wallet-standard registry — i.e. signInWithGoogle can actually run without
+   *  throwing. The Enoki wallet registers via a SEPARATE async effect that hasn't
+   *  completed at first mount, so this flips from false→true a frame after load.
+   *  Auto-sign-in MUST gate on this to avoid the mount-order race. */
+  canSignIn: boolean;
   /** Trigger Google zkLogin. Resolves to the address if already connected; the
    *  real path navigates the page away (resolves to '' before navigation). THROWS
    *  if Enoki/the Google wallet is unavailable (App redirects to suize.io). */
@@ -68,6 +74,12 @@ export function useAuth(): AuthState {
 
   const realAddress = account?.address ?? null;
   const sponsored = Boolean(currentWallet && isEnokiWallet(currentWallet));
+
+  // True only once Enoki is wired AND the Google zkLogin wallet has registered.
+  // This is exactly the precondition signInWithGoogle's safety throw checks, so
+  // gating auto-sign-in on it guarantees the call won't throw the "unavailable"
+  // error during the mount-order race.
+  const canSignIn = ENOKI_ENABLED && Boolean(googleWallet);
 
   const ownerAddress = realAddress;
   const status: AuthState['status'] = realAddress
@@ -98,6 +110,7 @@ export function useAuth(): AuthState {
     ownerAddress,
     sponsored,
     enokiEnabled: ENOKI_ENABLED,
+    canSignIn,
     signInWithGoogle,
   };
 }

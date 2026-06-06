@@ -1,0 +1,4 @@
+# publish scratch / backups (never commit)
+.fresh-publish.*
+Published.toml.bak-*
+build/

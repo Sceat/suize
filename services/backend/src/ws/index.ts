@@ -1,10 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // @suize/backend — the single Enoki-verified WebSocket server.
 //
-// Mirrors aresrpg's pattern (services/backend ALONGSIDE the existing HTTP, NOT
-// replacing it — /sponsor, /execute, /waitlist stay live over HTTP for crash +
-// landing; handle ops are WS-ONLY, the unauthenticated /handle/* HTTP routes are
-// no longer mounted). ONE WebSocket per address; auth happens AT the connection:
+// Mirrors aresrpg's pattern. Sponsorship (sponsor/execute) AND handle ops are now
+// WS-ONLY: both the wallet and crash route them over THIS authenticated socket.
+// The public HTTP POST /sponsor + /execute routes and the unauthenticated
+// /handle/* routes are no longer mounted. ONE WebSocket per address; auth happens
+// AT the connection:
 //
 //   1. UPGRADE  GET /ws?address=0x… — read + validate the zkLogin address from
 //      the query param, KICK any existing socket for that address, then
@@ -38,6 +39,7 @@ import {
   type ClientPacket,
   type ServerPacket,
 } from "@suize/shared/protocol";
+import { config } from "../config";
 import { suiClient, createSponsor, executeSponsor, SponsorError } from "../sponsor";
 import {
   availableCore,
@@ -103,8 +105,8 @@ export const wsConnectionCount = (): number => sockets.size;
 // RATE LIMIT — per-AUTHENTICATED-address token bucket on costly frames. Same
 // shape/intent as the HTTP /sponsor and /handle/claim limiters (sponsor/index.ts,
 // handle/index.ts): a process-local bucket is enough to blunt gas-pool drain
-// abuse from a single authed socket; Enoki's allow-list + Redis idempotency are
-// the hard caps. Keyed by ws.data.address (the verified subject), NOT by socket,
+// abuse from a single authed socket; Enoki's allow-list + the on-chain atomic
+// leaf-mint are the hard caps. Keyed by ws.data.address (the verified subject), NOT by socket,
 // so a reconnect can't reset the bucket. Burst 5, sustained 2/sec — generous for
 // real interactive use (sponsor → sign → execute), tight against a spam loop.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -144,6 +146,7 @@ setInterval(() => {
 // ─────────────────────────────────────────────────────────────────────────────
 const verifyAuth = async (
   data: WsData,
+  expectedNonce: string,
   bytes: string,
   signature: string,
 ): Promise<{ ok: true } | { ok: false; reason: string }> => {
@@ -158,7 +161,10 @@ const verifyAuth = async (
     const signer = publicKey.toSuiAddress();
 
     // The signed message must carry the exact nonce we issued for this socket.
-    if (signedNonce !== data.nonce) {
+    // `expectedNonce` is the value BURNED from ws.data before this call, so a
+    // replayed second attempt (which sees data.nonce === "") can never match.
+    // An empty expectedNonce (already-burned) is itself a hard reject.
+    if (!expectedNonce || signedNonce !== expectedNonce) {
       return { ok: false, reason: "nonce mismatch" };
     }
     // The recovered signer must be the address bound at upgrade. (zkLogin gives a
@@ -194,7 +200,15 @@ const handleSignatureResponse = async (ws: WsSocket, frame: ClientPacket): Promi
     return;
   }
 
-  const result = await verifyAuth(ws.data, bytes, signature);
+  // BURN the nonce: single-use. We capture it, then clear ws.data.nonce so that a
+  // SECOND signatureResponse — even one carrying a valid signature over the same
+  // nonce — verifies against "" and is rejected ("nonce mismatch"). This closes
+  // the replay window for a FAILED first attempt (the duplicate guard above only
+  // covers a SUCCESSFUL first attempt, where authenticated is already true).
+  const expectedNonce = ws.data.nonce;
+  ws.data.nonce = "";
+
+  const result = await verifyAuth(ws.data, expectedNonce, bytes, signature);
   if (!result.ok) {
     reject(ws, WS_CLOSE.AUTH_FAILED, result.reason);
     return;
@@ -206,6 +220,31 @@ const handleSignatureResponse = async (ws: WsSocket, frame: ClientPacket): Promi
     clearTimeout(ws.data.authTimeout);
     ws.data.authTimeout = undefined;
   }
+
+  // SINGLE-SOCKET ENFORCEMENT — now, AFTER proof of address control (H2). We only
+  // evict an EXISTING AUTHENTICATED socket for the same address; an unauthenticated
+  // incumbent (a half-open connect that never signed) is left alone — it will die on
+  // its own auth timeout. Crucially, this means a newcomer can never kick a session
+  // it hasn't out-authenticated, and an UNAUTH newcomer can never kick an AUTH
+  // incumbent. The registry only ever holds AUTHENTICATED sockets (we register
+  // below), so any socket found here is already authenticated.
+  const incumbent = sockets.get(ws.data.address);
+  if (incumbent && incumbent !== ws) {
+    const old = incumbent.data;
+    if (old.authTimeout) clearTimeout(old.authTimeout);
+    if (old.pingInterval) clearInterval(old.pingInterval);
+    sendPacket(incumbent, { type: "connectionRejected", data: { reason: "connected from another device" } });
+    try {
+      incumbent.close(WS_CLOSE.REPLACED, "connected from another device");
+    } catch {
+      // socket already closed
+    }
+  }
+  // This authenticated socket is now THE socket for the address (push routing +
+  // single-device). Registering only authenticated sockets keeps an unauthenticated
+  // probe from ever clobbering a live session's registry slot.
+  sockets.set(ws.data.address, ws);
+
   sendPacket(ws, { type: "connectionAccepted", data: { address: ws.data.address } });
 
   // Real on-chain read: push the address's current SUI balance. A transient RPC
@@ -334,7 +373,11 @@ const route = async (ws: WsSocket, frame: ClientPacket): Promise<void> => {
         return;
       }
       try {
-        // Claim targets the verified session address — un-spoofable.
+        // Claim targets the verified session address — un-spoofable. The response
+        // now ALSO carries the sponsored setDefault (set_reverse_lookup) bytes +
+        // digest the wallet must sign (user's zkLogin signer) and execute via the
+        // existing executeRequest path, so the reverse record is set on-chain (a
+        // leaf subname does not auto-set it). Forwarded verbatim on the same frame.
         const data = await claimCore(frame.data?.name ?? "", address);
         sendPacket(ws, { type: "handleClaimResponse", id, data });
         // The claim mutated on-chain state for this address; nudge a fresh balance.
@@ -367,26 +410,29 @@ export const tryUpgrade = (
   url: URL,
   server: Server<WsData>,
 ): Response | undefined => {
+  // Origin allow-list — mirror the HTTP CORS stance (config.allowedOrigins, see
+  // http.ts): an Origin that is present but NOT allow-listed is a cross-site
+  // socket attempt (CSWSH) — reject the upgrade with 403. A request with NO
+  // Origin (native / non-browser clients) is allowed, matching CORS, which only
+  // gates browser-supplied Origins. Checked BEFORE the address format.
+  const origin = req.headers.get("origin");
+  if (origin && !config.allowedOrigins.includes(origin)) {
+    return new Response("forbidden origin", { status: 403 });
+  }
+
   const address = url.searchParams.get("address") ?? "";
   if (!SUI_ADDRESS_RE.test(address)) {
     return new Response("invalid address format", { status: 400 });
   }
 
-  // One socket per address: kick any existing connection (single-device).
-  const existing = sockets.get(address);
-  if (existing) {
-    const old = existing.data;
-    if (old.authTimeout) clearTimeout(old.authTimeout);
-    if (old.pingInterval) clearInterval(old.pingInterval);
-    sendPacket(existing, { type: "connectionRejected", data: { reason: "connected from another device" } });
-    try {
-      existing.close(WS_CLOSE.REPLACED, "connected from another device");
-    } catch {
-      // socket already closed
-    }
-    sockets.delete(address);
-  }
-
+  // SECURITY: we do NOT evict any existing socket for this address HERE. The
+  // `address` is an UNVERIFIED query param at upgrade time — an attacker who knows
+  // a victim's public zkLogin address could otherwise open `/ws?address=<victim>`
+  // and instantly kick the victim's authenticated session WITHOUT ever proving
+  // control of the address (a pre-auth denial-of-service). The newcomer is admitted
+  // UNAUTHENTICATED; single-socket eviction happens only AFTER it proves control of
+  // the address (handleSignatureResponse), and only ever evicts ANOTHER
+  // AUTHENTICATED socket for the same address. See the registry note in `open`.
   const data: WsData = { address, authenticated: false, nonce: crypto.randomUUID() };
   const ok = server.upgrade(req, { data });
   if (ok) return undefined; // Bun handles the 101; do NOT return a Response.
@@ -401,9 +447,12 @@ export const websocketHandler = {
   idleTimeout: 120,
 
   open(ws: WsSocket) {
-    // Register BEFORE issuing the challenge so a racing re-connect for the same
-    // address sees this socket and can kick it.
-    sockets.set(ws.data.address, ws);
+    // We do NOT register the socket here — the address→socket registry now holds
+    // ONLY authenticated sockets (set in handleSignatureResponse after proof of
+    // control). An unauthenticated socket that clobbered the registry slot could
+    // be used to kick a live authenticated session before ever signing (H2), so it
+    // stays out of the map until it authenticates. Until then it is a transient,
+    // anonymous, auth-window-bounded connection.
 
     // Issue the auth challenge: the nonce was minted at upgrade and lives in
     // ws.data; the client folds it into buildAuthMessage(nonce) and signs it.
@@ -461,8 +510,10 @@ export const websocketHandler = {
     if (authTimeout) clearTimeout(authTimeout);
     if (pingInterval) clearInterval(pingInterval);
     // Only clear the registry if THIS socket is still the active one for the
-    // address (guards the race where an old socket's close fires after a new
-    // socket has already replaced it in the map).
+    // address. The registry holds only authenticated sockets, so an unauthenticated
+    // socket closing is a no-op here (it was never registered) — it therefore can
+    // never evict the authenticated incumbent's slot. This still guards the race
+    // where a replaced socket's close fires after its successor took the slot.
     if (sockets.get(address) === ws) sockets.delete(address);
   },
 };

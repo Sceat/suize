@@ -71,12 +71,14 @@ export function JournalBalanceHero({ totalUsd, showDemoDelta = false }: JournalB
 
   return (
     <div className="hero">
-      <div className="hero__lab">All your money, today</div>
+      {/* No label here — JournalShell already renders the "All your money, today"
+          eyebrow above this leaf. The grand total is NEUTRAL ink (not the gradient):
+          it reads as money, not decoration — the accent is spent elsewhere. */}
       <div className="hero__num">
         <span className="cur" aria-hidden="true">
           $
         </span>
-        <span className="grad mono">{fmt(value)}</span>
+        <span className="ng">{fmt(value)}</span>
       </div>
       <div className="hero__sub">
         <span>Across three accounts</span>

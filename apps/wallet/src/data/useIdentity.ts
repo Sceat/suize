@@ -23,7 +23,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { getHandleForAddress } from './suins';
+import { getCachedHandle, getHandleForAddress, setCachedHandle } from './suins';
 import { use_ws } from './ws';
 
 export interface Identity {
@@ -66,20 +66,41 @@ export function useIdentity(ownerAddress: string | null): Identity {
     let cancelled = false;
     setLoading(true);
 
+    // CACHE-FIRST: a handle confirmed by a prior successful claim (or a prior non-null
+    // `/me`) on THIS device wins immediately — the masthead shows the real handle
+    // without waiting on the reverse lookup, and a later empty `/me` can never blank it.
+    const cached = getCachedHandle(ownerAddress);
+    if (cached) {
+      setHandle(cached);
+      setHasHandle(true);
+    }
+
     getHandleForAddress()
       .then((resp) => {
         if (cancelled) return;
-        setHasHandle(resp.handle != null);
-        // Keep the resolved "<name>@suize" string so the TopBar + get-paid sheet
-        // show the real handle (not just the null/non-null gate).
-        setHandle(resp.handle ?? '');
+        if (resp.handle != null) {
+          // `/me` resolved (the reverse record indexed) — trust it + refresh the cache
+          // so a later device sees it too.
+          setHasHandle(true);
+          setHandle(resp.handle);
+          setCachedHandle(ownerAddress, resp.handle);
+        } else if (!cached) {
+          // No reverse record AND no cached claim → genuinely no handle (onboarding).
+          // When `cached` is set we DON'T touch hasHandle/handle: the broken reverse
+          // lookup must never override a known-good cached handle.
+          setHasHandle(false);
+          setHandle('');
+        }
         setSuggestedName(resp.suggestedName ?? '');
       })
       .catch(() => {
-        // Fail safe to onboarding (recoverable) rather than a forever-spinner.
+        // Fail safe to onboarding (recoverable) rather than a forever-spinner — UNLESS
+        // a cached handle proves this owner already claimed (then keep showing it).
         if (cancelled) return;
-        setHasHandle(false);
-        setHandle('');
+        if (!cached) {
+          setHasHandle(false);
+          setHandle('');
+        }
         setSuggestedName('');
       })
       .finally(() => {

@@ -39,6 +39,23 @@ export function relative(ts: number, from = Date.now()): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
+/**
+ * "2m" / "1h" / "Mon" / "3 Jun" — ultra-compact relative time for the
+ * Activity widget. No "ago" suffix; caps at the weekday for <7d (then a
+ * day-month date) so the time cell stays ~3ch and never wraps.
+ */
+export function relShort(ts: number, from = Date.now()): string {
+  const s = Math.max(0, Math.round((from - ts) / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.round(h / 24);
+  if (d < 7) return new Date(ts).toLocaleDateString('en-US', { weekday: 'short' });
+  return new Date(ts).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+}
+
 /** Shorten a hex digest: 0x7c41…788f */
 export function shortHash(digest: string): string {
   if (digest.length <= 12) return digest;

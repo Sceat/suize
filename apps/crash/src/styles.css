@@ -535,6 +535,30 @@ input {
   overflow: hidden;
 }
 
+/* ---------------- MOBILE: let the page SCROLL ----------------------------
+   The desktop "Fold & Footer" is a single full-viewport, non-scroll stage
+   (the .app above pins it to the viewport and the e05 regions are absolutely
+   positioned within it). On a phone that stage cannot fit masthead + chart +
+   bet ritual + house band in one screen, so content was clipped and nothing
+   scrolled. On small/coarse screens we RELEASE the lock: the document scrolls
+   normally and the e05 layer reflows into a single stacked, scrollable column
+   (see the ≤560px reflow block in crash-e05.ts). Desktop is untouched. */
+@media (max-width: 560px) {
+  html,
+  body,
+  #root {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden;
+  }
+  .app {
+    position: static;
+    inset: auto;
+    overflow: visible;
+    min-height: 100dvh;
+  }
+}
+
 /* ---------------- CUSTOM CURSOR (fine pointers only) ---------------- */
 .cursor-dot,
 .cursor-ring {

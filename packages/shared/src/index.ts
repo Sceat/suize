@@ -24,9 +24,14 @@ export const fullnodeUrl = (network: SuiNetwork): string =>
 // These are public on-chain ids — safe to commit.
 // ---------------------------------------------------------------------------
 
-/** Crash router package (live on testnet). */
+/**
+ * Crash router package (live on testnet — version-gated + accumulator build).
+ * Upgraded 2026-06-06 to v2 (added router::withdraw_all for atomic settle->wallet
+ * sweep); on-chain Version lifted to 2 via migrate, fencing the prior v1 package
+ * 0xcd1f6af8…ebd31e19. UpgradeCap 0xbbb53a32…d886b9e1 (deployer-owned).
+ */
 const CRASH_ROUTER_PACKAGE =
-  '0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3';
+  '0x16eb262d69300c4291beab7e9f27b2b94640124a290f373230c5c8a3d3d50c26';
 
 /**
  * Wallet Move package — LIVE on testnet.
@@ -37,8 +42,25 @@ const CRASH_ROUTER_PACKAGE =
 const WALLET_PACKAGE =
   '0x285865f6795ae733bbbb3d55df6826d4614dbdcad7bd5c177ab6a4b4314267b1';
 
+/**
+ * Deploy Move package (`deploy_sui`) — NOT YET PUBLISHED to testnet.
+ * `PACKAGE`, `VERSION_OBJECT`, and `DOMAIN_REGISTRY_OBJECT` below are PLACEHOLDERS
+ * ('0x0') until `packages/move-deploy` is published (gated, owner-approved — see
+ * docs/deploy/SPEC.md §13). Mirror of how WALLET_PACKAGE was a placeholder pre-publish:
+ * after publish, overwrite these with the real package id + shared object ids.
+ */
+const DEPLOY_PACKAGE = '0x0';
+const DEPLOY_VERSION_OBJECT = '0x0';
+const DEPLOY_DOMAIN_REGISTRY_OBJECT = '0x0';
+
 export const PACKAGE_IDS = {
-  /** Crash router package + its 7 sponsorable `router::*` targets. */
+  /**
+   * Crash router package + its 7 sponsorable `router::*` targets, PLUS the one
+   * framework helper a fully-manager-funded bet needs (`0x2::coin::zero`): after a
+   * cash-out the manager holds the funds and the wallet has no dUSDC coin object, so
+   * the bet PTB mints a zero Coin<DUSDC> as its (harmless) 0-value payment. It moves
+   * no value — it just lets the bet build without a wallet coin to split.
+   */
   CRASH: {
     PACKAGE: CRASH_ROUTER_PACKAGE,
     TARGETS: {
@@ -47,8 +69,14 @@ export const PACKAGE_IDS = {
       CASH_OUT: `${CRASH_ROUTER_PACKAGE}::router::cash_out`,
       CLAIM: `${CRASH_ROUTER_PACKAGE}::router::claim`,
       WITHDRAW: `${CRASH_ROUTER_PACKAGE}::router::withdraw`,
+      // Sweeps the FULL manager balance to the sender (no amount arg). Bundled into
+      // the cash_out + claim PTBs for an atomic settle -> auto-sweep to wallet, so
+      // payouts never pile up invisibly in the manager.
+      WITHDRAW_ALL: `${CRASH_ROUTER_PACKAGE}::router::withdraw_all`,
       SUPPLY: `${CRASH_ROUTER_PACKAGE}::router::supply`,
       REDEEM_LP: `${CRASH_ROUTER_PACKAGE}::router::redeem_lp`,
+      // Sui framework: zero-coin mint for a fully-manager-funded bet (moves no value).
+      COIN_ZERO: `0x2::coin::zero`,
     },
   },
 
@@ -96,6 +124,25 @@ export const PACKAGE_IDS = {
       NAVI_AGENT_ABSORB_WITHDRAWN: `${WALLET_PACKAGE}::navi::agent_absorb_withdrawn`,
     } as Record<string, string>,
   },
+
+  /**
+   * Deploy package (`deploy_sui`) — PLACEHOLDER ids until published to testnet.
+   * `PACKAGE`/`VERSION_OBJECT`/`DOMAIN_REGISTRY_OBJECT` are all '0x0' for now (see
+   * the DEPLOY_PACKAGE comment above + docs/deploy/SPEC.md §13). The three write
+   * targets are signed by the backend's OWN deploy service wallet (it pays its own
+   * gas) — NOT Enoki-sponsored — so they are intentionally absent from the sponsor
+   * allow-list union; DEPLOY_MOVE_TARGETS exports them for future use only.
+   */
+  DEPLOY: {
+    PACKAGE: DEPLOY_PACKAGE,
+    VERSION_OBJECT: DEPLOY_VERSION_OBJECT,
+    DOMAIN_REGISTRY_OBJECT: DEPLOY_DOMAIN_REGISTRY_OBJECT,
+    TARGETS: {
+      CREATE_SITE: `${DEPLOY_PACKAGE}::site::create_site`,
+      LINK_DOMAIN: `${DEPLOY_PACKAGE}::domain_registry::link_domain`,
+      UNLINK_DOMAIN: `${DEPLOY_PACKAGE}::domain_registry::unlink_domain`,
+    },
+  },
 } as const;
 
 /** Flat list of the Crash router targets, in declaration order. */
@@ -103,6 +150,14 @@ export const CRASH_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.CRASH.TARG
 
 /** Flat list of the wallet targets — the wallet pkg is LIVE on testnet (mandate/vault/swap/navi). */
 export const WALLET_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.WALLET.TARGETS);
+
+/**
+ * Flat list of the deploy targets (create_site / link_domain / unlink_domain).
+ * Exported for future use only — these are signed by the backend's own deploy
+ * service wallet (pays its own gas), so they are deliberately NOT added to the
+ * sponsor's allow-list union. (Placeholder package id until move-deploy ships.)
+ */
+export const DEPLOY_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.DEPLOY.TARGETS);
 
 // ---------------------------------------------------------------------------
 // Sponsor wire types — the request/response contract between the apps and the
@@ -144,8 +199,9 @@ export interface ExecuteResponse {
 // Handle wire types — the request/response contract between the apps and the
 // unified backend's handle module (GET /handle/available, GET /handle/me,
 // POST /handle/claim). Handles are `<name>@suize` (= `<name>.suize.sui` leaf
-// subnames). Backend (Redis) is the source of truth; the SuiNS reverse record
-// is a backstop. Issuance is self-custody (Path B): the backend custodies the
+// subnames). Issuance + lookup are FULLY ON-CHAIN via the Sui SDK (no DB): the
+// SuiNS leaf record is the availability source, and the user-signed reverse record
+// (setDefault at claim) makes /me resolve. Issuance is self-custody (Path B): the backend custodies the
 // suize.sui parent NFT + a separate issuer key, mints leaf subnames via
 // @mysten/suins, and sponsors gas through the existing Enoki sponsor.
 // ---------------------------------------------------------------------------
@@ -185,8 +241,108 @@ export interface HandleClaimRequest {
  * POST /handle/claim response body.
  * `handle` is the issued `<name>@suize` handle; `txDigest` is the leaf-subname
  * mint transaction digest (sponsored).
+ *
+ * `setDefaultBytes`/`setDefaultDigest` carry the SPONSORED `set_reverse_lookup`
+ * (setDefault) transaction the WALLET must sign with the user's zkLogin signer
+ * and execute via the existing `executeRequest` path. A leaf subname does NOT
+ * auto-set a reverse record, so without this step `resolveNameServiceNames`
+ * returns nothing — the claim is only complete once the wallet lands these.
+ * Both are present whenever the leaf was minted/owned by this address; they are
+ * optional only for forward-compat and the (never-hit) configured-but-no-record
+ * path. The sender of these bytes is the VERIFIED USER (Enoki sponsors gas), so
+ * `set_reverse_lookup` binds the reverse record to the user's address.
  */
 export interface HandleClaimResponse {
   handle: string;
   txDigest: string;
+  /** Base64 sponsored `set_reverse_lookup` tx bytes — the wallet signs these verbatim. */
+  setDefaultBytes?: string;
+  /** Digest of the sponsored setDefault tx — passed to `executeRequest` after signing. */
+  setDefaultDigest?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Deploy wire types — the request/response contract between agents/dashboard and
+// the unified backend's deploy module (POST /deploy, GET /sites, GET /sites/:id,
+// POST /domains, DELETE /domains/:domain). Sites are deployed to Walrus + a fresh
+// on-chain `Site` object by the backend's OWN deploy service wallet (it pays SUI +
+// WAL gas). The route is OPEN in the MVP — no auth, optional `owner` attribution —
+// payments gate it later. See docs/deploy/SPEC.md.
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /deploy response body.
+ * Each deploy mints a NEW immutable `Site` (new id → new URL); there is no
+ * overwrite path in the MVP. `siteId` is the on-chain object id; `subdomain` is
+ * `base36(siteId)`; `url` is `https://<subdomain>.deploy.suize.io`; `version` is
+ * always 1 in the MVP; `digest` is the create_site tx digest.
+ */
+export interface DeployResponse {
+  siteId: string;
+  subdomain: string;
+  url: string;
+  version: number;
+  digest: string;
+}
+
+/**
+ * GET /sites/:id (and the entries of GET /sites) response body.
+ * `owner` is best-effort attribution (the deployer, or the service-wallet address
+ * if none was passed) — NOT Sui-ownership. `domains` are the linked custom domains.
+ */
+export interface SiteInfo {
+  siteId: string;
+  name: string;
+  owner: string;
+  url: string;
+  sizeBytes: number;
+  fileCount: number;
+  createdAtMs: number;
+  domains: string[];
+}
+
+/**
+ * POST /domains request body — request to link a custom domain to a site. The
+ * backend replies with a DNS TXT challenge (DomainChallengeResponse) the caller
+ * must satisfy before the on-chain `link_domain` runs.
+ */
+export interface DomainLinkRequest {
+  siteId: string;
+  domain: string;
+}
+
+/**
+ * SSL-provisioning status for a linked custom domain (Cloudflare-for-SaaS
+ * adapter). Mirrors the backend's `CustomHostnameStatus` structurally — shared has
+ * zero runtime deps, so the shape is restated here, not imported. Present on a
+ * verify response only when the on-chain link succeeded.
+ */
+export type DomainSslStatus =
+  | { provisioned: true; hostnameId: string; sslStatus: string }
+  | { provisioned: false; reason: 'not-configured' }
+  | { provisioned: false; reason: 'error'; detail: string };
+
+/**
+ * POST /domains response body — the DNS-ownership challenge + target records.
+ * `status` is `pending` (TXT not yet verified, on-chain link not run) or `linked`
+ * (TXT verified AND `link_domain` landed) — there is no separate intermediate
+ * state. `txtName`/`txtValue` are the `_suize-verify.<domain>` TXT record to add;
+ * `cname` is the `<subdomain>.deploy.suize.io` target to CNAME the apex/host at.
+ *
+ * The optional fields ride on specific outcomes:
+ * - `detail` — a still-`pending` reason (TXT not found yet / mismatch).
+ * - `digest` — the `link_domain` tx digest (only on a successful `linked`).
+ * - `ssl` — the best-effort Cloudflare SSL provisioning result (only on `linked`).
+ * - `instructions` — manual-CNAME guidance when the CF adapter is off (`linked`).
+ */
+export interface DomainChallengeResponse {
+  domain: string;
+  status: 'pending' | 'linked';
+  txtName: string;
+  txtValue: string;
+  cname: string;
+  detail?: string;
+  digest?: string;
+  ssl?: DomainSslStatus;
+  instructions?: string;
 }

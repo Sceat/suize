@@ -1,11 +1,12 @@
 // Shared HTTP helpers. Both the sponsor and api modules used identical CORS +
 // JSON + client-IP logic; it's collapsed here so there is ONE CORS policy for
 // the whole backend, driven by config.allowedOrigins.
+import type { Server } from "bun";
 import { config } from "./config";
 
 export const corsHeaders = (origin: string | null): Record<string, string> => {
   const base: Record<string, string> = {
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
@@ -37,9 +38,22 @@ export const text = (
     headers: { "Content-Type": "text/plain", ...corsHeaders(origin) },
   });
 
-export const getIp = (req: Request): string | null => {
+// Client IP for rate-limiting. We are fronted by the TRUSTED Cloudflare tunnel,
+// which sets `cf-connecting-ip` to the real client IP. We trust ONLY that header.
+// We NEVER trust client-supplied `x-forwarded-for` — an attacker can set it to any
+// value to rotate "identities" and dodge the per-IP limiter. If the trusted header
+// is absent (direct hit / misconfig), we fall back to the raw socket peer address
+// via `server.requestIP(req)`. When even that is unavailable the caller MUST treat
+// a null IP as untrusted and FAIL CLOSED (deny), never allow — see takeToken.
+export const getIp = (req: Request, server?: Server<unknown>): string | null => {
   const cf = req.headers.get("cf-connecting-ip");
-  if (cf) return cf;
-  const xff = req.headers.get("x-forwarded-for");
-  return xff ? xff.split(",")[0]!.trim() : null;
+  if (cf) return cf.trim();
+  // No trusted CF header — fall back to the real socket peer (never client XFF).
+  try {
+    const addr = server?.requestIP(req);
+    if (addr?.address) return addr.address;
+  } catch {
+    // requestIP can throw for an already-consumed/edge request — fall through.
+  }
+  return null;
 };

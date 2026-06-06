@@ -1027,3 +1027,95 @@ fun test_withdraw_idle_unknown_asset_aborts() {
 
     cleanup(scenario, clock);
 }
+
+// ============================================================================
+// C2 — WITHDRAW-TICKET ASSET/VALUE BIND (the cage-escape fix)
+// ============================================================================
+//
+// These drive the REAL `agent_withdraw_request` + `agent_absorb_withdrawn`
+// directly (not the `*_stub`, which always mints a MATCHING-type, exact-value
+// coin and so cannot express the attack). The threat: the agent requests a
+// withdraw of A (NAVI hands back real `Coin<A>`), then discharges the no-abilities
+// ticket with a WRONG-TYPE or SHORT coin while pocketing the real funds.
+
+#[test]
+#[expected_failure(abort_code = suize::navi::ETicketAssetMismatch)]
+/// THE TYPE-BIND PROOF (C2): a ticket minted for COIN_A cannot be discharged with a
+/// `Coin<COIN_B>`. Supply A (so the `supplied` ledger has it), request a withdraw of
+/// A to get a real ticket, then try to absorb a COIN_B coin (the "wrong-type junk"
+/// the agent would substitute) → `ETicketAssetMismatch`.
+fun test_absorb_wrong_asset_aborts() {
+    let (mut scenario, clock) = begin();
+
+    let mandate_id = create_default_mandate(&mut scenario, &clock);
+    create_vault_for(&mut scenario, mandate_id);
+    fund_vault(&mut scenario);
+    issue_cap_to_agent(&mut scenario);
+
+    scenario.next_tx(AGENT);
+    {
+        let mut vault = scenario.take_shared<MultiAssetVault<StubAccountCap>>();
+        let mut mandate = scenario.take_shared<Mandate>();
+        let cap = scenario.take_from_sender<AgentCap>();
+
+        // Supply 300 A so the supplied-ledger has COIN_A.
+        navi::agent_supply_stub<StubAccountCap, COIN_A>(
+            &mut vault, &mut mandate, &cap,
+            SCOPE_SUPPLY, ASSET_ID_A, 300, &clock, scenario.ctx(),
+        );
+        // Request a real ticket for 250 A.
+        let ticket = navi::agent_withdraw_request<StubAccountCap, COIN_A>(
+            &mut vault, &mut mandate, &cap,
+            SCOPE_WITHDRAW, ASSET_ID_A, 250, &clock,
+        );
+        // The attack: discharge the A-ticket with a COIN_B coin → ETicketAssetMismatch.
+        let junk = coin::mint_for_testing<COIN_B>(250, scenario.ctx());
+        navi::agent_absorb_withdrawn<StubAccountCap, COIN_B>(&mut vault, ticket, junk);
+
+        scenario.return_to_sender(cap);
+        ts::return_shared(mandate);
+        ts::return_shared(vault);
+    };
+
+    cleanup(scenario, clock);
+}
+
+#[test]
+#[expected_failure(abort_code = suize::navi::ETicketUndervalued)]
+/// THE VALUE-BIND PROOF (C2): even with the RIGHT type, a ticket for 250 A cannot be
+/// discharged with a coin worth less than 250 — here a `coin::zero<COIN_A>()` (the
+/// degenerate "keep the redeemed principal, hand back nothing" attack) → it has the
+/// right type but value 0 < 250 → `ETicketUndervalued`.
+fun test_absorb_undervalued_coin_aborts() {
+    let (mut scenario, clock) = begin();
+
+    let mandate_id = create_default_mandate(&mut scenario, &clock);
+    create_vault_for(&mut scenario, mandate_id);
+    fund_vault(&mut scenario);
+    issue_cap_to_agent(&mut scenario);
+
+    scenario.next_tx(AGENT);
+    {
+        let mut vault = scenario.take_shared<MultiAssetVault<StubAccountCap>>();
+        let mut mandate = scenario.take_shared<Mandate>();
+        let cap = scenario.take_from_sender<AgentCap>();
+
+        navi::agent_supply_stub<StubAccountCap, COIN_A>(
+            &mut vault, &mut mandate, &cap,
+            SCOPE_SUPPLY, ASSET_ID_A, 300, &clock, scenario.ctx(),
+        );
+        let ticket = navi::agent_withdraw_request<StubAccountCap, COIN_A>(
+            &mut vault, &mut mandate, &cap,
+            SCOPE_WITHDRAW, ASSET_ID_A, 250, &clock,
+        );
+        // Right TYPE, value 0 < 250 → ETicketUndervalued.
+        let short = coin::zero<COIN_A>(scenario.ctx());
+        navi::agent_absorb_withdrawn<StubAccountCap, COIN_A>(&mut vault, ticket, short);
+
+        scenario.return_to_sender(cap);
+        ts::return_shared(mandate);
+        ts::return_shared(vault);
+    };
+
+    cleanup(scenario, clock);
+}

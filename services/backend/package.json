@@ -1,13 +1,12 @@
 {
   "name": "@suize/backend",
-  "version": "0.1.0",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "typecheck": "tsc --noEmit",
-    "check:emails": "bun scripts/check-emails.ts",
     "push": "bash scripts/push.sh",
     "push:patch": "bash scripts/push.sh patch",
     "push:minor": "bash scripts/push.sh minor",
@@ -18,7 +17,7 @@
     "@mysten/sui": "^2.17.0",
     "@mysten/suins": "^1.1.4",
     "@suize/shared": "workspace:*",
-    "ioredis": "^5.4.1"
+    "nanotar": "^0.3.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

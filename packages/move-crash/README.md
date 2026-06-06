@@ -1,4 +1,4 @@
-# crash_sui — single non-bypassable router for DeepBook Predict
+# crash_sui — single sponsored-path router for DeepBook Predict
 
 A thin Move package whose `router` module is the **only** move-call target every
 user action flows through. The app sponsors gas via Enoki, and Enoki scopes
@@ -7,24 +7,57 @@ sponsorship with an `allowedMoveCallTargets` allowlist (one entry per
 betting, cashing out, claiming, withdrawing, and providing/redeeming LP ("being
 the house") — into a `crash_sui::router::*` wrapper, the Enoki allowlist need
 only contain **our seven targets**. Sponsored gas can therefore never reach a raw
-`predict::mint` (which would skip the 3% rake) or any other off-path call,
+`predict::mint` (which would skip the rake) or any other off-path call,
 because those targets are simply not on the allowlist.
 
-The 3% rake is still enforced atomically **inside** `bet`: it is skimmed in the
-same Move call that places the bet, so it is unavoidable for anyone using the
-router, and the treasury + rate live in an on-chain shared `Config` that only our
-`AdminCap` can mutate. No treasury address ever lives in client code.
+The rake is enforced atomically **inside** `bet`: it is skimmed in the
+same Move call that places the bet, so it is unavoidable **on the sponsored path** —
+anyone using the router gets rake'd, and the Enoki allowlist (above) means a
+**sponsored** tx can only ever reach `router::*`, never a raw `predict::mint`. The
+rake is **not** unavoidable for a **self-payer**: a user paying their own gas can
+build a tx that calls `predict::mint` directly and skip the router (and the rake)
+entirely — the contract cannot prevent that. So the rake is non-bypassable on the
+Enoki-gated path, not at the protocol level. The treasury + rate live in an
+on-chain shared `Config` that only our `AdminCap` can mutate, and no treasury
+address ever lives in client code. Precisely:
+the rake is **3% (300 bps) of the pre-trade quoted cost** (`predict::get_trade_amounts`),
+withdrawn from the manager *before* `predict::mint` pulls the actual post-trade
+mint cost. So the platform collects 3% of the *quote*, not exactly 3% of what the
+user ends up paying — it slightly under-collects on price drift and never
+overcharges the user.
 
-## Deployed IDs (Sui testnet)
+## Testnet vs. mainnet (read this)
+
+**This source is the version-gated + accumulator-rake package** (gated from
+`init`, rake routed via `coin::send_funds`). It is now **freshly published to
+testnet too** — the prior ungated testnet demo is retired, and the deployed IDs
+below point at the NEW gated package. The same source is the mainnet form.
+
+Because adding the required `version: &Version` arg changes the seven public
+signatures (which the `compatible` upgrade policy forbids), the gated package is
+**published fresh** (a brand-new original-id), not upgraded over the old one — on
+testnet now and on mainnet later.
+
+A fresh publish auto-creates and shares the `Version` singleton in `init` at
+`PACKAGE_VERSION`, so the seven user functions are gated from block one — no
+bootstrap call. After a fresh publish: the dapp **repoints to the new package
+id** and adds `version: &Version` as the **first** PTB argument to the seven
+router calls, and the **@suize backend Enoki allowlist targets move to the new
+package id**. Admin recovery (`migrate` / `freeze_all`, `set_fee_*`) is
+deliberately NOT version-gated, so it keeps working even while the package is
+frozen.
+
+## Deployed IDs (Sui testnet — fresh gated + accumulator publish)
 
 | Thing | ID |
 | ----- | -- |
-| **Package** | `0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3` |
-| **Config** (shared, initial version `667332733`) | `0x001a7db5bacc9b2e05e8d51b8733f43280e68dea842fbb01c7c5639d512859f3` |
-| **AdminCap** (owned by deployer) | `0x30d541bd14a5c26a99a3f2d2885851111e33ef7469cc1d504a1e37d607c3849d` |
-| **UpgradeCap** (owned by deployer) | `0x865cf91c017990eaa543ffc43ffa8dea755e70fd2ac188730571989299c95271` |
+| **Package** | `0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19` |
+| **Config** (shared; `fee_bps=300`, `fee_recipient=deployer`) | `0x66bdf9a8050573d46d409d32ff0b19cd5983a082d4326289709057f68c14f5ee` |
+| **Version** (shared; `value=1`) | `0x6f0247af6e7b0580c7891771dd8a15469df4035a822a6e050871b12d1afc72a4` |
+| **AdminCap** (owned by deployer) | `0xf41787566604bdc0218a78d222a5a825cdf5660e31abb7e2ce42faa29b4c3528` |
+| **UpgradeCap** (owned by deployer) | `0xbbb53a32aead317348559e51fc04db796bb6468f8cfdcf1c4e825af8d886b9e1` |
 | **AdminCap owner / deployer** | `0x087aa862ca645c0b94400c49e11b491011fca35db837361ccfc4c6f69d356e86` |
-| Publish tx digest | `HGiqjmXpYU3rPfHKSDXuSScmDcjiC57r5UKrYLqtFi5o` |
+| Publish tx digest | `7FH2MnfMyUpQnm87JcMRq33GMRBfmHFJeNommxAbexoq` |
 
 Links to the live DeepBook Predict package
 `0xf5ea2b3749c65d6e56507cc35388719aadb28f9cab873696a2f8687f5c785138` —
@@ -38,13 +71,17 @@ All are `public fun` (NOT `entry`) so they are PTB-composable and accept `ID`
 args via `tx.pure.id`. Enoki gates on the move-call **target**, independent of
 `entry`-ness.
 
+Every one takes `version: &Version` as the **first** parameter and asserts it
+before doing anything (the version gate).
+
 ```move
 // 1. One-time manager creation. Returns the new shared PredictManager's ID.
-public fun create_manager(ctx: &mut TxContext): ID
+public fun create_manager(version: &Version, ctx: &mut TxContext): ID
 
 // 2. The ONE top-level call per bet. Deposits payment, builds the key, skims
-//    the 3% rake to the treasury, and mints — all internally.
+//    3% of the quoted cost to the treasury, and mints — all internally.
 public fun bet<Quote>(
+    version: &Version,
     config: &Config,
     predict: &mut Predict,
     manager: &mut PredictManager,
@@ -61,31 +98,35 @@ public fun bet<Quote>(
 
 // 3. Early cash-out of a live position. Payout -> manager balance. No rake.
 public fun cash_out<Quote>(
-    predict: &mut Predict, manager: &mut PredictManager, oracle: &OracleSVI,
-    oracle_id: ID, expiry: u64, strike: u64, is_up: bool, quantity: u64,
-    clock: &Clock, ctx: &mut TxContext,
+    version: &Version, predict: &mut Predict, manager: &mut PredictManager,
+    oracle: &OracleSVI, oracle_id: ID, expiry: u64, strike: u64, is_up: bool,
+    quantity: u64, clock: &Clock, ctx: &mut TxContext,
 )
 
 // 4. Claim a settled position permissionlessly. Payout -> manager balance. No rake.
 public fun claim<Quote>(
-    predict: &mut Predict, manager: &mut PredictManager, oracle: &OracleSVI,
-    oracle_id: ID, expiry: u64, strike: u64, is_up: bool, quantity: u64,
-    clock: &Clock, ctx: &mut TxContext,
+    version: &Version, predict: &mut Predict, manager: &mut PredictManager,
+    oracle: &OracleSVI, oracle_id: ID, expiry: u64, strike: u64, is_up: bool,
+    quantity: u64, clock: &Clock, ctx: &mut TxContext,
 )
 
 // 5. Pull `amount` of the manager's internal balance back to the caller's wallet.
-public fun withdraw<Quote>(manager: &mut PredictManager, amount: u64, ctx: &mut TxContext)
+public fun withdraw<Quote>(
+    version: &Version, manager: &mut PredictManager, amount: u64, ctx: &mut TxContext,
+)
 
 // 6. "Be the house": supply dUSDC into Predict's shared LP vault; PLP shares
 //    are minted and sent to the supplier. No rake (LPing is not a bet).
 public fun supply<Quote>(
-    predict: &mut Predict, payment: Coin<Quote>, clock: &Clock, ctx: &mut TxContext,
+    version: &Version, predict: &mut Predict, payment: Coin<Quote>,
+    clock: &Clock, ctx: &mut TxContext,
 )
 
 // 7. Burn PLP shares, return the underlying dUSDC to the LP. Named `redeem_lp`
 //    to avoid colliding with `withdraw` (manager balance). No rake.
 public fun redeem_lp<Quote>(
-    predict: &mut Predict, lp_coin: Coin<PLP>, clock: &Clock, ctx: &mut TxContext,
+    version: &Version, predict: &mut Predict, lp_coin: Coin<PLP>,
+    clock: &Clock, ctx: &mut TxContext,
 )
 ```
 
@@ -112,19 +153,20 @@ public fun fee_recipient(config: &Config): address
    (`MarketKey` has `copy`, reused for quote + mint).
 3. Quotes the cost via `predict::get_trade_amounts`.
 4. `rake = cost * fee_bps / 10_000`; if non-zero, withdraws it from the manager
-   (`withdraw` asserts caller == owner) and `public_transfer`s to the treasury.
+   (`withdraw` asserts caller == owner) and routes it to the treasury via
+   `coin::send_funds` (Sui Address Balances), not a fresh owned Coin object.
 5. `predict::mint` pulls `cost` from the manager's internal balance.
 
 ## Enoki allowlist (the EXACT seven targets)
 
 ```
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::create_manager
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::bet
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::cash_out
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::claim
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::withdraw
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::supply
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::redeem_lp
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::create_manager
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::bet
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::cash_out
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::claim
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::withdraw
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::supply
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::redeem_lp
 ```
 
 These are the only `allowedMoveCallTargets` the Enoki app needs. Native PTB
@@ -158,12 +200,20 @@ Type argument for every generic fn is `Quote = DUSDC`
 `CLOCK` = `0x6`, `PREDICT` (shared) =
 `0xc8736204d12f0a7277c86388a68bf8a194b0a14c5538ad13f22cbd8e2a38028a`.
 
+> NOTE: every router call below now takes the shared `Version` object as its
+> **first** argument (`tx.object(VERSION)`), inserted ahead of the args shown.
+> The version gate asserts it before anything else.
+
 ```ts
-const ROUTER = '0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3'
-const CONFIG = '0x001a7db5bacc9b2e05e8d51b8733f43280e68dea842fbb01c7c5639d512859f3'
+const ROUTER = '0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19'
+const CONFIG = '0x66bdf9a8050573d46d409d32ff0b19cd5983a082d4326289709057f68c14f5ee'
+const VERSION = '0x6f0247af6e7b0580c7891771dd8a15469df4035a822a6e050871b12d1afc72a4'
 
 // 1) create_manager — own tx, read new manager id from objectChanges
-tx.moveCall({ target: `${ROUTER}::router::create_manager`, arguments: [] })
+tx.moveCall({
+  target: `${ROUTER}::router::create_manager`,
+  arguments: [tx.object(VERSION)],
+})
 
 // 2) bet — the single top-level call; SplitCoins funds the payment coin
 const [payment] = tx.splitCoins(srcCoin, [tx.pure.u64(fundAmount)]) // native, not allowlisted
@@ -253,8 +303,9 @@ user to hold dUSDC.
 
 ```bash
 cd move
-sui move build   # exit 0 (3 benign, intentional lint warnings: self_transfer + 2x public_entry)
-sui move test    # 3 tests pass (admin round-trip + over-cap abort + rake math)
+sui move build   # exit 0, warning-free
+sui move test    # 6 tests pass (admin round-trip + over-cap abort + rake math
+                 #               + version assert pass/freeze + migrate guard)
 ./deploy.sh      # builds + publishes; prints ROUTER_PACKAGE / ROUTER_CONFIG / AdminCap
 ```
 
@@ -281,9 +332,13 @@ framework are auto-injected and pinned to `testnet` in `Move.lock`.
 
 - `move/Move.toml` — package manifest.
 - `move/deploy.sh` — redeploy helper.
-- `move/sources/router.move` — the `router` module (7 user fns, admin setters,
-  reads, `init`, and 3 unit tests). LP `supply`/`redeem_lp` lack a unit test on
-  purpose: Predict's only `Predict`/`Currency` constructors are `#[test_only]
-  public(package)` to `deepbook_predict` and thus unreachable from this package;
-  the LP path is verified on-chain instead (see above), not faked in a test.
+- `move/sources/router.move` — the `router` module (7 version-gated user fns,
+  admin setters + version lifecycle, reads, `init`, and 3 unit tests: rake math,
+  admin round-trip, over-cap abort). `bet`/`supply`/`redeem_lp` lack a full
+  unit test on purpose: Predict's only `Predict`/`Currency` constructors are
+  `#[test_only] public(package)` to `deepbook_predict` and thus unreachable from
+  this package; those paths are verified on-chain instead, not faked in a test.
+- `move/sources/version.move` — the `version` gate (`Version` object,
+  `assert_latest`, package-internal create/migrate/freeze) + 3 unit tests:
+  assert pass at current, abort when frozen, migrate guard rejects when current.
 - `move/deps/{predict,deepbook,token}/` — vendored DeepBook Predict source deps.

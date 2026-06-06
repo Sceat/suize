@@ -15,3 +15,4 @@ move/build/
 # Screenshots / scratch images (never commit)
 *.png
 .playwright-mcp/
+.vercel

@@ -7,6 +7,7 @@ import {
   createNetworkConfig,
 } from '@mysten/dapp-kit'
 import '@mysten/dapp-kit/dist/index.css'
+import { Analytics } from '@vercel/analytics/react'
 import { App } from './App'
 import './styles.css'
 import { RPC_URL } from './config'
@@ -46,6 +47,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         {/* autoConnect restores the previous session (incl. zkLogin) silently. */}
         <WalletProvider autoConnect>
           <App />
+          <Analytics />
         </WalletProvider>
       </SuiClientProvider>
     </QueryClientProvider>

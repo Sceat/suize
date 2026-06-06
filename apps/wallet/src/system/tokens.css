@@ -236,24 +236,50 @@ a {
 }
 
 /* the soft breath — used by Loader: a gentle swell + fade, eased so it never
-   feels mechanical. */
+   feels mechanical. Stronger now (deeper swell, brighter peak) so the bloom
+   reads as clearly alive, not static. */
 @keyframes suize-breathe {
   0%,
   100% {
-    opacity: 0.35;
-    transform: scale(0.92);
+    opacity: 0.3;
+    transform: scale(0.86);
   }
   50% {
-    opacity: 0.95;
-    transform: scale(1.08);
+    opacity: 1;
+    transform: scale(1.16);
   }
 }
 .suize-breathe {
-  animation: suize-breathe 3.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation: suize-breathe 3.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 .suize-breathe-slow {
-  animation: suize-breathe 5.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation: suize-breathe 4.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
   animation-delay: -1.2s;
+}
+
+/* the Loader's sweeping accent ring — a conic gradient (transparent → accent)
+   rotating around the bloom, masked to a thin ring so only the rim shows. Reads
+   unmistakably as "working". */
+@keyframes suize-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.suize-loader-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 200deg,
+    color-mix(in srgb, var(--cyan) 55%, transparent) 320deg,
+    var(--cyan) 360deg
+  );
+  /* carve the disc into a thin rim */
+  -webkit-mask: radial-gradient(circle, transparent 0 calc(50% - 2px), #000 calc(50% - 2px) 50%, transparent 50%);
+  mask: radial-gradient(circle, transparent 0 calc(50% - 2px), #000 calc(50% - 2px) 50%, transparent 50%);
+  animation: suize-spin 1.4s linear infinite;
 }
 
 /* the one allowed health dot's soft halo pulse. */
@@ -275,6 +301,10 @@ a {
   .suize-breathe-slow {
     animation: none;
     opacity: 0.7;
+  }
+  .suize-loader-ring {
+    animation: none;
+    opacity: 0;
   }
 }
 

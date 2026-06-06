@@ -15,10 +15,15 @@
  * @suize/shared/protocol):
  *   handleAvailableRequest { name }  -> WsHandleAvailableResponse { available, reason? }
  *   handleMeRequest {}               -> WsHandleMeResponse        { handle, suggestedName? }
- *   handleClaimRequest { name }      -> WsHandleClaimResponse     { handle, txDigest }
- * Handles are `<name>@suize` (= `<name>.suize.sui` leaf subnames); the backend
- * (Redis) is the source of truth, the SuiNS reverse record a backstop. Issuance is
- * self-custody (Path B): the backend mints + sponsors the leaf — gasless to the user.
+ *   handleClaimRequest { name }      -> WsHandleClaimResponse     { handle, txDigest, setDefaultBytes?, setDefaultDigest? }
+ * Handles are `<name>@suize` (= `<name>.suize.sui` leaf subnames). Source of truth is
+ * fully ON-CHAIN now (no Redis): availability is `getNameRecord`, ownership is the
+ * SuiNS reverse record. Issuance is self-custody (Path B): the backend mints + sponsors
+ * the leaf — gasless to the user — THEN returns a SECOND sponsored tx (`set_reverse_lookup`,
+ * sender = the verified user) that the WALLET signs with its zkLogin signer and executes,
+ * which is what actually sets the reverse record so `/me` resolves on any device. A leaf
+ * subname does NOT auto-set a reverse record, so this second leg is mandatory — without it
+ * the handle is minted but `resolveNameServiceNames(address)` returns nothing.
  * The claim/me requests carry NO address — the authenticated subject is `ws.data`.
  */
 
@@ -107,6 +112,51 @@ export async function resolveRecipient(
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Confirmed-handle cache (same-device, owner-scoped).
+// ───────────────────────────────────────────────────────────────────────────
+//
+// WHY: the `/me` gate resolves a handle from the SuiNS REVERSE record
+// (`resolveNameServiceNames`). A leaf subname's reverse record can lag or fail to
+// index, so `/me` can return null EVEN AFTER a successful claim — leaving the
+// masthead stuck on "…@suize". The claim itself, though, returns the
+// backend-MINTED "<name>@suize" (honest — it's the real on-chain mint, not
+// fabricated). We cache THAT, keyed by the owner's (stable) zkLogin address, so:
+//   • same-device users see their real handle INSTANTLY + across reloads, and
+//   • a later empty `/me` can never blank out a known-good cached handle.
+// The `/me` reverse lookup stays the cross-device fallback; a NON-null `/me` also
+// writes the cache. Keyed by owner so different Google accounts never collide and
+// nothing needs clearing on sign-out.
+//
+// SEAM: mirrors accountStore — swap the body for a WS RPC later, signature stays.
+
+const HANDLE_KEY = (owner: string) => `suize:handle:${owner.toLowerCase()}`;
+
+/** Read the confirmed handle cached for `owner` on THIS device, or null. */
+export function getCachedHandle(owner: string): string | null {
+  if (!owner) return null;
+  try {
+    const v = localStorage.getItem(HANDLE_KEY(owner));
+    return v && v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cache the confirmed "<name>@suize" handle for `owner`. Call ONLY with a handle the
+ * backend actually returned (a successful claim, or a non-null `/me`) — never fabricate.
+ */
+export function setCachedHandle(owner: string, handle: string): void {
+  if (!owner || !handle) return;
+  try {
+    localStorage.setItem(HANDLE_KEY(owner), handle);
+  } catch {
+    // Storage full / disabled (private mode) — the in-memory identity state still
+    // carries the handle for this session; we just won't persist across a reload.
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Handle endpoints (onboarding + gate)
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -118,6 +168,15 @@ export interface ClaimedHandle {
   handle: string;
   /** the leaf-subname mint tx digest (sponsored). */
   txDigest: string;
+  /**
+   * The SECOND, user-signed leg of the claim: the sponsored `set_reverse_lookup`
+   * (setDefault) tx whose SENDER is this user. `null` only on a legacy/forward-compat
+   * response that omits it (the wallet then skips the second leg). When present, the
+   * caller MUST sign `bytes` with the zkLogin signer and `setReverseRecord({ bytes,
+   * digest })` BEFORE treating the claim as complete — otherwise the handle is minted
+   * but the reverse record is unset and `/me` resolves nothing on any device.
+   */
+  setDefault: { bytes: string; digest: string } | null;
 }
 
 /**
@@ -148,14 +207,45 @@ export async function getHandleForAddress(): Promise<HandleMeResponse> {
 /**
  * Claim `<name>@suize` during onboarding (gasless). Sends ONLY the bare label —
  * the backend targets the authenticated `ws.data.address` (a claim cannot be
- * spoofed), mints the leaf subname, sponsors gas, and returns the full handle + tx
- * digest. No address is sent (the WS already knows who you are). Throws on failure
- * (taken / unauthorized / connection) so onboarding can surface a calm retry.
+ * spoofed), mints the leaf subname (issuer-signed, sponsored), and returns the full
+ * handle + leaf digest PLUS a SECOND sponsored tx (`set_reverse_lookup`) for the
+ * wallet to sign + execute so the reverse record is set. No address is sent (the WS
+ * already knows who you are). Throws on failure (taken / unauthorized / connection)
+ * so onboarding can surface a calm retry.
+ *
+ * The returned `setDefault` is `null` only when the backend omitted both sponsored
+ * fields (forward-compat / a server that already set the reverse record); the caller
+ * then skips the second leg. Whenever it is present the caller MUST sign + execute it
+ * (see `setReverseRecord`) BEFORE completing — the leaf alone does NOT set the reverse
+ * record, so without it `/me` resolves nothing.
  */
 export async function claimHandle(name: string): Promise<ClaimedHandle> {
   const clean = name.trim().toLowerCase();
   const res = await wsHandleClaim(clean);
-  return { name: clean, handle: res.handle, txDigest: res.txDigest };
+  // Both halves of the sponsored setDefault must be present to attempt the second leg;
+  // a partial response (one without the other) is treated as "no second leg" rather than
+  // trying to execute an undefined digest.
+  const setDefault =
+    res.setDefaultBytes && res.setDefaultDigest
+      ? { bytes: res.setDefaultBytes, digest: res.setDefaultDigest }
+      : null;
+  return { name: clean, handle: res.handle, txDigest: res.txDigest, setDefault };
+}
+
+/**
+ * Submit the user's signature over the sponsored setDefault (`set_reverse_lookup`)
+ * bytes — the SECOND leg of a claim. The caller signs `bytes` VERBATIM with the
+ * zkLogin signer (dapp-kit `useSignTransaction`, same path as a sponsored send) and
+ * passes the resulting `signature` here; the backend submits it + pays gas. After this
+ * lands, the reverse record is set and `resolveNameServiceNames(address)` returns the
+ * handle on any device. Throws on failure so onboarding can surface a calm retry (the
+ * handle is already minted — only the reverse record is missing).
+ */
+export async function setReverseRecord(opts: {
+  digest: string;
+  signature: string;
+}): Promise<ExecuteResponse> {
+  return wsExecute({ digest: opts.digest, signature: opts.signature });
 }
 
 // ───────────────────────────────────────────────────────────────────────────

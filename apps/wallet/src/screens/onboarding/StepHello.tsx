@@ -20,9 +20,32 @@
  *   lede     : "An AI wallet that works for you."
  */
 
-import { GradText, Logo } from '../../system';
+import { useCallback, useRef } from 'react';
+import { ArrowRight, GradText, ICON_STROKE, Logo, Wordmark } from '../../system';
 
-export function StepHello() {
+/** A deliberate downward scroll past this delta advances the beat. Tiny trackpad
+ *  jitter / momentum tails below it are ignored so the hello can't skip on a twitch. */
+const SCROLL_ADVANCE_DELTA = 24;
+
+export function StepHello({ onNext }: { onNext?: () => void }) {
+  // Fire onNext at most once per mount: a single wheel burst (momentum scroll emits
+  // a stream of events) must not double-advance, and once we've handed off we ignore
+  // any trailing deltas.
+  const advanced = useRef(false);
+  const advance = useCallback(() => {
+    if (advanced.current || !onNext) return;
+    advanced.current = true;
+    onNext();
+  }, [onNext]);
+
+  // Advance only on a deliberate DOWNWARD wheel (positive deltaY past the floor).
+  const onWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (e.deltaY > SCROLL_ADVANCE_DELTA) advance();
+    },
+    [advance],
+  );
+
   return (
     <div
       // left-anchored editorial block (mockup §02). Column provides `--pad` + the
@@ -33,6 +56,7 @@ export function StepHello() {
         maxWidth: 760,
         width: '100%',
       }}
+      onWheel={onNext ? onWheel : undefined}
     >
       <style>{HELLO_CSS}</style>
 
@@ -52,19 +76,8 @@ export function StepHello() {
           animationDelay: '0.12s',
         }}
       >
-        <Logo size={40} />
-        <GradText variant="mark" className="tnum">
-          <span
-            style={{
-              fontFamily: 'var(--serif)',
-              fontSize: 'clamp(1.8rem, 6vw, 2.4rem)',
-              fontWeight: 400,
-              letterSpacing: '-0.02em',
-            }}
-          >
-            Suize
-          </span>
-        </GradText>
+        <Logo size={44} />
+        <Wordmark size="clamp(1.8rem, 6vw, 2.4rem)" />
       </div>
 
       {/* headline — BIG serif display, one block reveal (mockup .disp) */}
@@ -109,6 +122,22 @@ export function StepHello() {
       >
         An AI wallet that works for you.
       </p>
+
+      {/* Next — user-driven advance (also fires on a deliberate scroll-down). An
+          editorial affordance, NOT a chunky button: mono label + a lucide arrow,
+          muted, with a soft hover-slide on the arrow. Reveals last in the stagger;
+          reduced-motion collapses it (and every reveal) to the resting state. */}
+      {onNext ? (
+        <button
+          type="button"
+          onClick={advance}
+          className="suize-hello__reveal suize-hello__next"
+          style={{ animationDelay: '0.58s' }}
+        >
+          Next
+          <ArrowRight size={16} strokeWidth={ICON_STROKE} aria-hidden className="suize-hello__next-arrow" />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -142,6 +171,32 @@ const HELLO_CSS = `
   flex: 0 0 auto;
   display: inline-block;
 }
+.suize-hello__next {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: clamp(8px, 2vh, 20px);
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  transition: color .32s var(--e-quart);
+}
+.suize-hello__next:hover {
+  color: var(--cyan);
+}
+.suize-hello__next-arrow {
+  transition: transform .32s var(--e-expo);
+}
+.suize-hello__next:hover .suize-hello__next-arrow {
+  transform: translateX(4px);
+}
 .suize-hello__ul {
   position: relative;
   white-space: nowrap;
@@ -169,6 +224,11 @@ const HELLO_CSS = `
   .suize-hello__ul::after {
     right: 0;
     animation: none;
+  }
+  .suize-hello__next-arrow,
+  .suize-hello__next:hover .suize-hello__next-arrow {
+    transition: none;
+    transform: none;
   }
 }
 `;

@@ -78,6 +78,17 @@ const EVaultMandateMismatch: u64 = 2;
 /// Checked here so the owner gets a clear "top up DEEP" signal rather than a
 /// framework split abort deep inside the pool call.
 const EInsufficientDeep: u64 = 3;
+/// The `Pool` passed to `agent_swap_*` is NOT the one this vault is pinned to.
+/// THE CAGE FIX (C1): without this, a jailbroken agent could pass its OWN
+/// `create_permissionless_pool`-minted pool and route the vault's funds through
+/// it at `min_out = 0`, draining the sandbox for dust. The vault is bound to a
+/// single owner-set `allowed_pool_id`; only that pool may ever be driven.
+const EWrongPool: u64 = 4;
+/// `min_out` (the slippage floor) was zero. THE CAGE FIX (C1, defense-in-depth):
+/// a `min_out = 0` lets a round-trip return dust even against the pinned pool, so
+/// we reject it outright. The deterministic core supplies a real floor; the agent
+/// can never disarm slippage protection by passing zero.
+const EZeroMinOut: u64 = 5;
 
 // === Structs ===
 
@@ -99,6 +110,14 @@ public struct SwapVault<phantom Base, phantom Quote> has key {
     /// it. Checked first in `agent_swap_*` so a foreign mandate can never move
     /// this vault even if that mandate's own gate would pass.
     mandate_id: ID,
+    /// THE PINNED POOL (C1 fix). The object ID of the ONE DeepBook `Pool<Base,
+    /// Quote>` this vault is allowed to trade against. Owner-set at creation (and
+    /// rotatable via `set_allowed_pool`). `agent_swap_*` asserts
+    /// `object::id(pool) == allowed_pool_id`, so a jailbroken agent CANNOT route
+    /// the vault's funds through a pool of its own making (e.g. a self-created
+    /// permissionless pool with no liquidity and `min_out = 0`) — the pool is part
+    /// of the cage, not a free runtime arg.
+    allowed_pool_id: ID,
     /// The BASE-side custody pot (e.g. SUI). The agent swaps OUT OF here on a
     /// base→quote swap and the leftover/output lands back here.
     base: Balance<Base>,
@@ -119,6 +138,14 @@ public struct SwapVaultCreated has copy, drop {
     vault_id: ID,
     owner: address,
     mandate_id: ID,
+    /// The pool this vault is pinned to at creation (C1).
+    allowed_pool_id: ID,
+}
+
+/// Emitted when the owner re-pins the vault to a different DeepBook pool (C1).
+public struct AllowedPoolSet has copy, drop {
+    vault_id: ID,
+    allowed_pool_id: ID,
 }
 
 public struct SwapDeposited has copy, drop {
@@ -156,13 +183,23 @@ public struct AgentSwapped has copy, drop {
 /// bound to `mandate_id`. Like `vault::create_vault`, the caller passes the ID of
 /// a mandate they own (e.g. the degen mandate minted in the same onboarding PTB);
 /// the agent gate later enforces that ONLY that mandate can drive this vault.
-public fun create_swap_vault<Base, Quote>(mandate_id: ID, ctx: &mut TxContext) {
+///
+/// `allowed_pool_id` PINS the vault to the single DeepBook `Pool<Base, Quote>` the
+/// agent may ever trade against (C1). The owner supplies the canonical SUI↔USDC
+/// pool's object ID here at onboarding; the agent gate then refuses any other pool.
+/// Re-pin later via `set_allowed_pool`.
+public fun create_swap_vault<Base, Quote>(
+    mandate_id: ID,
+    allowed_pool_id: ID,
+    ctx: &mut TxContext,
+) {
     let owner = ctx.sender();
 
     let vault = SwapVault<Base, Quote> {
         id: object::new(ctx),
         owner,
         mandate_id,
+        allowed_pool_id,
         base: balance::zero<Base>(),
         quote: balance::zero<Quote>(),
         deep: balance::zero<DEEP>(),
@@ -172,9 +209,28 @@ public fun create_swap_vault<Base, Quote>(mandate_id: ID, ctx: &mut TxContext) {
         vault_id: object::id(&vault),
         owner,
         mandate_id,
+        allowed_pool_id,
     });
 
     transfer::share_object(vault);
+}
+
+/// Owner-only: re-pin the vault to a different DeepBook `Pool` (C1). The authority
+/// root is the same `sender == owner` check used by every owner path here. Lets the
+/// user rotate to a new canonical pool without rebuilding the vault; the agent is
+/// never granted this power (no `AgentCap` path reaches it).
+public fun set_allowed_pool<Base, Quote>(
+    vault: &mut SwapVault<Base, Quote>,
+    allowed_pool_id: ID,
+    ctx: &TxContext,
+) {
+    assert!(ctx.sender() == vault.owner, ENotOwner);
+    vault.allowed_pool_id = allowed_pool_id;
+
+    event::emit(AllowedPoolSet {
+        vault_id: object::id(vault),
+        allowed_pool_id,
+    });
 }
 
 // === Owner-only deposits ===
@@ -315,9 +371,13 @@ public fun agent_swap_base_to_quote<Base, Quote>(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    // Steps 1–4 + split the BASE input out of custody (shared, single-source).
+    // C1 — THE POOL PIN. The agent may only ever trade against the vault's pinned
+    // pool; a self-created drain pool is rejected before any custody is touched.
+    assert!(object::id(pool) == vault.allowed_pool_id, EWrongPool);
+
+    // Steps 1–4 + the min_out floor + split the BASE input out of custody.
     let (base_in, deep_in) = gate_and_split_base(
-        vault, mandate, cap, scope_tag, amount_in, deep_fee, clock, ctx,
+        vault, mandate, cap, scope_tag, amount_in, deep_fee, min_quote_out, clock, ctx,
     );
 
     // Step 5a — the REAL DeepBook call (the ONLY protocol-touching line on this
@@ -350,9 +410,12 @@ public fun agent_swap_quote_to_base<Base, Quote>(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    // Steps 1–4 + split the QUOTE input out of custody (shared, single-source).
+    // C1 — THE POOL PIN (symmetric to base→quote).
+    assert!(object::id(pool) == vault.allowed_pool_id, EWrongPool);
+
+    // Steps 1–4 + the min_out floor + split the QUOTE input out of custody.
     let (quote_in, deep_in) = gate_and_split_quote(
-        vault, mandate, cap, scope_tag, amount_in, deep_fee, clock, ctx,
+        vault, mandate, cap, scope_tag, amount_in, deep_fee, min_base_out, clock, ctx,
     );
 
     // Step 5a — the REAL DeepBook call. Returns (base out, leftover quote,
@@ -386,9 +449,13 @@ fun gate_and_split_base<Base, Quote>(
     scope_tag: u8,
     amount_in: u64,
     deep_fee: u64,
+    min_out: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ): (Coin<Base>, Coin<DEEP>) {
+    // C1 — the slippage floor (defense-in-depth). A zero floor would let a
+    // round-trip return dust even against the pinned pool; reject it outright.
+    assert!(min_out > 0, EZeroMinOut);
     // 1. This vault may only be driven by its own mandate.
     assert!(vault.mandate_id == object::id(mandate), EVaultMandateMismatch);
     // 2. The full mandate gate (5 asserts) + budget debit. Atomic with the swap.
@@ -411,9 +478,12 @@ fun gate_and_split_quote<Base, Quote>(
     scope_tag: u8,
     amount_in: u64,
     deep_fee: u64,
+    min_out: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ): (Coin<Quote>, Coin<DEEP>) {
+    // C1 — the slippage floor (defense-in-depth), symmetric to the base side.
+    assert!(min_out > 0, EZeroMinOut);
     assert!(vault.mandate_id == object::id(mandate), EVaultMandateMismatch);
     mandate::consume_budget(mandate, cap, scope_tag, amount_in, clock);
     assert!(vault.quote.value() >= amount_in, EInsufficientBalance);
@@ -526,6 +596,12 @@ public fun owner<Base, Quote>(vault: &SwapVault<Base, Quote>): address { vault.o
 
 public fun mandate_id<Base, Quote>(vault: &SwapVault<Base, Quote>): ID { vault.mandate_id }
 
+/// The DeepBook pool this vault is pinned to (C1). The UI/agent reads this to know
+/// which pool to thread into `agent_swap_*`; any other pool is rejected `EWrongPool`.
+public fun allowed_pool_id<Base, Quote>(vault: &SwapVault<Base, Quote>): ID {
+    vault.allowed_pool_id
+}
+
 public fun base_value<Base, Quote>(vault: &SwapVault<Base, Quote>): u64 { vault.base.value() }
 
 public fun quote_value<Base, Quote>(vault: &SwapVault<Base, Quote>): u64 { vault.quote.value() }
@@ -566,15 +642,18 @@ public fun agent_swap_base_to_quote_stub<Base, Quote>(
     scope_tag: u8,
     amount_in: u64,
     deep_fee: u64,
+    min_out: u64,
     out_amount: u64,
     deep_leftover_amt: u64,
     input_leftover: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    // REAL gate + split (steps 1–4) — same code path as production.
+    // REAL gate + split (steps 1–4 + the min_out floor) — same code path as
+    // production. The pool-pin assert lives in `agent_swap_base_to_quote` (it needs
+    // the real `Pool`, which is uncreatable here); everything else is identical.
     let (base_in, deep_in) = gate_and_split_base(
-        vault, mandate, cap, scope_tag, amount_in, deep_fee, clock, ctx,
+        vault, mandate, cap, scope_tag, amount_in, deep_fee, min_out, clock, ctx,
     );
 
     // STUB swap (replaces `do_swap_base_to_quote`): the real call takes a zero
@@ -602,6 +681,7 @@ public fun agent_swap_quote_to_base_stub<Base, Quote>(
     scope_tag: u8,
     amount_in: u64,
     deep_fee: u64,
+    min_out: u64,
     out_amount: u64,
     deep_leftover_amt: u64,
     input_leftover: u64,
@@ -609,7 +689,7 @@ public fun agent_swap_quote_to_base_stub<Base, Quote>(
     ctx: &mut TxContext,
 ) {
     let (quote_in, deep_in) = gate_and_split_quote(
-        vault, mandate, cap, scope_tag, amount_in, deep_fee, clock, ctx,
+        vault, mandate, cap, scope_tag, amount_in, deep_fee, min_out, clock, ctx,
     );
 
     // STUB swap: real call takes a zero base coin internally; pass a zero base

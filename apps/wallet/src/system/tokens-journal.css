@@ -52,6 +52,16 @@
   --grad: linear-gradient(100deg, var(--g1) 0%, var(--g2) 42%, var(--g3) 78%, var(--g2) 100%);
   --grad-soft: linear-gradient(120deg, rgba(159, 210, 255, 0.16), rgba(30, 143, 230, 0.05));
   --grad-edge: linear-gradient(135deg, var(--g2), var(--g3));
+  /* THE NUMBER "DISCORD" GRADIENT — the signature two-tone on the balance figures.
+     Light = bright→deep blue, every stop visible on the white paper (the earlier
+     white→blue ghosted out; these stops all read). Applied via `.ng` to the grand
+     total + each card's number; the $ + USDC label stay muted solid (NOT this).
+     Founder lock: NUMBERS are BLUE in BOTH themes — the dark gold gilt was scrapped. */
+  --num-grad: linear-gradient(110deg, #4da2ff 0%, #1e8fe6 55%, #4da2ff 100%);
+  /* NAMES / ADDRESSES — the "Discord-perk" orange→red→orange signature. Applied via
+     .rcpt (chat recipient) + the shared .handle class (any @suize handle / 0x address).
+     Distinct from the blue numbers so money vs identity never blur. */
+  --grad-name: linear-gradient(110deg, #ff9a4d 0%, #ff4d5e 55%, #ff9a4d 100%);
   --scrim: rgba(11, 27, 43, 0.3);
 
   --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
@@ -64,6 +74,15 @@
   --pad: clamp(24px, 7vw, 140px);
   --sel: var(--accent);
   --sel-ink: #fff;
+
+  /* RADIUS TOKENS — editorial, near-square. Outer >= inner so corners nest.
+     control=buttons/inputs/chips/steppers/split-bar+segments · card=the 3 account
+     cards + the Activity widget · max=the move-money popup only. Every hardcoded
+     radius elsewhere is replaced by one of these (the only exception: genuine
+     CIRCLES at 50%). */
+  --r-control: 4px;
+  --r-card: 7px;
+  --r-max: 10px;
 }
 
 /* ── DARK (warm GOLD) — the mockup gold ramp, scoped to the journal subtree ── */
@@ -92,6 +111,13 @@
   --grad: linear-gradient(100deg, var(--g1) 0%, var(--g2) 42%, var(--g3) 78%, var(--g2) 100%);
   --grad-soft: linear-gradient(120deg, rgba(231, 193, 110, 0.14), rgba(201, 154, 60, 0.04));
   --grad-edge: linear-gradient(135deg, var(--g2), var(--g3));
+  /* NUMBERS are BLUE in BOTH themes (founder lock): the gold gilt was scrapped so the
+     figure reads as one semantic color everywhere. A touch brighter than light's blue so
+     it lifts off the near-black paper without blowing out. */
+  --num-grad: linear-gradient(110deg, #5bb0ff 0%, #2e9bff 55%, #5bb0ff 100%);
+  /* NAMES / ADDRESSES — the orange→red signature, a hair brighter for the dark paper.
+     Applied via .rcpt + .handle (any @suize handle / 0x address). */
+  --grad-name: linear-gradient(110deg, #ffb05c 0%, #ff5c6e 55%, #ffb05c 100%);
   --scrim: rgba(7, 6, 3, 0.62);
   --sel: var(--accent);
   --sel-ink: #0b0a07;
@@ -147,7 +173,7 @@
 .journal :focus-visible {
   outline: 2px solid var(--accent-line);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: var(--r-control);
 }
 /* text inputs prefer a quiet underline/border emphasis over a ring (handled per
    field below); never the old double halo. */
@@ -178,6 +204,59 @@
   .journal .grad {
     -webkit-text-fill-color: var(--accent);
     color: var(--accent);
+  }
+}
+
+/* THE NUMBER GRADIENT (.ng) — the founder's signature two-tone, but READABLE: every
+   --num-grad stop is a visible blue/gold (no ghosting white start). Applied by the TSX
+   to the grand-total figure AND each card's .acct__num span. Weight stays 400 so the
+   serif strokes stay solid under the clip (no thin-stroke shimmer-out). The $ sign
+   (.cur / .acct__cur) + the USDC label keep their muted SOLID color — never gradient.
+   Static (no animation): a clipped figure must stay legible; background-size 180% just
+   lets the mid stop land richly across wide numbers. */
+.journal .ng {
+  background: var(--num-grad);
+  background-size: 180% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  font-weight: 400;
+}
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .journal .ng {
+    -webkit-text-fill-color: var(--accent);
+    color: var(--accent);
+  }
+}
+
+/* THE NAME GRADIENT (.handle / chat .rcpt) — the orange→red "Discord-perk" signature on
+   identity: any @suize handle or 0x address. Same clip recipe as .grad but with the warm
+   --grad-name ramp, in BOTH themes. The slow gradShiftJ keeps it alive (respecting
+   prefers-reduced-motion); weight 600 so the clipped strokes stay solid + legible on both
+   card surfaces. Distinct from the BLUE numbers so money vs identity never blur. */
+.journal .handle,
+.journal .rcpt {
+  background-image: var(--grad-name);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  font-weight: 600;
+  animation: gradShiftJ 13s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .journal .handle,
+  .journal .rcpt {
+    animation: none;
+  }
+}
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .journal .handle,
+  .journal .rcpt {
+    -webkit-text-fill-color: var(--warn);
+    color: var(--warn);
   }
 }
 
@@ -213,6 +292,15 @@
   align-items: baseline;
   gap: 16px;
   flex-wrap: wrap;
+}
+.journal .mh__mark {
+  align-self: center;
+  flex: none;
+  height: 30px;
+  aspect-ratio: 56 / 67;
+  background: var(--accent);
+  -webkit-mask: url(/logo-mask.png) center / contain no-repeat;
+  mask: url(/logo-mask.png) center / contain no-repeat;
 }
 .journal .mh__word {
   font-family: var(--serif);
@@ -282,62 +370,6 @@
 :root[data-theme='dark'] .journal .thememark i {
   background: var(--accent);
   box-shadow: none;
-}
-
-/* state ribbon — the "fresh / in use" demonstration switch (kept editorial) */
-.journal .ribbon {
-  position: relative;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 0;
-  flex-wrap: wrap;
-  padding: 14px var(--pad);
-  border-bottom: 1px solid var(--hair-2);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  color: var(--ink-3);
-}
-.journal .ribbon__lab {
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  font-size: 10px;
-  margin-right: 18px;
-  color: var(--ink-4);
-}
-.journal .ribbon__seg {
-  display: inline-flex;
-  border: 1px solid var(--hair);
-  border-radius: 3px;
-  overflow: hidden;
-}
-.journal .ribbon__opt {
-  padding: 7px 16px;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: var(--ink-3);
-  border-right: 1px solid var(--hair);
-  transition:
-    color 0.4s,
-    background 0.4s;
-  position: relative;
-}
-.journal .ribbon__opt:last-child {
-  border-right: none;
-}
-.journal .ribbon__opt[aria-pressed='true'] {
-  color: var(--accent);
-  background: var(--accent-wash);
-}
-.journal .ribbon__note {
-  margin-left: auto;
-  color: var(--ink-4);
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
-  max-width: 46ch;
-  text-align: right;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -471,10 +503,12 @@
 }
 .journal .hero__num {
   font-family: var(--serif);
-  font-weight: 300;
+  font-weight: 400;
   letter-spacing: -0.022em;
   line-height: 0.94;
-  font-size: clamp(3rem, 10vw, 7rem);
+  font-size: clamp(3rem, 9vw, 6.2rem);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
 }
 .journal .hero__num .cur {
   font-size: 0.32em;
@@ -498,7 +532,12 @@
   font-weight: 500;
 }
 
-/* ── ACCOUNTS LEDGER — the three accounts as SOFT-FRAME cards ───────────────── */
+/* ── ACCOUNTS LEDGER — the three accounts as FLAT HAIRLINE cards ────────────── */
+/* FOUNDER LOCK: flat hairline depth ONLY. No ::before gradient wash, no box-shadow
+   (card/hover/drop/selected/left-edge bar). Each card is a single faint --paper-2 fill
+   on ONE hairline; hierarchy comes from SIZE (the huge serif balance is the hero), and
+   selection is a faint accent WASH only (the founder killed the accent left-edge bar —
+   "screams AI slop"). */
 .journal .ledger {
   display: flex;
   flex-direction: column;
@@ -506,111 +545,92 @@
 }
 .journal .acct {
   position: relative;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 20px;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(9px, 1.4vh, 14px);
   padding: clamp(16px, 2.4vh, 24px) clamp(18px, 2vw, 26px);
   background: var(--paper-2);
-  border: 1px solid var(--hair-2);
-  border-radius: 14px;
-  box-shadow:
-    0 1px 0 var(--hair),
-    0 40px 70px -56px rgba(11, 27, 43, 0.55);
+  /* one faint hairline — bumped to the full --hair (not --hair-2) so the frame
+     never dissolves on white; flat, no shadow, no wash. */
+  border: 1px solid var(--hair);
+  border-radius: var(--r-card);
+  /* the whole card SELECTS (click) — pointer cursor whether it renders as a
+     <button> or a <div role="button">. The drag affordance overrides this below. */
+  cursor: pointer;
+  /* DRAG never selects the card's text — pressing + dragging a card to move money
+     must not highlight the balance/labels. (.split carries the same guard.) */
+  -webkit-user-select: none;
+  user-select: none;
   transition:
     background 0.4s var(--e-quart),
-    box-shadow 0.5s var(--e-quart),
-    border-color 0.5s;
+    border-color 0.5s var(--e-quart);
 }
-:root[data-theme='dark'] .journal .acct {
-  box-shadow:
-    0 1px 0 var(--hair),
-    0 40px 70px -50px rgba(0, 0, 0, 0.8);
-}
-.journal .acct::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 14px;
-  pointer-events: none;
-  background: var(--grad-soft);
-  opacity: 0.5;
-}
-.journal .acct__main,
-.journal .acct__right {
-  position: relative;
-  z-index: 1;
-}
-.journal .acct:hover {
-  box-shadow:
-    0 1px 0 var(--accent-line),
-    0 50px 80px -50px rgba(11, 27, 43, 0.5);
-}
-/* DRAGGABLE CARD — the whole card moves money (no dot grip). A "grab" cursor on
-   the card + a faint hover lift signal it; pressing and dragging onto another card
-   (or Main) opens the move-money popup. touch-action:none so the gesture owns the
-   pointer on touch. The interactive controls inside (toggle, links) opt OUT below. */
+/* DRAGGABLE CARD — the whole card moves money (no dot grip). A "grab" cursor signals
+   it; pressing and dragging onto another card (or Main) opens the move-money popup.
+   touch-action:none so the gesture owns the pointer on touch. NO hover lift (flat).
+   The interactive controls inside (status row, links) opt OUT below. */
 .journal .acct[data-drag] {
   cursor: grab;
   touch-action: none;
-  transition:
-    background 0.4s var(--e-quart),
-    box-shadow 0.5s var(--e-quart),
-    border-color 0.5s,
-    transform 0.35s var(--e-expo);
-}
-.journal .acct[data-drag]:hover {
-  transform: translateY(-2px);
 }
 .journal .acct[data-drag]:active {
   cursor: grabbing;
-  transform: translateY(0);
 }
-/* controls inside a draggable card keep their own cursor + must not start a drag */
-.journal .acct .sw,
-.journal .acct .killer,
+/* interactive controls inside a draggable card keep the pointer cursor (NOT grab) and
+   must not start a drag. The .kill ROW is no longer a control (only .kill__act is), so
+   we target the real nested controls: the pause button, the footer actions, links. */
+.journal .acct .kill__act,
+.journal .acct .action,
 .journal .acct a,
 .journal .acct button {
   cursor: pointer;
 }
+/* DROP TARGET — accent-wash fill + accent border only (shadow deleted). */
 .journal .acct.drop-ok {
   background: var(--accent-wash);
   border-color: var(--accent-line);
-  box-shadow:
-    0 1px 0 var(--accent-line),
-    0 30px 60px -44px var(--accent-line);
 }
-.journal .acct__main {
+
+/* the VERTICAL STACK — everything that dims when paused lives in .acct__body:
+   tiny mono name label → HUGE serif balance hero → one plain capability line.
+   The status row (.kill) + the action footer (.acct__foot) sit BELOW it and stay
+   full opacity even when paused. */
+.journal .acct__body {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: clamp(7px, 1vh, 11px);
   min-width: 0;
+  transition:
+    opacity 0.4s var(--e-quart),
+    filter 0.4s var(--e-quart);
 }
-.journal .acct__name {
-  font-family: var(--serif);
-  font-weight: 400;
-  font-size: clamp(1.25rem, 2.6vw, 1.7rem);
-  letter-spacing: -0.01em;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.journal .acct__tag {
+.journal .acct__label {
   font-family: var(--mono);
   font-size: 9.5px;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--ink-3);
-  border: 1px solid var(--hair);
-  border-radius: 999px;
-  padding: 3px 9px;
 }
-.journal .acct__tag.lock {
+/* the HERO — the big balance number; the card's reason to exist. */
+.journal .acct__hero {
+  font-family: var(--serif);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-size: clamp(1.9rem, 4.4vw, 2.6rem);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
+}
+.journal .acct__cur {
+  font-family: var(--mono);
+  font-weight: 400;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--ink-3);
-}
-.journal .acct__tag.on {
-  color: var(--accent);
-  border-color: var(--accent-line);
 }
 .journal .acct__cap {
   font-family: var(--mono);
@@ -618,120 +638,235 @@
   color: var(--ink-3);
   letter-spacing: 0.005em;
 }
-.journal .acct__right {
+
+/* the docked action footer (Main card) — the REAL Add money (.action--primary, the
+   ONE solid accent CTA) + Send + Convert (.action ghosts) as a LEFT-ALIGNED row of
+   small buttons at the card bottom. NOT three flex:1 columns — each button hugs its
+   label so they read as a tight verb cluster, not a segmented control. */
+.journal .acct__foot {
   display: flex;
-  align-items: center;
-  gap: clamp(16px, 3vw, 40px);
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 2px;
 }
-.journal .acct__bal {
-  text-align: right;
-}
-.journal .acct__bal .v {
-  font-family: var(--mono);
-  font-size: clamp(1rem, 2vw, 1.35rem);
-  color: var(--ink);
-}
-.journal .acct__bal .u {
-  font-family: var(--mono);
+/* SMALL footer buttons — the card is a compact surface, so the footer .action /
+   .action--primary are tighter + a touch smaller than the detail-pane .actions
+   variants. They stay clearly clickable (the shared :hover lift in the .action rules
+   below carries through). The nested buttons own their own focus ring. */
+.journal .acct__foot .action {
+  padding: 8px 12px;
   font-size: 10px;
-  color: var(--ink-3);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  display: block;
-  margin-top: 3px;
+  letter-spacing: 0.07em;
+  gap: 6px;
+  /* ghost on the card: a true transparent fill on a hairline (the card is already
+     --paper-2, so a --paper-2 button would vanish). The solid CTA below opts back in. */
+  background: transparent;
 }
+.journal .acct__foot .action svg {
+  width: 13px;
+  height: 13px;
+}
+/* the ONE solid accent CTA on the Main card — keep its accent fill (override the
+   transparent ghost rule above). Hover lift is inherited from .action--primary:hover. */
+.journal .acct__foot .action--primary {
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+}
+
 /* the card being dragged dims; its source highlights stay subtle */
 .journal .acct.dragging {
   opacity: 0.45;
   cursor: grabbing;
 }
-/* the selected account card (its detail fills the right pane) — a quiet accent edge */
+
+/* SELECTED — a faint accent WASH only. The founder killed the 2px accent left-edge
+   bar ("screams AI slop"): NO left border, NO border-color change, NO shadow. The
+   wash sits a touch stronger than the drop-ok wash so the selected card reads without
+   any chrome. The 1px hairline + symmetric padding are UNCHANGED from the base .acct,
+   so selecting/deselecting never shifts the card a pixel (no left-bar to compensate
+   for). color-mix doubles --accent-wash's opacity in both themes. */
 .journal .acct.selected {
-  border-color: var(--accent-line);
-  box-shadow:
-    0 1px 0 var(--accent-line),
-    0 40px 70px -52px rgba(11, 27, 43, 0.5),
-    inset 0 0 0 1px var(--accent-wash);
+  background: color-mix(in srgb, var(--accent-wash) 100%, var(--accent) 6%);
 }
-:root[data-theme='dark'] .journal .acct.selected {
-  box-shadow:
-    0 1px 0 var(--accent-line),
-    0 40px 70px -46px rgba(0, 0, 0, 0.8),
-    inset 0 0 0 1px var(--accent-wash);
+
+/* PAUSED — the body dims to ~50% + desaturates so it reads as "off", while the
+   .kill status row stays fully lit so it can be turned back on (founder lock #4). */
+.journal .acct.paused .acct__body {
+  opacity: 0.5;
+  filter: saturate(0.4);
 }
-/* the whole card is a button when it selects an account — kill default button look */
-.journal button.acct {
+
+/* the whole card SELECTS an account. It renders as a <div role="button"> (so it can
+   nest its own real .action / .kill__act buttons without an invalid button-in-button),
+   but a legacy <button.acct> is still styled identically — kill the default button
+   chrome and left-align the editorial stack. The single focus ring comes from the
+   global .journal :focus-visible (one calm accent outline) — the card never adds a
+   second ring, and the nested buttons carry their OWN focus ring (no double rings,
+   since the card outline only paints when the CARD itself is keyboard-focused). */
+.journal button.acct,
+.journal .acct[role='button'] {
   font: inherit;
   text-align: left;
   width: 100%;
   color: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+/* card-kind modifiers — anchors the TSX sets so the docked footer (Main) / the lit
+   status row (AI) read as one family. Main's footer + AI's status row keep a small
+   gap from the body above them so the lit controls breathe under the dimmable stack. */
+.journal .acct--main .acct__foot,
+.journal .acct--ai .kill {
+  margin-top: clamp(2px, 0.6vh, 6px);
 }
 
-/* kill switch — a calm on/off toggle, no "pause agent" verb */
-.journal .killer {
-  display: inline-flex;
-  align-items: center;
-  gap: 11px;
-}
-.journal .killer__lab {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  min-width: 34px;
-  text-align: right;
-  transition: color 0.4s;
-}
-/* REFINED on/off switch — calm + unmistakable.
-   OFF: a quiet hollow track, the knob sits left in muted ink.
-   ON : the track FILLS with a solid accent gradient, knob snaps right to crisp
-        paper-white with a soft lift. The fill (not just a wash) makes the state
-        unambiguous at a glance, while staying editorial — no diode, no glow. */
-.journal .sw {
-  width: 42px;
-  height: 23px;
-  border-radius: 999px;
-  border: 1px solid var(--hair);
-  background: var(--paper-3);
-  position: relative;
-  transition:
-    background 0.45s var(--e-quart),
-    border-color 0.45s var(--e-quart),
-    box-shadow 0.45s var(--e-quart);
-  flex: 0 0 auto;
-}
-.journal .sw::after {
+/* ── ACTIVE AI CARD — the two AI accounts read as "alive" vs the plain Main card. A
+   very faint accent wash (color-mix --accent ~6% over --paper-2) plus a barely-there
+   slow diagonal shimmer. Painted on a ::before overlay so it composes UNDER the content
+   and does NOT fight the `background` property (which .selected / .drop-ok set on the
+   card itself). Editorial, not a bootstrap glow. Main (.acct--main) gets no ::before. */
+.journal .acct--ai::before {
   content: '';
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 17px;
-  height: 17px;
-  border-radius: 50%;
-  background: var(--ink-3);
-  box-shadow: none;
-  transition:
-    transform 0.45s var(--e-spring),
-    background 0.45s var(--e-quart),
-    box-shadow 0.45s var(--e-quart);
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  /* the static accent wash — barely there, just enough to feel warm/active */
+  background:
+    linear-gradient(
+      120deg,
+      color-mix(in srgb, var(--accent) 6%, transparent),
+      color-mix(in srgb, var(--accent) 2%, transparent)
+    );
 }
-.journal .sw[aria-pressed='true'] {
-  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
-  border-color: transparent;
-  box-shadow: inset 0 0 0 1px var(--accent-line);
+/* the slow shimmer — a faint diagonal sheen sweeping ~6s. Its own overlay so it can
+   animate background-position without disturbing the static wash. Very low opacity. */
+.journal .acct--ai::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    color-mix(in srgb, var(--accent) 9%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 220% 100%;
+  background-position: 120% 0;
+  opacity: 0.7;
+  animation: aiSheenJ 6s var(--e-quart) infinite;
 }
-.journal .sw[aria-pressed='true']::after {
-  transform: translateX(19px);
-  background: var(--paper-2);
-  box-shadow: 0 1px 3px -1px rgba(11, 27, 43, 0.45);
+/* keep the card's real content above both overlays */
+.journal .acct--ai > * {
+  position: relative;
+  z-index: 1;
 }
-:root[data-theme='dark'] .journal .sw[aria-pressed='true']::after {
-  background: #0b0a07;
+@keyframes aiSheenJ {
+  0% {
+    background-position: 120% 0;
+  }
+  60%,
+  100% {
+    background-position: -120% 0;
+  }
 }
-.journal .sw[aria-pressed='true'] ~ .killer__lab,
-.journal .killer.on .killer__lab {
+@media (prefers-reduced-motion: reduce) {
+  .journal .acct--ai::after {
+    animation: none;
+    background-position: 50% 0;
+    opacity: 0.4;
+  }
+}
+
+/* ── STATUS ROW (.kill) — split into a plain STATE LABEL (left) + an explicit ACTION
+   BUTTON (right). The founder killed "click the word Working": the label only REPORTS
+   state now (it is not clickable); the small button on the right is the ONLY toggle.
+   Layout: a full-width row, label pushed left + button pushed right (space-between).
+     .kill__state  — the dot + word, plain text
+     .kill__dot    — 6px lucide Circle (filled accent when Working / hollow neutral off)
+     .kill__word   — "Working" (accent) / "Paused" (--ink-3)
+     .kill__act    — small ghost button: "Pause" (PauseCircle) on / "Turn on" (Power) off
+   The whole row stays full opacity even when the card body dims (it is the way back). */
+.journal .kill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin-top: 2px;
+}
+/* LEFT — the plain state label (dot + word). NOT a control: default cursor, no hover. */
+.journal .kill__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  cursor: default;
+  transition: color 0.35s var(--e-quart);
+}
+.journal .kill__dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  display: inline-flex;
+}
+.journal .kill__dot svg {
+  width: 6px;
+  height: 6px;
+  display: block;
+}
+.journal .kill__word {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  transition: color 0.35s var(--e-quart);
+}
+/* WORKING — accent dot (filled Circle) + accent word. The card's single accent. */
+.journal .kill.on .kill__dot {
   color: var(--accent);
+}
+.journal .kill.on .kill__word {
+  color: var(--accent);
+}
+/* RIGHT — the ONLY toggle: a small ghost/hairline button (Pause / Turn on). Clearly
+   clickable, with a quiet hover lift (accent border + wash). --r-control corners. */
+.journal .kill__act {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition:
+    color 0.35s,
+    border-color 0.35s,
+    background 0.35s;
+}
+.journal .kill__act:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+}
+.journal .kill__act:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.journal .kill__act svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
 }
 
 /* when an AI account is OFF, its detail dims & collapses */
@@ -816,6 +951,7 @@
   align-items: center;
   padding: clamp(12px, 1.8vh, 16px) 2px;
   border-top: 1px solid var(--hair-2);
+  position: relative;
 }
 .journal .curr__row:last-child {
   border-bottom: 1px solid var(--hair-2);
@@ -856,7 +992,7 @@
   text-transform: uppercase;
   color: var(--ink-4);
   border: 1px solid var(--hair);
-  border-radius: 999px;
+  border-radius: var(--r-control);
   padding: 1px 6px;
 }
 .journal .curr__name {
@@ -888,23 +1024,109 @@
   padding: clamp(14px, 2vh, 20px) 0;
 }
 
-/* ACTION ROW — Add funds / Send / Convert (rebuilt) */
+/* UNKNOWN-coin "unverified" tag — same quiet hairline chip as `.curr__soon`, a
+   muted neutral so it reads honest-not-alarming (no price, not yet trusted). */
+.journal .curr__tag {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-control);
+  padding: 1px 6px;
+}
+
+/* "raw" hint after a best-effort amount when on-chain decimals were missing. */
+.journal .curr__amt .ui .curr__raw {
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  margin-left: 4px;
+}
+
+/* PIN toggle on an unknown row — sits at the far right of the (relative) row; quiet,
+   no chrome, brightens on hover/focus. The row reserves space via padding-right so
+   the amount never collides with it. */
+.journal .curr__row .curr__pin {
+  position: absolute;
+  top: 50%;
+  right: -2px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink-4);
+  cursor: pointer;
+  border-radius: var(--r-control);
+  transition: color 0.15s ease;
+}
+.journal .curr__row .curr__pin:hover,
+.journal .curr__row .curr__pin:focus-visible {
+  color: var(--ink);
+}
+.journal .curr__row .curr__pin[aria-pressed='true'] {
+  color: var(--ink-3);
+}
+/* Reserve the gutter so the right-aligned amount clears the pin button. */
+.journal .curr__row:has(.curr__pin) {
+  padding-right: 30px;
+}
+
+/* "Show N more tokens" — a quiet editorial expander, not a button. Mono, muted,
+   left-aligned; the chevron rotates when open. NO chunky chrome, no accent bar. */
+.journal .curr__more {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: clamp(11px, 1.6vh, 14px) 2px;
+  border: none;
+  border-top: 1px solid var(--hair-2);
+  background: none;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  text-align: left;
+  transition: color 0.15s ease;
+}
+.journal .curr__more:hover,
+.journal .curr__more:focus-visible {
+  color: var(--ink);
+}
+.journal .curr__more-chev {
+  transition: transform 0.18s ease;
+}
+.journal .curr__more-chev.is-open {
+  transform: rotate(180deg);
+}
+
+/* ACTION ROW — one solid-accent primary ('Add money') + quiet ghost verbs (Send /
+   Convert / Adjust mix), LEFT-ALIGNED (dropped the three flex:1 columns — complaint
+   #5). Used in the Main detail pane AND the Main card footer. */
 .journal .actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
   margin-top: clamp(18px, 2.6vh, 26px);
 }
 .journal .action {
-  flex: 1 1 0;
-  min-width: 96px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
-  padding: 13px 14px;
+  gap: 8px;
+  padding: 11px 16px;
   border: 1px solid var(--hair);
-  border-radius: 8px;
+  border-radius: var(--r-control);
   background: var(--paper-2);
   color: var(--ink-2);
   font-family: var(--mono);
@@ -914,16 +1136,12 @@
   transition:
     color 0.35s,
     border-color 0.35s,
-    background 0.35s,
-    transform 0.3s var(--e-expo),
-    box-shadow 0.35s;
+    background 0.35s;
 }
 .journal .action:hover:not(:disabled) {
   color: var(--accent);
   border-color: var(--accent-line);
   background: var(--accent-wash);
-  transform: translateY(-1px);
-  box-shadow: 0 12px 30px -22px var(--accent-line);
 }
 .journal .action:disabled {
   opacity: 0.5;
@@ -939,93 +1157,26 @@
   letter-spacing: 0.1em;
   color: var(--ink-4);
 }
+/* the ONE solid-accent CTA on the dashboard — 'Add money'. Solid accent fill +
+   --sel-ink text; the single landing spot for the eye. No shadow. */
+.journal .action--primary {
+  color: var(--sel-ink);
+  border-color: var(--accent);
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+}
+.journal .action--primary:hover:not(:disabled) {
+  color: var(--sel-ink);
+  border-color: var(--accent);
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+  filter: brightness(1.04);
+}
 
-/* ── INVESTING: per-strategy ON/OFF toggle + a PERCENT slider ──────────────── */
-.journal .strat__toggle {
-  display: flex;
-  align-items: center;
-}
-.journal .strat__slider {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 14px;
-  align-items: center;
-  margin-top: 4px;
-  overflow: hidden;
-  max-height: 60px;
-  opacity: 1;
-  transition:
-    max-height 0.5s var(--e-expo),
-    opacity 0.4s var(--e-quart),
-    margin 0.4s var(--e-expo);
-}
-.journal .strat.off .strat__slider {
-  max-height: 0;
-  opacity: 0;
-  margin-top: 0;
-  pointer-events: none;
-}
-.journal .rng {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--paper-3);
-  outline: none;
-  cursor: pointer;
-}
-.journal .rng::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 999px;
-}
-.journal .rng::-moz-range-track {
-  height: 4px;
-  border-radius: 999px;
-  background: var(--paper-3);
-}
-.journal .rng::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--paper-2);
-  box-shadow: 0 1px 4px -1px rgba(11, 27, 43, 0.5);
-  margin-top: -5.5px;
-  transition: transform 0.2s var(--e-spring);
-}
-.journal .rng::-moz-range-thumb {
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--paper-2);
-  box-shadow: 0 1px 4px -1px rgba(11, 27, 43, 0.5);
-}
-.journal .rng:active::-webkit-slider-thumb {
-  transform: scale(1.15);
-}
-.journal .rng:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.journal .strat__rngval {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--accent);
-  min-width: 42px;
-  text-align: right;
-}
-/* allocation total chip — green when it sums to 100, warn otherwise */
-.journal .alloc__lab .v.ok {
-  color: var(--good);
-}
-.journal .alloc__lab .v.warn {
-  color: var(--warn);
-}
+/* ── INVESTING — see the SPLIT-BAR block below (.split* / .remainder / .invest__foot).
+   The founder rejected the three separate slider rows ("too many sliders stacked"):
+   the allocation is now ONE horizontal bar of three segments separated by two
+   draggable dividers — drag a seam to re-weight the tiers on either side. The
+   strategy name lives in its segment exactly once; the legend dot ties description
+   to color (no name repeated). */
 
 /* ══════════════════════════════════════════════════════════════════════════
    CORNER LOG — a persistent compact widget pinned bottom-right (always visible).
@@ -1039,15 +1190,9 @@
   width: min(330px, calc(100vw - 32px));
   background: var(--paper-2);
   border: 1px solid var(--hair);
-  border-radius: 12px;
-  box-shadow: 0 30px 60px -40px rgba(11, 27, 43, 0.55);
+  border-radius: var(--r-card);
   overflow: hidden;
-  transition:
-    box-shadow 0.4s var(--e-quart),
-    border-color 0.4s var(--e-quart);
-}
-:root[data-theme='dark'] .journal .clog {
-  box-shadow: 0 30px 60px -36px rgba(0, 0, 0, 0.85);
+  transition: border-color 0.4s var(--e-quart);
 }
 .journal .clog:hover,
 .journal .clog.open {
@@ -1117,42 +1262,66 @@
   padding: 0 14px 12px;
   border-top: 1px solid var(--hair-2);
 }
+/* STRICT SINGLE-LINE ROW (complaint #4) — [dot, flex-none] [body, flex:1 truncating
+   ellipsis] [time, ~3ch flex-none] [amount, flex-none mono right]. Never wraps. The
+   .src kicker left the truncating cell and became the leading dot's TONE. */
 .journal .clog__row {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 10px;
-  align-items: baseline;
+  display: flex;
+  align-items: center;
+  gap: 9px;
   padding: 9px 0;
   border-bottom: 1px solid var(--hair-3);
 }
 .journal .clog__row:last-child {
   border-bottom: none;
 }
-.journal .clog__t {
-  font-family: var(--mono);
-  font-size: 9.5px;
-  color: var(--ink-4);
-  white-space: nowrap;
+/* the LEADING status dot — 5px, tone-colored (source → tone). Scoped under .clog__row
+   so it does not clash with the 6px accent pulse dot in the .clog__head. */
+.journal .clog__row .clog__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--ink-3);
+  box-shadow: none;
+}
+.journal .clog__row .clog__dot.good {
+  background: var(--good);
+}
+.journal .clog__row .clog__dot.cy {
+  background: var(--accent);
+}
+.journal .clog__row .clog__dot.mute {
+  background: var(--ink-4);
 }
 .journal .clog__b {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: var(--serif);
   font-size: 0.92rem;
   line-height: 1.35;
   color: var(--ink);
-  min-width: 0;
 }
-.journal .clog__b .src {
+.journal .clog__t {
+  flex: 0 0 auto;
   font-family: var(--mono);
-  font-size: 8.5px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  margin-right: 7px;
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-4);
+  white-space: nowrap;
+  text-align: right;
 }
 .journal .clog__v {
+  flex: 0 0 auto;
+  min-width: 6ch;
   font-family: var(--mono);
   font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  text-align: right;
 }
 .journal .clog__v.good {
   color: var(--good);
@@ -1166,6 +1335,15 @@
 .journal .clog__full {
   padding: 4px 14px 12px;
 }
+/* HONEST empty state — no real activity yet (production, empty feed). A calm muted
+   line, no dot/value chrome, never a fabricated row. */
+.journal .clog__empty {
+  font-family: var(--serif);
+  font-size: 0.9rem;
+  font-style: italic;
+  color: var(--ink-4);
+  padding: 4px 0;
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
    SPENDING — the in-app AI CHAT
@@ -1174,17 +1352,28 @@
   max-width: 680px;
   margin-top: clamp(18px, 2.4vh, 26px);
 }
+/* COMPACT EDITORIAL RHYTHM (founder rework): 3px between same-speaker rows; 12px before
+   a speaker CHANGE (.msg--turn, set by the component comparing rows[i-1].who). Tight,
+   not chunky — no bubbles, no receipt tail. The container gap is the same-speaker base;
+   --turn rows add the bigger top margin for the speaker switch. */
 .journal .chat__log {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 3px;
   padding: 6px 0 18px;
 }
 .journal .msg {
-  max-width: 80%;
+  max-width: 56ch;
+  min-width: 0;
   opacity: 0;
   transform: translateY(8px);
   animation: msgInJ 0.7s var(--e-expo) forwards;
+}
+.journal .msg--turn {
+  margin-top: 12px;
+}
+.journal .msg--turn:first-child {
+  margin-top: 0;
 }
 @keyframes msgInJ {
   to {
@@ -1192,53 +1381,44 @@
     transform: none;
   }
 }
+/* the optional tiny mono kicker — 10px / 0.14em — the 'You' / 'Suize AI' signal (the
+   side does most of the work). --ink-3 so it reads on both themes without shouting. */
 .journal .msg__who {
   font-family: var(--mono);
-  font-size: 9px;
-  letter-spacing: 0.16em;
+  font-size: 10px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--ink-4);
-  margin-bottom: 6px;
+  color: var(--ink-3);
+  margin-bottom: 3px;
 }
+/* the body — Space Grotesk (dropping the serif fixed the "font is off" feeling), ~14px
+   / 1.35, compact. tabular-nums so money columns still line up. */
 .journal .msg__body {
-  font-family: var(--serif);
-  font-size: clamp(1rem, 1.6vw, 1.18rem);
-  line-height: 1.5;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.35;
   color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
+/* You — right-aligned; Suize AI — left-aligned (the default flex start). */
 .journal .msg--me {
   align-self: flex-end;
   text-align: right;
 }
-.journal .msg--me .msg__body {
-  color: var(--ink-2);
-  font-style: italic;
+.journal .msg--ai {
+  align-self: flex-start;
 }
-.journal .msg--ai .msg__body {
-  color: var(--ink);
-}
-.journal .msg--ai .msg__body b {
+/* colored amounts inside a body — bold accent for figures, .good for confirmations,
+   links accent too. Read on BOTH themes (blue/gold accent, green/mint good). Applied
+   to both speakers' bodies so a right-aligned 'You' echo of a number still reads. */
+.journal .msg__body b,
+.journal .msg__body a {
   color: var(--accent);
   font-weight: 500;
   font-style: normal;
 }
-.journal .msg--ai .msg__body .good {
+.journal .msg__body .good {
   color: var(--good);
-}
-/* receipt line under an AI action */
-.journal .msg__receipt {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
-  color: var(--good);
-  margin-top: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.journal .msg__receipt svg {
-  width: 13px;
-  height: 13px;
 }
 .journal .dots {
   display: inline-flex;
@@ -1270,6 +1450,292 @@
     transform: translateY(-3px);
   }
 }
+/* ── SUGGESTION CHIPS (.chat__suggest) — a wrap row of quick prompts sitting just ABOVE
+   the input row. Each .suggest is a small ghost chip on a hairline with a quiet hover
+   lift (accent border + wash + a 1px rise). --r-control corners. */
+.journal .chat__suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 4px 0 10px;
+}
+.journal .suggest {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  transition:
+    color 0.3s,
+    border-color 0.3s,
+    background 0.3s,
+    transform 0.2s var(--e-spring);
+}
+.journal .suggest:hover {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+  transform: translateY(-1px);
+}
+.journal .suggest svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+/* ── CONFIRM CARD (.chatcard) — the "FLUID" send-confirmation surface in the AI lane.
+   NOT a bootstrap card: a soft accent-tinted gradient panel lit from within, with a
+   glowing accent rail down the left edge and a feathered accent shadow. The amount
+   sits on a faint accent wash. --r-max corners. Premium-fintech hierarchy: a tiny mono
+   "SEND" kicker + lucide icon → the AMOUNT as the big tabular HERO → the recipient on a
+   quiet secondary mono line → a hairline divider → a tight right-aligned action row
+   (Cancel ghost + the ONE gradient-accent Confirm). The TSX renders per status:
+   'pending' → divider+foot; 'sending' → a calm status line; 'sent' → collapses to ONE
+   check+summary line; 'failed' → a warn line + divider + a quiet Retry. The Fluid
+   surface themes correctly via vars (blue in light, gold in dark) on its own. Compact,
+   max ~300px. */
+.journal .chatcard {
+  position: relative;
+  overflow: hidden;
+  align-self: flex-start;
+  width: 100%;
+  max-width: 300px;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  /* COMPACT (founder rework): tight + premium, not airy. Smaller gap + padding; the
+     amount/rule/foot tighten in step below. The Fluid gradient surface + glow stay. */
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--hair));
+  border-radius: var(--r-max);
+  background:
+    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%),
+    linear-gradient(180deg, var(--paper-2), color-mix(in srgb, var(--paper-2) 86%, var(--accent) 14%));
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--accent) 20%, transparent) inset,
+    0 14px 34px -18px color-mix(in srgb, var(--accent) 60%, transparent);
+  transition: border-color 0.4s var(--e-quart);
+}
+/* NO left-edge accent rail — a colored bar on a card's left edge is the #1 AI-slop
+   tell. The Fluid look lives in the gradient SURFACE + glow, never a left stripe. */
+/* failed card: a quiet --warn border so the state reads without flooding the card red */
+.journal .chatcard.is-failed {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--hair));
+}
+/* the tiny mono KICKER ("SEND") + small lucide icon — chrome recedes, money leads. */
+.journal .chatcard__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.journal .chatcard__head svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+/* the AMOUNT — the HERO of the card. Tabular money lifted by a faint accent glow.
+   Compacted 28px → 22px so the card reads tight + premium, not airy. */
+.journal .chatcard__amount {
+  font-family: var(--mono);
+  font-size: 22px;
+  line-height: 1.05;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 18px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+/* the recipient — a quiet secondary line ("to landlord@suize"), mono, --ink-3. */
+.journal .chatcard__to {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+  color: var(--ink-3);
+  word-break: break-word;
+}
+/* In a chat money line, the AMOUNT and the RECIPIENT each carry their OWN semantic
+   gradient so they read apart — and apart from the muted connective text ("Sent · … to …",
+   which stays solid --ink-3). AMOUNT = the BLUE number gradient (--num-grad, the same clip
+   recipe as .ng). RECIPIENT = the orange→red name gradient (handled by the shared
+   .handle/.rcpt rule above). Clearly distinct: blue money, warm identity. */
+.journal .chatcard .amt {
+  background-image: var(--num-grad);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  font-weight: 600;
+  animation: gradShiftJ 13s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .journal .chatcard .amt {
+    animation: none;
+  }
+}
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .journal .chatcard .amt {
+    -webkit-text-fill-color: var(--accent);
+    color: var(--accent);
+  }
+}
+/* the hairline divider between the money block and the action row / states. Tightened
+   margins to match the compact card. */
+.journal .chatcard__rule {
+  height: 1px;
+  background: var(--hair);
+  margin: 3px 0 1px;
+}
+/* the action row — Cancel (quiet ghost text) + Confirm (the ONE accent), right-grouped. */
+.journal .chatcard__foot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  margin-top: 1px;
+}
+/* Confirm / Retry — the ONE accent: a Fluid GRADIENT fill (accent-bright → accent) with
+   a soft accent glow, small + square-ish (--r-control). --sel-ink reads on both ramps. */
+.journal .chatcard__foot .chatcard__confirm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--r-control);
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+  border-color: transparent;
+  box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--accent) 80%, transparent);
+  color: var(--sel-ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  transition:
+    filter 0.3s,
+    border-color 0.3s;
+}
+.journal .chatcard__foot .chatcard__confirm:hover {
+  filter: brightness(1.06);
+}
+.journal .chatcard__confirm svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+/* Cancel / Dismiss — a quiet GHOST TEXT button (no box on the carbon): just muted ink
+   that lifts to full ink on hover. Keeps the accent Confirm the sole chrome. */
+.journal .chatcard__cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  transition: color 0.3s;
+}
+.journal .chatcard__cancel:hover {
+  color: var(--ink);
+}
+/* on a FAILED card the Confirm button is the Retry — tint it --warn (flat solid, no
+   gradient) so it reads as the recovery action, matching the card's warn border. */
+.journal .chatcard.is-failed .chatcard__foot .chatcard__confirm {
+  border-color: var(--warn);
+  background: var(--warn);
+  color: var(--sel-ink);
+  box-shadow: none;
+}
+.journal .chatcard.is-failed .chatcard__foot .chatcard__confirm:hover {
+  border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 84%, #fff);
+}
+:root[data-theme='dark'] .journal .chatcard.is-failed .chatcard__foot .chatcard__confirm {
+  color: #0b0a07;
+}
+/* the STATUS line — 'Sending…' (muted), the warn "Couldn't send" line, OR the collapsed
+   'Sent · $X to name@suize' summary (.is-sent, with a lucide check). One mono line. */
+.journal .chatcard__status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.journal .chatcard__status--warn {
+  color: var(--warn);
+}
+/* SENT — the card collapses to ONE clean line: a small --good check + the summary. The
+   tight gap shrinks (no money block above), so reset it to a single-line surface. */
+.journal .chatcard.is-sent {
+  gap: 0;
+}
+.journal .chatcard.is-sent .chatcard__status {
+  color: var(--ink-3);
+}
+.journal .chatcard__check {
+  flex: 0 0 auto;
+  color: var(--good);
+}
+/* SUIVISION TXID LINK — a small, quiet mono link shown under the SENT summary that opens
+   the tx on SuiVision in a new tab. Muted --ink-3 by default with a subtle hairline
+   underline; lifts to --accent on hover. It carries a tiny lucide ArrowUpRight external
+   hint. Compact + understated — it confirms, it does not shout. */
+.journal .chatcard__tx {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  text-decoration: underline;
+  text-decoration-color: var(--hair);
+  text-underline-offset: 2px;
+  transition:
+    color 0.3s var(--e-quart),
+    text-decoration-color 0.3s var(--e-quart);
+}
+.journal .chatcard__tx:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent-line);
+}
+.journal .chatcard__tx svg {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+}
+
 .journal .chat__input {
   display: flex;
   align-items: center;
@@ -1310,7 +1776,7 @@
   text-transform: uppercase;
   color: var(--ink-4);
   border: 1px solid var(--hair);
-  border-radius: 999px;
+  border-radius: var(--r-control);
   padding: 3px 8px;
   flex: 0 0 auto;
 }
@@ -1321,7 +1787,7 @@
   text-transform: uppercase;
   color: var(--ink-3);
   border: 1px solid var(--hair);
-  border-radius: 3px;
+  border-radius: var(--r-control);
   padding: 8px 14px;
   transition:
     color 0.4s,
@@ -1335,203 +1801,341 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   INVESTING — strategy MULTI-SELECT + allocation split
+   INVESTING — ONE SPLIT-BAR (founder rework). The whole Investing balance is a
+   single horizontal bar = 100%. Three segments (Passive / Degen / GameFi) sit
+   side by side, each flex-basis'd inline by the TSX to its live %. TWO draggable
+   dividers straddle the seams — grab a divider to re-weight the tiers on either
+   side. Each segment carries its strategy NAME (once, here only) + its %, centered;
+   a single-accent ramp keyed off data-seg auto-themes blue/gold. A compact legend
+   row under the bar ties each color dot to a plain-words description (no name
+   repeated). Because the bar is pinned to 100%, .remainder reads "All your money is
+   working"; the .warn state stays available if a future flow over/under-fills.
    ════════════════════════════════════════════════════════════════════════ */
-.journal .strats {
-  display: flex;
-  flex-direction: column;
+
+/* the live remainder readout above the bar — a single mono line. On a fixed-100 bar
+   this reads 'All your money is working'; the .warn tone stays available for any
+   under/over-fill state the TSX may surface. */
+.journal .remainder {
   margin-top: clamp(14px, 2vh, 22px);
-}
-.journal .strat {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  column-gap: clamp(16px, 3vw, 26px);
-  row-gap: clamp(10px, 1.4vh, 14px);
-  align-items: center;
-  padding: clamp(15px, 2.2vh, 22px) 2px;
-  border-top: 1px solid var(--hair);
-  transition: opacity 0.4s var(--e-quart);
-}
-.journal .strat:last-child {
-  border-bottom: 1px solid var(--hair);
-}
-.journal .strat.off {
-  opacity: 0.72;
-}
-.journal .strat__main {
-  min-width: 0;
-}
-.journal .strat__name {
-  font-family: var(--serif);
-  font-weight: 400;
-  font-size: clamp(1.2rem, 2.2vw, 1.6rem);
-  letter-spacing: -0.01em;
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.journal .strat__name .by {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-.journal .strat__desc {
+  margin-bottom: clamp(10px, 1.4vh, 14px);
   font-family: var(--mono);
   font-size: 11.5px;
-  color: var(--ink-3);
-  line-height: 1.6;
-  margin-top: 6px;
-  letter-spacing: 0.005em;
-  max-width: 52ch;
-}
-.journal .strat__desc b {
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
   color: var(--ink-2);
-  font-weight: 500;
+  transition: color 0.3s var(--e-quart);
 }
-.journal .strat__share {
-  text-align: right;
-  font-family: var(--mono);
-  min-width: 80px;
-}
-.journal .strat__share .pct {
-  font-size: clamp(1.1rem, 2vw, 1.4rem);
-  color: var(--ink);
-  transition: color 0.4s;
-}
-.journal .strat.on .strat__share .pct {
-  color: var(--accent);
-}
-.journal .strat__share .amt {
-  font-size: 10.5px;
-  color: var(--ink-3);
-  display: block;
-  margin-top: 4px;
-  letter-spacing: 0.02em;
-}
-.journal .strat.off .strat__share {
-  opacity: 0.35;
+.journal .remainder.warn {
+  color: var(--warn);
 }
 
-/* allocation split bar — the visual slices */
-.journal .alloc {
-  margin-top: clamp(26px, 3.4vh, 40px);
-}
-.journal .alloc__lab {
+/* ── THE BAR (.split) — one horizontal bar, the whole Investing balance. flex row of
+   three segments; overflow VISIBLE so the divider grips can straddle the seams and
+   poke above/below the bar. The hairline frame + radius come from the segments + this
+   wrapper's clip-free outline; a 1px --hair ring keeps the bar grounded on --paper. */
+.journal .split {
+  position: relative;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 12px;
+  align-items: stretch;
+  height: 46px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-control);
+  background: var(--paper-2);
+  overflow: visible; /* the divider grips straddle the seams */
+  /* a soft inner clip for the SEGMENTS (rounded ends) without clipping the grips:
+     the segments themselves round their outer corners below. */
+  user-select: none;
+  touch-action: none;
 }
-.journal .alloc__lab .k {
+
+/* ── A SEGMENT (.split__seg) — flex-basis set inline by the TSX as its %. The fill is
+   a single-accent RAMP keyed off data-seg (Passive lightest → Degen mid → GameFi
+   deepest) via color-mix, so it auto-themes blue/gold. Name + % are CENTERED; both
+   hide gracefully (overflow/ellipsis) when a segment gets too narrow. */
+.journal .split__seg {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0; /* allow it to shrink past content so narrow tiers clip cleanly */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  overflow: hidden;
+  padding: 0 6px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  transition: background 0.3s var(--e-quart);
+}
+/* the THREE ramp steps — one accent, three depths. Passive lightest → GameFi deepest. */
+.journal .split__seg[data-seg='passive'] {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.journal .split__seg[data-seg='degen'] {
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.journal .split__seg[data-seg='gamefi'] {
+  background: color-mix(in srgb, var(--accent) 64%, transparent);
+}
+/* round only the bar's OUTER ends (first/last segment) so the ramp meets the frame. */
+.journal .split__seg:first-child {
+  border-top-left-radius: calc(var(--r-control) - 1px);
+  border-bottom-left-radius: calc(var(--r-control) - 1px);
+}
+.journal .split__seg:last-child {
+  border-top-right-radius: calc(var(--r-control) - 1px);
+  border-bottom-right-radius: calc(var(--r-control) - 1px);
+}
+/* the strategy NAME — mono uppercase ~10px, the ONLY place it appears. Clips to one
+   ellipsised line when the segment is too narrow. */
+.journal .split__name {
+  max-width: 100%;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* the % — tabular mono, a touch quieter than the name. */
+.journal .split__pct {
+  max-width: 100%;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── A DIVIDER (.split__div) — the two draggable seams. It straddles the boundary as a
+   thin vertical handle; the VISIBLE GRIP is a small rounded pill in --paper with a 1px
+   --hair border + two short grip lines, centered on the seam. col-resize cursor;
+   :hover/:active accent the grip so it reads as obviously slideable. It sits BETWEEN
+   the segments in the flex row (zero basis) and casts the grip via a centered ::after,
+   so it never consumes layout width. */
+.journal .split__div {
+  position: relative;
+  flex: 0 0 0;
+  width: 0;
+  align-self: stretch;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-appearance: none;
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+}
+/* the seam line — a 1px paper hairline straight down the boundary, so the two ramp
+   steps read as separated even before you grab. */
+.journal .split__div::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--paper-2);
+  opacity: 0.7;
+}
+/* the GRIP PILL — ~10×24px, --paper fill, 1px --hair border, centered on the seam.
+   The two short grip lines are painted with a repeating-linear-gradient so no extra
+   markup is needed. Subtle drop shadow lifts it off the ramp. */
+.journal .split__div::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  border-radius: 99px;
+  background:
+    repeating-linear-gradient(
+      to right,
+      transparent 0 3px,
+      var(--ink-4) 3px 4px,
+      transparent 4px 7px
+    ),
+    var(--paper);
+  border: 1px solid var(--hair);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  transition:
+    border-color 0.25s var(--e-quart),
+    box-shadow 0.25s var(--e-quart),
+    background 0.25s var(--e-quart);
+}
+.journal .split__div:hover::after,
+.journal .split__div:active::after,
+.journal .split__div:focus-visible::after {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-wash);
+  background:
+    repeating-linear-gradient(
+      to right,
+      transparent 0 3px,
+      var(--accent) 3px 4px,
+      transparent 4px 7px
+    ),
+    var(--paper);
+}
+.journal .split__div:focus-visible {
+  outline: none;
+}
+
+/* ── CURRENT POSITIONS (.strat-detail) — replaces the old 2-column-wrap legend (which
+   wrapped awkwardly + the Crash card broke the line). A clean VERTICAL list: one .sd-row
+   per strategy, each a color dot (.sd-dot[data-seg], ties to the bar segment so the name
+   is NOT repeated) + a plain "what it does" line (.sd-desc) + the live position (.sd-pos)
+   on the SAME row, aligned in a grid. On a narrow pane the desc/pos stack under the dot. */
+.journal .sd-head {
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-3);
+  margin-top: clamp(16px, 2.2vh, 22px);
+  margin-bottom: clamp(8px, 1.2vh, 12px);
 }
-.journal .alloc__lab .v {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-2);
-}
-.journal .alloc__bar {
-  height: 10px;
-  border-radius: 999px;
-  overflow: hidden;
+.journal .strat-detail {
   display: flex;
-  background: var(--paper-3);
-  border: 1px solid var(--hair-2);
+  flex-direction: column;
 }
-.journal .alloc__seg {
-  height: 100%;
-  transition:
-    flex-basis 0.9s var(--e-expo),
-    opacity 0.5s;
-  flex: 0 0 0%;
-  opacity: 0;
+.journal .sd-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  column-gap: 12px;
+  row-gap: 3px;
+  padding: clamp(8px, 1.2vh, 11px) 0;
+  border-top: 1px solid var(--hair-2);
 }
-.journal .alloc__seg.passive {
-  background: linear-gradient(90deg, var(--accent-soft), var(--accent-bright));
+.journal .sd-row:first-of-type {
+  border-top: none;
 }
-.journal .alloc__seg.degen {
-  background: linear-gradient(90deg, var(--accent-bright), var(--accent));
-}
-.journal .alloc__seg.gamefi {
-  background: linear-gradient(90deg, var(--accent), var(--accent-soft));
-}
-.journal .alloc__seg.on {
-  opacity: 1;
-}
-.journal .alloc__keys {
-  display: flex;
-  gap: 22px;
-  flex-wrap: wrap;
-  margin-top: 16px;
-}
-.journal .alloc__key {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-3);
-  transition: opacity 0.4s;
-}
-.journal .alloc__key.off {
-  opacity: 0.3;
-}
-.journal .alloc__key i {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
+/* the dot ties the row to its bar segment (same data-seg ramp) — no name repeated. The
+   dot sits on the text baseline via a tiny nudge so it aligns with the mono desc line. */
+.journal .sd-dot {
+  width: 9px;
+  height: 9px;
   flex: 0 0 auto;
+  border-radius: 50%;
+  align-self: center;
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
 }
-.journal .alloc__key.passive i {
-  background: var(--accent-soft);
+.journal .sd-dot[data-seg='passive'] {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 0 0 1px var(--hair); /* the lightest dot needs a ring to read */
 }
-.journal .alloc__key.degen i {
-  background: var(--accent-bright);
+.journal .sd-dot[data-seg='degen'] {
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
 }
-.journal .alloc__key.gamefi i {
-  background: var(--accent);
+.journal .sd-dot[data-seg='gamefi'] {
+  background: color-mix(in srgb, var(--accent) 64%, transparent);
 }
-.journal .alloc__key b {
+/* the plain-words "what it does" line — mono, quiet --ink-3 */
+.journal .sd-desc {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  color: var(--ink-3);
+}
+/* the live position — mono, a touch brighter --ink-2, right-aligned + tabular so the
+   figures line up down the column. Never wraps (it's a compact figure). */
+.journal .sd-pos {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
   color: var(--ink-2);
-  font-weight: 500;
+  text-align: right;
+  white-space: nowrap;
+}
+/* narrow pane: drop the third column — let the position stack under the desc, both in
+   the second grid column (dot stays in column 1, spanning the two text rows). */
+@media (max-width: 560px) {
+  .journal .sd-row {
+    grid-template-columns: auto 1fr;
+  }
+  .journal .sd-dot {
+    grid-row: 1 / span 2;
+  }
+  .journal .sd-pos {
+    grid-column: 2;
+    text-align: left;
+  }
 }
 
-/* GameFi → Crash callout */
+/* INVESTING FOOTER (.invest__foot) — the founder said the buttons sat too far apart
+   (space-between flung them to the edges). GROUP them on the RIGHT: 'Split evenly'
+   (.btn--ghost) then a small 'Confirm' (.btn--cy, auto width) sit together with a tight
+   10px gap. The disabled-Confirm style is kept below. */
+.journal .invest__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: clamp(18px, 2.6vh, 26px);
+}
+
+/* GameFi → Crash — now a COMPACT inline chip (the founder killed the big card that broke
+   the line / wrapped). The TSX renders it as the LAST child of the GameFi .sd-row, so it
+   places onto a SECOND grid line spanning the full width and left-aligns under the desc
+   — a small accent-washed pill that hugs its content + never overflows the row. The chip
+   stays on ONE line internally (its label is short); its hover lifts the border to accent.
+   --r-control corners per the founder lock. */
+.journal .sd-row:has(> .crashlink) {
+  grid-template-rows: auto auto;
+}
 .journal .crashlink {
-  margin-top: 18px;
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin-top: 6px;
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 7px;
+  padding: 4px 10px;
   border: 1px solid var(--hair);
-  border-radius: 6px;
+  border-radius: var(--r-control);
   background: var(--accent-wash);
   font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-2);
-  letter-spacing: 0.01em;
-  transition: border-color 0.4s;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  color: var(--ink-3);
+  max-width: 100%;
+  transition:
+    border-color 0.35s,
+    color 0.35s;
 }
 .journal .crashlink:hover {
   border-color: var(--accent-line);
+  color: var(--ink-2);
 }
 .journal .crashlink b {
   font-family: var(--serif);
   font-style: italic;
   font-weight: 400;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--accent);
 }
 .journal .crashlink .arr {
   color: var(--ink-3);
+  display: inline-flex;
+}
+.journal .crashlink .arr svg {
+  width: 11px;
+  height: 11px;
+  display: block;
 }
 
 /* empty-state line — the quiet "not yet" of a fresh / paused section */
@@ -1569,9 +2173,8 @@
   color: var(--accent);
   background: var(--paper-2);
   border: 1px solid var(--accent-line);
-  border-radius: 8px;
+  border-radius: var(--r-control);
   padding: 10px 14px;
-  box-shadow: 0 24px 50px -28px var(--accent-line);
   opacity: 0;
   transform: translate(-50%, -50%) scale(0.9);
 }
@@ -1606,17 +2209,13 @@
   width: min(420px, calc(100% - 36px));
   background: var(--paper-2);
   border: 1px solid var(--hair);
-  border-radius: 14px;
+  border-radius: var(--r-max);
   padding: clamp(26px, 4vw, 36px);
-  box-shadow: 0 50px 90px -50px rgba(11, 27, 43, 0.6);
   opacity: 0;
   pointer-events: none;
   transition:
     opacity 0.5s var(--e-quart),
     transform 0.6s var(--e-expo);
-}
-:root[data-theme='dark'] .journal .pop {
-  box-shadow: 0 50px 90px -44px rgba(0, 0, 0, 0.85);
 }
 .journal .pop.open {
   opacity: 1;
@@ -1631,19 +2230,28 @@
   color: var(--ink-3);
   margin-bottom: 16px;
 }
+/* MOVE-MONEY FLOW (complaint #10) — a 3-col grid [from | arrow | to]. Each .node is
+   itself a 2-row stack: the muted From/To kicker on the QUIET top line, the account
+   NAME on the baseline below. The lucide arrow sits in the middle column, pushed to
+   the BOTTOM (name baseline) — so it lands on the titles, not between two stacked
+   blocks. Accent-colored, name-size. (Markup: .node>small + .node>span; .arr>svg.) */
 .journal .pop__flow {
-  display: flex;
-  align-items: center;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  column-gap: 14px;
+  align-items: end;
   margin-bottom: 24px;
-  font-family: var(--serif);
-  font-size: clamp(1.1rem, 2.4vw, 1.5rem);
 }
 .journal .pop__flow .node {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-rows: auto auto;
+  row-gap: 5px;
+  min-width: 0;
 }
+.journal .pop__flow .node:last-child {
+  text-align: right;
+}
+/* the muted From/To kicker sits ABOVE the name (row 1) */
 .journal .pop__flow .node small {
   font-family: var(--mono);
   font-size: 9.5px;
@@ -1651,24 +2259,42 @@
   text-transform: uppercase;
   color: var(--ink-3);
 }
+/* the account name on the baseline (row 2) */
+.journal .pop__flow .node > span {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(1.1rem, 2.4vw, 1.5rem);
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* the lucide ArrowRight — middle column, pushed to the name baseline, accent */
 .journal .pop__flow .arr {
+  align-self: end;
   color: var(--accent);
-  font-family: var(--mono);
-  font-size: 18px;
+  display: inline-flex;
+  padding-bottom: 0.18em;
+}
+.journal .pop__flow .arr svg {
+  width: clamp(20px, 4vw, 26px);
+  height: clamp(20px, 4vw, 26px);
+  display: block;
 }
 .journal .pop__field {
   display: flex;
   align-items: center;
   gap: 10px;
   border: 1px solid var(--hair);
-  border-radius: 6px;
+  border-radius: var(--r-control);
   padding: 14px 16px;
   background: var(--paper);
   transition: border-color 0.4s;
 }
 .journal .pop__field:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-wash);
 }
 .journal .pop__field .pre {
   font-family: var(--mono);
@@ -1703,6 +2329,120 @@
   line-height: 1.6;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   WARNING MODAL (.warnpop) — turning OFF AI Investing. A centered modal like .pop
+   but warning-toned: a calm eyebrow title, a body of "what will happen" bullet lines
+   (each with a small lucide icon), and a foot with [Cancel ghost] + [Turn off & cash
+   out]. ONE --warn accent (the confirm button + the bullet icons) — NOT alarmist red
+   everywhere. .warnpop__scrim dims the backdrop; .open reveals + animates in.
+   ════════════════════════════════════════════════════════════════════════ */
+.journal .warnpop__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 97;
+  background: var(--scrim);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s var(--e-quart);
+}
+.journal .warnpop__scrim.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.journal .warnpop {
+  position: fixed;
+  z-index: 98;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -46%) scale(0.97);
+  width: min(440px, calc(100% - 36px));
+  background: var(--paper-2);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-max);
+  padding: clamp(26px, 4vw, 36px);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.5s var(--e-quart),
+    transform 0.6s var(--e-expo);
+}
+.journal .warnpop.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) scale(1);
+}
+/* the eyebrow title — mono, the single --warn accent at the top */
+.journal .warnpop__title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--warn);
+  margin-bottom: 18px;
+}
+.journal .warnpop__title svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+/* the body — what will happen, as bullet lines */
+.journal .warnpop__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.journal .warnpop__li {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  font-family: var(--serif);
+  font-weight: 300;
+  font-size: clamp(1rem, 1.8vw, 1.12rem);
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+/* the small lucide icon leading each bullet — quiet --warn, nudged onto the text line */
+.journal .warnpop__li svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin-top: 0.18em;
+  color: var(--warn);
+}
+.journal .warnpop__li b {
+  color: var(--ink);
+  font-weight: 400;
+}
+/* the foot — [Cancel ghost] + [Turn off & cash out]. The confirm is .btn--cy but
+   warning-accented (border + text + fill use --warn), so the action reads as the
+   consequential one without flooding the modal in red. */
+.journal .warnpop__foot {
+  display: flex;
+  gap: 12px;
+}
+/* the warning-accented confirm — overrides .btn--cy's accent fill with --warn. */
+.journal .warnpop__foot .btn--cy {
+  color: var(--sel-ink);
+  border-color: var(--warn);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--warn) 88%, #fff),
+    var(--warn)
+  );
+}
+:root[data-theme='dark'] .journal .warnpop__foot .btn--cy {
+  color: #0b0a07;
+}
+.journal .warnpop__foot .btn--cy:hover {
+  filter: brightness(1.05);
+}
+
 .journal .btn {
   position: relative;
   font-family: var(--mono);
@@ -1711,7 +2451,7 @@
   letter-spacing: 0.04em;
   padding: 13px 20px;
   border: 1px solid var(--hair);
-  border-radius: 5px;
+  border-radius: var(--r-control);
   background: var(--paper-2);
   color: var(--ink);
   display: inline-flex;
@@ -1720,19 +2460,19 @@
   gap: 9px;
   user-select: none;
   transition:
-    transform 0.3s var(--e-expo),
     border-color 0.35s,
     background 0.35s,
-    color 0.35s,
-    box-shadow 0.35s;
+    color 0.35s;
 }
 .journal .btn:hover {
   border-color: var(--accent);
-  transform: translateY(-1px);
-  box-shadow: 0 12px 30px -20px var(--accent-line);
 }
-.journal .btn:active {
-  transform: translateY(0);
+.journal .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.journal .btn:disabled:hover {
+  border-color: var(--hair);
 }
 .journal .btn--cy {
   flex: 1 1 auto;
@@ -1745,7 +2485,10 @@
 }
 .journal .btn--cy:hover {
   filter: brightness(1.05);
-  box-shadow: 0 16px 36px -16px var(--accent-line);
+}
+.journal .btn--cy:disabled:hover {
+  filter: none;
+  border-color: var(--accent);
 }
 .journal .btn--ghost {
   background: transparent;
@@ -1753,6 +2496,22 @@
 }
 .journal .btn--ghost:hover {
   color: var(--ink);
+}
+
+/* INVESTING FOOTER buttons — the founder said the Confirm was "too big". Inside
+   .invest__foot the buttons are AUTO width (override .btn--cy's flex:1 so Confirm
+   doesn't stretch full-width — that override stays scoped here so MoveMoney's popup
+   pair keeps its 50/50 split) with modest padding + a slightly smaller label. The
+   disabled (not-100%) Confirm reads clearly inert. --r-control corners inherited. */
+.journal .invest__foot .btn {
+  flex: 0 0 auto;
+  padding: 9px 16px;
+  font-size: 11px;
+}
+.journal .invest__foot .btn--cy:disabled {
+  background: var(--paper-2);
+  color: var(--ink-4);
+  border-color: var(--hair);
 }
 
 /* foot mark */
@@ -1792,11 +2551,6 @@
   .journal .masthead {
     padding-top: clamp(18px, 2.4vh, 28px);
     padding-bottom: clamp(12px, 1.6vh, 18px);
-    flex: 0 0 auto;
-  }
-  .journal .ribbon {
-    padding-top: 11px;
-    padding-bottom: 11px;
     flex: 0 0 auto;
   }
   .journal .amb {
@@ -1917,23 +2671,20 @@
     margin-top: 12px !important;
   }
 
-  /* tighter, flatter account cards inside the rail (avoid name/balance wrap) */
+  /* tighter account cards inside the narrow rail — compact the vertical stack so the
+     three cards + the hero hold in the no-scroll frame without scrolling. */
   .journal .rail-left .acct {
     padding: clamp(13px, 1.8vh, 20px) clamp(16px, 1.6vw, 22px);
-    gap: 14px;
+    gap: clamp(7px, 1.1vh, 11px);
   }
-  .journal .rail-left .acct__name {
-    font-size: clamp(1.1rem, 1.8vw, 1.4rem);
-    flex-wrap: wrap;
+  .journal .rail-left .acct__body {
+    gap: clamp(5px, 0.8vh, 9px);
+  }
+  .journal .rail-left .acct__hero {
+    font-size: clamp(1.6rem, 2.6vw, 2.1rem);
   }
   .journal .rail-left .acct__cap {
     font-size: 11px;
-  }
-  .journal .rail-left .acct__right {
-    gap: clamp(12px, 1.6vw, 22px);
-  }
-  .journal .rail-left .acct__bal .v {
-    font-size: clamp(0.95rem, 1.4vw, 1.2rem);
   }
 
   /* CHAT (spending pane): the chat fills the body; log scrolls, input pinned */
@@ -1975,11 +2726,8 @@
   .journal .chat__input {
     flex: 0 0 auto;
   }
-  /* INVESTING (strategies pane): its scroller fills the body */
-  .journal .rail-right #stratDetail {
-    max-height: none !important;
-    overflow: visible;
-  }
+  /* INVESTING (split-bar pane): its root IS the .pane__scroll, so the generic
+     .pane__scroll rule above already fills the body + scrolls internally. */
   .journal .foot {
     flex: 0 0 auto;
     padding-top: clamp(12px, 1.6vh, 18px);
@@ -2008,21 +2756,10 @@
   .journal .chat__log {
     overflow: visible;
   }
-  .journal .acct {
-    grid-template-columns: 1fr;
-    gap: 16px;
-  }
-  .journal .acct__right {
-    justify-content: space-between;
-  }
-  .journal .strat {
-    grid-template-columns: auto 1fr auto;
-  }
-  .journal .strat__share {
-    text-align: right;
-  }
-  .journal .ribbon__note {
-    display: none;
+  /* the card is already a vertical flex stack; just give the mobile balance hero
+     a touch more room to breathe. The split steppers stack comfortably as-is. */
+  .journal .acct__hero {
+    font-size: clamp(2rem, 9vw, 2.5rem);
   }
   .journal .mh__right {
     gap: 16px;

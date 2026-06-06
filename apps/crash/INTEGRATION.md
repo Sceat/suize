@@ -149,8 +149,11 @@ public fun redeem_permissionless<Quote>(
    `crash_sui::router::bet<Quote>(config, predict, manager, oracle, key, qty,
    clock, ctx)` — one extra leading shared-config arg. `router::bet` calls
    `predict::mint` then skims 3% to a treasury stored INSIDE the router config
-   on-chain, so the fee is non-bypassable and no treasury address lives in client
-   code. The client funds the manager with ~8% headroom
+   on-chain, so the fee is non-bypassable **on the sponsored (Enoki-gated) path**
+   and no treasury address lives in client code. (A self-payer can still call
+   `predict::mint` directly and skip the router + rake — the contract can't stop
+   that; only the Enoki allowlist closes the sponsored path.) The client funds the
+   manager with ~8% headroom
    (`bet_amount_with_buffer`) to cover the future rake + price drift.
 
 ## Scaling (the part that bites you)
@@ -189,32 +192,49 @@ Two `u64` returns are parsed with `bcs.u64().parse(Uint8Array.from(bytes))`.
 Deployed on **testnet** (`packages/move-crash`, package `crash_sui`). The `router` module is the
 **single move-call target every user action flows through**, so the Enoki
 sponsorship allowlist contains ONLY our seven `router::*` functions. Sponsored gas
-can never reach a raw `predict::mint` (rake-skip) or any off-path call. The 3%
-(300 bps) rake is skimmed atomically **inside** `router::bet`, to a treasury
-stored in a shared `Config` mutable only via an `AdminCap` we hold. The two LP
+can never reach a raw `predict::mint` (rake-skip) or any off-path call. The rake —
+**3% (300 bps) of the pre-trade quoted cost** — is skimmed atomically **inside**
+`router::bet`, to a treasury stored in a shared `Config` mutable only via an
+`AdminCap` we hold. (The rake is taken on the quote while the user pays the
+post-trade mint cost, so the platform collects 3% of the *quote*, slightly
+under-collecting on price drift and never overcharging the user.) This makes the
+rake non-bypassable **on the sponsored path only** — a self-paying user can build
+a tx that calls `predict::mint` directly, skipping the router and the rake; the
+allowlist gates sponsored gas, not the protocol. The two LP
 ("be the house") wrappers `supply` / `redeem_lp` take **no rake** (LPing is not a
-bet). Full module docs in `move/README.md`.
+bet). Full module docs — including the authoritative version-gated signatures —
+in `packages/move-crash/README.md`.
+
+> **Live lineage.** This is the **version-gated** package. Every `router::*` entry
+> fn now takes `version: &Version` as its **first** argument and asserts it before
+> doing anything. Because that arg change breaks the `compatible` upgrade policy,
+> the gated package was **published fresh** (new original-id) and the prior ungated
+> demo (`0x885bc905…d2c3`) is **retired** — calling it, or allowlisting it in
+> Enoki, will not sponsor. The single source of truth for the live id + targets is
+> `@suize/shared` (`PACKAGE_IDS.CRASH`), re-exported by `src/config.ts`.
 
 | Thing | ID |
 | ----- | -- |
-| Package | `0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3` |
-| Config (shared, init v `667332733`) | `0x001a7db5bacc9b2e05e8d51b8733f43280e68dea842fbb01c7c5639d512859f3` |
-| AdminCap | `0x30d541bd14a5c26a99a3f2d2885851111e33ef7469cc1d504a1e37d607c3849d` |
-| UpgradeCap | `0x865cf91c017990eaa543ffc43ffa8dea755e70fd2ac188730571989299c95271` |
+| **Package** (live, version-gated) | `0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19` |
+| **Config** (shared; `fee_bps=300`, `fee_recipient=deployer`) | `0x66bdf9a8050573d46d409d32ff0b19cd5983a082d4326289709057f68c14f5ee` |
+| **Version** (shared; `value=1`) | `0x6f0247af6e7b0580c7891771dd8a15469df4035a822a6e050871b12d1afc72a4` |
+| **AdminCap** (owned by deployer) | `0xf41787566604bdc0218a78d222a5a825cdf5660e31abb7e2ce42faa29b4c3528` |
+| **UpgradeCap** (owned by deployer) | `0xbbb53a32aead317348559e51fc04db796bb6468f8cfdcf1c4e825af8d886b9e1` |
 | AdminCap owner (deployer) | `0x087aa862ca645c0b94400c49e11b491011fca35db837361ccfc4c6f69d356e86` |
-| Publish digest | `HGiqjmXpYU3rPfHKSDXuSScmDcjiC57r5UKrYLqtFi5o` |
+| Publish digest | `7FH2MnfMyUpQnm87JcMRq33GMRBfmHFJeNommxAbexoq` |
 
 Verified on-chain (`sui_getNormalizedMoveFunction`): all seven user fns exist and
 link the live predict package
 `0xf5ea2b3749c65d6e56507cc35388719aadb28f9cab873696a2f8687f5c785138`.
 `router::bet`'s parameter types reference only our package, predict, and the
-framework `0x1`/`0x2` — no deepbook/token leak. The on-chain ABI exposes 12
-positional parameters (the 11 the frontend passes plus the implicit `&mut
-TxContext`): `&Config`, `&mut Predict`, `&mut PredictManager`, `&OracleSVI`,
-`ID`, `u64`, `u64`, `bool`, `u64`, `Coin<Quote>`, `&Clock`, `&mut TxContext`.
-The LP wrappers link predict + its LP-share type: `supply<Quote>` ABI is
-`(&mut Predict, Coin<Quote>, &Clock, &mut TxContext)` and `redeem_lp<Quote>` is
-`(&mut Predict, Coin<PLP>, &Clock, &mut TxContext)` where `PLP` =
+framework `0x1`/`0x2` — no deepbook/token leak. With the version gate, the on-chain
+`bet` ABI exposes 13 positional parameters (the 12 the frontend passes plus the
+implicit `&mut TxContext`): `&Version`, `&Config`, `&mut Predict`,
+`&mut PredictManager`, `&OracleSVI`, `ID`, `u64`, `u64`, `bool`, `u64`,
+`Coin<Quote>`, `&Clock`, `&mut TxContext`. The LP wrappers link predict + its
+LP-share type: `supply<Quote>` ABI is
+`(&Version, &mut Predict, Coin<Quote>, &Clock, &mut TxContext)` and `redeem_lp<Quote>`
+is `(&Version, &mut Predict, Coin<PLP>, &Clock, &mut TxContext)` where `PLP` =
 `0xf5ea2b3749c65d6e56507cc35388719aadb28f9cab873696a2f8687f5c785138::plp::PLP`.
 Admin gating verified live via `set_fee_bps` 300 → 400 → 300 (digests
 `BsfmTJgdoHv3J1YWWyUieFCUZ7vCMF4V11yci4sqeobf` then
@@ -224,13 +244,13 @@ Admin gating verified live via `set_fee_bps` 300 → 400 → 300 (digests
 ### Enoki allowlist (the EXACT seven `allowedMoveCallTargets`)
 
 ```
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::create_manager
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::bet
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::cash_out
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::claim
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::withdraw
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::supply
-0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3::router::redeem_lp
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::create_manager
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::bet
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::cash_out
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::claim
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::withdraw
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::supply
+0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19::router::redeem_lp
 ```
 
 Native PTB commands (SplitCoins / MergeCoins / TransferObjects) are NOT
@@ -247,36 +267,48 @@ with only the seven targets above.
 `PREDICT` (shared) =
 `0xc8736204d12f0a7277c86388a68bf8a194b0a14c5538ad13f22cbd8e2a38028a`. `CLOCK` =
 `0x6`. `CONFIG` =
-`0x001a7db5bacc9b2e05e8d51b8733f43280e68dea842fbb01c7c5639d512859f3`.
+`0x66bdf9a8050573d46d409d32ff0b19cd5983a082d4326289709057f68c14f5ee`. `VERSION`
+(shared) =
+`0x6f0247af6e7b0580c7891771dd8a15469df4035a822a6e050871b12d1afc72a4`.
 
-- **create_manager** — `router::create_manager()` — no type arg, no args (own tx;
-  read the new `PredictManager` shared id from `objectChanges`). Returns `ID`.
+> **Version gate.** Every `router::*` entry fn takes `version`(object `VERSION`)
+> as its **first** argument, inserted ahead of the args listed below; the gate
+> asserts it before anything else.
+
+- **create_manager** — `router::create_manager(version)` — no type arg; one arg
+  `version`(object `VERSION`) (own tx; read the new `PredictManager` shared id from
+  `objectChanges`). Returns `ID`.
 - **bet&lt;DUSDC&gt;** — args in order:
-  `config`(object `CONFIG`), `predict`(object `PREDICT`), `manager`(object),
-  `oracle`(object), `oracle_id`(pure id), `expiry`(pure u64),
+  `version`(object `VERSION`), `config`(object `CONFIG`), `predict`(object `PREDICT`),
+  `manager`(object), `oracle`(object), `oracle_id`(pure id), `expiry`(pure u64),
   `strike`(pure u64), `is_up`(pure bool), `quantity`(pure u64, 1e6-scaled),
   `payment`(Coin&lt;DUSDC&gt;, a SplitCoins result), `clock`(object `0x6`).
 - **cash_out&lt;DUSDC&gt;** — args:
-  `predict`(object), `manager`(object), `oracle`(object), `oracle_id`(pure id),
-  `expiry`(pure u64), `strike`(pure u64), `is_up`(pure bool),
+  `version`(object `VERSION`), `predict`(object), `manager`(object), `oracle`(object),
+  `oracle_id`(pure id), `expiry`(pure u64), `strike`(pure u64), `is_up`(pure bool),
   `quantity`(pure u64), `clock`(object `0x6`).
-- **claim&lt;DUSDC&gt;** — same arg shape as `cash_out`.
-- **withdraw&lt;DUSDC&gt;** — args: `manager`(object), `amount`(pure u64). Router
-  transfers the resulting `Coin<DUSDC>` to `ctx.sender()`.
-- **supply&lt;DUSDC&gt;** — args in order: `predict`(object `PREDICT`),
-  `payment`(Coin&lt;DUSDC&gt;, a SplitCoins result), `clock`(object `0x6`). Router
-  transfers the minted `Coin<PLP>` LP shares to `ctx.sender()`. No rake.
-- **redeem_lp&lt;DUSDC&gt;** — args in order: `predict`(object `PREDICT`),
-  `lp_coin`(Coin&lt;PLP&gt;, the LP shares to burn), `clock`(object `0x6`). Router
-  transfers the resulting `Coin<DUSDC>` to `ctx.sender()`. No rake.
+- **claim&lt;DUSDC&gt;** — same arg shape as `cash_out` (`version` first).
+- **withdraw&lt;DUSDC&gt;** — args: `version`(object `VERSION`), `manager`(object),
+  `amount`(pure u64). Router transfers the resulting `Coin<DUSDC>` to `ctx.sender()`.
+- **supply&lt;DUSDC&gt;** — args in order: `version`(object `VERSION`),
+  `predict`(object `PREDICT`), `payment`(Coin&lt;DUSDC&gt;, a SplitCoins result),
+  `clock`(object `0x6`). Router transfers the minted `Coin<PLP>` LP shares to
+  `ctx.sender()`. No rake.
+- **redeem_lp&lt;DUSDC&gt;** — args in order: `version`(object `VERSION`),
+  `predict`(object `PREDICT`), `lp_coin`(Coin&lt;PLP&gt;, the LP shares to burn),
+  `clock`(object `0x6`). Router transfers the resulting `Coin<DUSDC>` to
+  `ctx.sender()`. No rake.
 
 ### Frontend wiring (`src/config.ts`)
 
 ```
 ROUTER_ENABLED = true
-ROUTER_PACKAGE = 0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3
-ROUTER_CONFIG  = 0x001a7db5bacc9b2e05e8d51b8733f43280e68dea842fbb01c7c5639d512859f3
+ROUTER_PACKAGE = 0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19
+ROUTER_CONFIG  = 0x66bdf9a8050573d46d409d32ff0b19cd5983a082d4326289709057f68c14f5ee
+ROUTER_VERSION = 0x6f0247af6e7b0580c7891771dd8a15469df4035a822a6e050871b12d1afc72a4
 ```
+(These mirror `@suize/shared` `PACKAGE_IDS.CRASH` — the single source of truth for
+the id + targets. `src/config.ts` re-exports them; never hardcode the id elsewhere.)
 
 Each user action becomes ONE top-level `router::*` moveCall (plus native
 SplitCoins/MergeCoins/TransferObjects). The `bet` path needs a funded manager +

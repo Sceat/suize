@@ -31,7 +31,8 @@
  * 🚩 UNIT NOTE: the journal mockup shows USDC balances, but the only REAL on-chain
  * move available this pass is a SUI deposit (`buildDepositSui`, amount in Mist). We
  * therefore treat the typed amount as SUI and convert to Mist (1 SUI = 1e9 Mist).
- * The "$"/"USDC" chrome is kept verbatim for visual fidelity; the deposit is SUI.
+ * The amount field is labeled SUI (no "$"/"USDC" chrome) so the visible unit matches
+ * what actually executes — honesty over mockup fidelity: this move is SUI.
  */
 import {
   useCallback,
@@ -41,6 +42,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { AiRole, HomeApi, TransferDirection } from '../data/types';
+import { ArrowRight, ICON_STROKE } from '../system';
 
 // ── the mockup's drawer keys (data-acct / data-drag) ────────────────────────
 type DrawerKey = 'main' | 'spend' | 'invest';
@@ -166,6 +168,18 @@ export function MoveMoney({ home }: { home: HomeApi }) {
       }
     };
 
+    // While a drag is ACTIVELY engaged, kill text selection across the whole page
+    // (not just the card) so dragging a card never highlights body copy. We stash
+    // the prior inline value and restore it the moment the drag ends.
+    let prevUserSelect = '';
+    const lockSelection = () => {
+      prevUserSelect = document.body.style.userSelect;
+      document.body.style.userSelect = 'none';
+    };
+    const unlockSelection = () => {
+      document.body.style.userSelect = prevUserSelect;
+    };
+
     /** Begin the visible drag (ghost + dragging class) once movement crosses the threshold. */
     const engage = (from: DrawerKey) => {
       const g = ghostRef.current;
@@ -186,8 +200,11 @@ export function MoveMoney({ home }: { home: HomeApi }) {
         const dy = e.clientY - drag.startY;
         if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
         drag.engaged = true;
+        lockSelection();
         engage(drag.from);
       }
+      // now that it's a real drag, stop the browser from extending a text selection
+      e.preventDefault();
       moveGhost(e.clientX, e.clientY);
       const el = document.elementFromPoint(e.clientX, e.clientY);
       const acct = el ? (el.closest('.acct') as HTMLElement | null) : null;
@@ -202,6 +219,7 @@ export function MoveMoney({ home }: { home: HomeApi }) {
 
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
+      unlockSelection();
       ghostRef.current?.classList.remove('on');
       clearDropHints();
       const drag = dragRef.current;
@@ -227,7 +245,8 @@ export function MoveMoney({ home }: { home: HomeApi }) {
       // DO NOT preventDefault here — a press without movement must remain a click so
       // the card's onClick selects the account. The drag engages on first move.
       dragRef.current = { from, over: null, startX: e.clientX, startY: e.clientY, engaged: false };
-      window.addEventListener('pointermove', onMove);
+      // passive:false so e.preventDefault() in onMove can suppress text selection.
+      window.addEventListener('pointermove', onMove, { passive: false });
       window.addEventListener('pointerup', onUp, { once: true });
     };
 
@@ -236,6 +255,8 @@ export function MoveMoney({ home }: { home: HomeApi }) {
       root.removeEventListener('pointerdown', onDown);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      // restore selection if we unmount mid-drag (defensive — onUp normally handles it).
+      unlockSelection();
     };
     // openPop is stable (defined below via useCallback); moveGhost is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -363,18 +384,22 @@ export function MoveMoney({ home }: { home: HomeApi }) {
       >
         <div className="pop__eyebrow">Move money</div>
         <div className="pop__flow">
+          {/* inverted node: muted "From" kicker ABOVE the account name */}
           <span className="node">
+            <small>From</small>
             <span>{pop ? NAMES[pop.from] : 'Main'}</span>
-            <small>from</small>
           </span>
-          <span className="arr">{'→'}</span>
+          {/* arrow lives ONLY on the name row (CSS places it grid-row 2),
+              baseline-aligned to the account titles, accent-colored, name-size */}
+          <span className="arr" aria-hidden="true">
+            <ArrowRight strokeWidth={ICON_STROKE} />
+          </span>
           <span className="node">
+            <small>To</small>
             <span>{pop ? NAMES[pop.to] : 'AI Investing'}</span>
-            <small>to</small>
           </span>
         </div>
         <div className="pop__field">
-          <span className="pre">$</span>
           <input
             ref={amtRef}
             value={amount}
@@ -382,10 +407,10 @@ export function MoveMoney({ home }: { home: HomeApi }) {
             onKeyDown={onAmtKeyDown}
             inputMode="decimal"
             placeholder={placeholder}
-            aria-label="Amount"
+            aria-label="Amount in SUI"
             disabled={sending}
           />
-          <span className="suf">USDC</span>
+          <span className="suf">SUI</span>
         </div>
         <div className="pop__hint">{hint}</div>
         <div className="pop__act">
@@ -404,7 +429,7 @@ export function MoveMoney({ home }: { home: HomeApi }) {
               onClick={() => void onConfirm()}
               disabled={sending}
             >
-              {sending ? 'Moving…' : 'Move money'}
+              {sending ? 'Moving…' : 'Move'}
             </button>
           )}
         </div>

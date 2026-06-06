@@ -4,6 +4,8 @@
 // verbatim Move signatures these calls target.
 // ============================================================================
 
+import { PACKAGE_IDS } from '@suize/shared'
+
 export const RPC_URL = 'https://fullnode.testnet.sui.io:443'
 
 export const PREDICT_PACKAGE =
@@ -41,6 +43,14 @@ export const MOD_MARKET_KEY = `${PREDICT_PACKAGE}::market_key`
 // On-chain object types we match against in objectChanges.
 export const PREDICT_MANAGER_TYPE = `${PREDICT_PACKAGE}::predict_manager::PredictManager`
 
+// Move event types (the source of truth for REALIZED history). PositionRedeemed
+// carries the EXACT realized `payout` + an `is_settled` discriminator (settlement
+// claim vs early cash-out); PositionMinted carries the per-bucket `cost`. We
+// query suix_queryEvents filtered by these MoveEventTypes and reconcile by the
+// shared key (manager_id, oracle_id, is_up, strike, expiry). Verified live.
+export const EVENT_POSITION_MINTED = `${PREDICT_PACKAGE}::predict::PositionMinted`
+export const EVENT_POSITION_REDEEMED = `${PREDICT_PACKAGE}::predict::PositionRedeemed`
+
 // ----------------------------------------------------------------------------
 // SCALING
 // ----------------------------------------------------------------------------
@@ -76,24 +86,24 @@ export const ONE_CONTRACT_QTY = DUSDC_SCALE // 1_000_000
 // Quote stake used purely for odds preview (devInspect get_trade_amounts).
 export const PREVIEW_QUANTITY = ONE_CONTRACT_QTY
 
+// The final-N-seconds BETTING SEAL window. A round locks for new bets/grows in its
+// last LOCK_WINDOW_MS; the bet target then ROLLS to the next active round (PART B),
+// so betting is continuous and only the looked-at round's final 15s is locked —
+// never a doubled 15s across the settle. pick_live_btc_oracle uses the same guard.
+export const LOCK_WINDOW_MS = 15_000
+
 // ----------------------------------------------------------------------------
 // STAKE PRESETS
 // ----------------------------------------------------------------------------
-// "Stake" here = payout-capacity in $: 1 contract pays $1 max if it wins. So a
-// $5 stake = 5 contracts = 5_000_000 quantity (max payout $5). The actual dUSDC
-// spent is the cost (ask < $1 per contract, so < stake) + the on-chain 3% rake.
-// The preset chips show the $ stake; the cost is displayed separately near the
-// bet buttons.
+// "Stake"/"wager" here = the dUSDC the user PARTS WITH IN TOTAL. The client sizes
+// `quantity` (App.tsx quantity_for_stake) from the live per-contract ask so the
+// DEBIT (bare cost + the on-chain 3% rake) ≈ the wager to sub-cent. The WIN payout
+// (contracts × $1) differs per side with the odds; the preset chips show the $ wager.
 export const STAKE_PRESETS_USD = [1, 5, 25, 100] as const
 
 // Default selected stake on landing. $25 so the headline previews a meaningful
 // "WIN $50" (~2x) instead of "WIN $2" from a $1 default.
 export const DEFAULT_STAKE_USD = 25
-
-// Whole-dollar stake -> 1e6-scaled quantity (whole contracts). $5 -> 5_000_000.
-// Rounds to whole contracts to keep `quantity` clean (no fractional contracts).
-export const usd_to_quantity = (usd: number): bigint =>
-  BigInt(Math.max(1, Math.round(usd))) * ONE_CONTRACT_QTY
 
 // LocalStorage keys.
 // The manager id + open position are NEVER persisted client-side: they are
@@ -115,19 +125,30 @@ export const LS_STREAK = 'crashsui.streak'
 // payment coin into the manager, skims 3% to a treasury stored INSIDE the
 // router's shared Config, then mints — fully on-chain and non-bypassable.
 //
-// Deployed + VERIFIED ON-CHAIN (publish digest DFoWSxzzP7iGiENmpg3nLs8GsJTfpQPWqDzMG1MgG8CE):
+// FRESH GATED + ACCUMULATOR PACKAGE — replaces the old 0x885b/0x453b2ad2 lineage
+// entirely. Every router fn is now version-gated: a shared `Version` object is the
+// FIRST arg to all seven entry fns, so a deprecated package version can be fenced
+// off on-chain. The package also threads an on-chain fee accumulator.
 //  - real published Move package on testnet
 //  - router::bet links the LIVE predict pkg 0xf5ea..785138; its ABI params are
-//    (Config, &mut Predict, &mut PredictManager, &OracleSVI, ID, u64, u64, bool,
-//     u64, Coin<Quote>, &Clock, &mut TxContext) — no deepbook/token leak
-//  - create_manager/cash_out/claim/withdraw all exist + link predict
-export const ROUTER_PACKAGE =
-  '0x885bc905f8c39a8a179a6013a4a688c19d94f49ae3a98653452f97dcaff9d2c3'
+//    (Version, Config, &mut Predict, &mut PredictManager, &OracleSVI, ID, u64,
+//     u64, bool, u64, Coin<Quote>, &Clock, &mut TxContext) — no deepbook/token leak
+//  - create_manager/cash_out/claim/withdraw/supply/redeem_lp all version-gated
+// SINGLE SOURCE OF TRUTH (LOCKED DECISION #5): the package id lives ONLY in
+// @suize/shared; we re-export it here rather than duplicate the literal.
+export const ROUTER_PACKAGE = PACKAGE_IDS.CRASH.PACKAGE
 
 // Shared RouterConfig (Shared object) — holds fee_bps=300 + fee_recipient on-chain.
-// Verified: type ...::router::Config, owner Shared, fee_bps 300. FIRST arg to router::bet.
+// Type ...::router::Config, owner Shared, fee_bps 300. SECOND arg to router::bet
+// (after the Version gate).
 export const ROUTER_CONFIG =
-  '0x001a7db5bacc9b2e05e8d51b8733f43280e68dea842fbb01c7c5639d512859f3'
+  '0x66bdf9a8050573d46d409d32ff0b19cd5983a082d4326289709057f68c14f5ee'
+
+// Shared Version object (the gate) — FIRST arg to EVERY router entry fn. A
+// deprecated package version is fenced off on-chain via this object, so an old
+// build can no longer reach the live predict pkg through the router.
+export const VERSION_ID =
+  '0x6f0247af6e7b0580c7891771dd8a15469df4035a822a6e050871b12d1afc72a4'
 
 // Module path for the router's entry fns (the only signed write targets).
 export const MOD_ROUTER = `${ROUTER_PACKAGE}::router`

@@ -22,6 +22,7 @@
 
 import type { AiRole } from './types';
 import type { AccountRefs, AllocationWeights } from './types';
+import { AGENT_ADDRESS } from '../lib/env';
 
 const KEY = (owner: string, role: AiRole) => `suize:acct:${owner.toLowerCase()}:${role}`;
 
@@ -41,6 +42,19 @@ export function getAccountRefs(owner: string, role: AiRole): AccountRefs | null 
       typeof parsed.agentAddress === 'string' &&
       (parsed.vaultKind === 'single' || parsed.vaultKind === 'swap')
     ) {
+      // SECURITY (defense in depth): the agent address feeds issue_agent_cap on
+      // resume / strategy-change. localStorage is attacker-writable, so NEVER trust
+      // the persisted value — pin it to the build-time AGENT_ADDRESS constant. On a
+      // mismatch we warn and override (the persisted ids are public object ids; only
+      // the cap RECIPIENT must be the configured agent). If the constant is unset we
+      // keep the parsed value — the create path already gates on AGENT_ADDRESS, so an
+      // unset constant means no AI accounts exist to mint a cap for anyway.
+      if (AGENT_ADDRESS && parsed.agentAddress !== AGENT_ADDRESS) {
+        console.warn(
+          `[accountStore] persisted agentAddress (${parsed.agentAddress}) != trusted AGENT_ADDRESS — overriding with the configured agent.`,
+        );
+        return { ...(parsed as AccountRefs), agentAddress: AGENT_ADDRESS };
+      }
       return parsed as AccountRefs;
     }
     return null;

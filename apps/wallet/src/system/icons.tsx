@@ -15,11 +15,17 @@ export {
   HeartPulse,
   Send,
   ArrowLeftRight,
+  ArrowRight,
+  ArrowUpRight,
+  RefreshCw,
+  SlidersHorizontal,
   ArrowUp,
   ArrowDown,
   Wallet,
   Coins,
   Plus,
+  Minus,
+  Circle,
   Copy,
   Check,
   X,
@@ -32,9 +38,24 @@ export {
   CreditCard,
   Landmark,
   Smartphone,
+  Mail,
+  MessageCircle,
   Pause,
   Play,
+  Pin,
+  PinOff,
+  Power,
+  PauseCircle,
+  AlertTriangle,
+  Dices,
+  CandlestickChart,
+  QrCode,
+  Share2,
+  Link,
 } from 'lucide-react';
+
+/** The shape of every icon in this set (props: size, strokeWidth, className…). */
+export type { LucideIcon as IconType } from 'lucide-react';
 
 /** Brand-consistent stroke weight for every icon. Pass as `strokeWidth`. */
 export const ICON_STROKE = 1.75;

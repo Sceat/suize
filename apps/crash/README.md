@@ -72,7 +72,11 @@ crash_sui::router::bet<DUSDC>(config, predict, manager, oracle, key, qty, clock,
 
 `router::bet` calls `predict::mint` and then skims 3% from the manager to a
 treasury stored **inside** the router's shared `config` object — fully on-chain
-and non-bypassable. The treasury address never touches the frontend.
+and non-bypassable **on the sponsored (Enoki-gated) path**, where the allowlist
+only permits `router::*` and never a raw `predict::mint`. A self-paying user can
+still call `predict::mint` directly and skip the router + rake — the contract
+can't prevent that, only the sponsor allowlist closes the gasless path. The
+treasury address never touches the frontend.
 
 - **Today:** the bet path calls plain `predict::mint` (no rake) while the Move
   router is being built by a separate Move agent.

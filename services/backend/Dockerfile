@@ -10,28 +10,38 @@
 # (`scripts/push.sh` does this for you with the root context.)
 
 # --- deps: install ONLY the backend workspace + its deps, frozen to bun.lock ---
-FROM oven/bun:1-alpine AS deps
+FROM oven/bun:1.3.5-alpine AS deps
 WORKDIR /app
 # Lockfile + every workspace manifest so --frozen-lockfile can validate the graph.
 COPY package.json bun.lock ./
 COPY apps/wallet/package.json ./apps/wallet/package.json
 COPY apps/landing/package.json ./apps/landing/package.json
+COPY apps/crash/package.json ./apps/crash/package.json
 COPY packages/shared/package.json ./packages/shared/package.json
 COPY packages/move-wallet/package.json ./packages/move-wallet/package.json
+COPY packages/move-deploy/package.json ./packages/move-deploy/package.json
+COPY apps/deploy/package.json ./apps/deploy/package.json
+COPY services/deploy-worker/package.json ./services/deploy-worker/package.json
 COPY services/backend/package.json ./services/backend/package.json
 # --filter installs the backend + its workspace dep (@suize/shared) only — no
 # frontend toolchains. --production drops devDependencies. --frozen-lockfile
 # forbids any lockfile drift (fails the build instead of silently resolving).
+# Every workspace manifest must be COPYed above (incl. apps/crash) or
+# --frozen-lockfile aborts on the missing member.
 RUN bun install --frozen-lockfile --production --filter './services/backend'
 
 # --- build: full deps + typecheck (fails the build on type errors) ---
-FROM oven/bun:1-alpine AS build
+FROM oven/bun:1.3.5-alpine AS build
 WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/wallet/package.json ./apps/wallet/package.json
 COPY apps/landing/package.json ./apps/landing/package.json
+COPY apps/crash/package.json ./apps/crash/package.json
 COPY packages/shared/package.json ./packages/shared/package.json
 COPY packages/move-wallet/package.json ./packages/move-wallet/package.json
+COPY packages/move-deploy/package.json ./packages/move-deploy/package.json
+COPY apps/deploy/package.json ./apps/deploy/package.json
+COPY services/deploy-worker/package.json ./services/deploy-worker/package.json
 COPY services/backend/package.json ./services/backend/package.json
 RUN bun install --frozen-lockfile --filter './services/backend'
 # Workspace source needed to typecheck: the shared package + the backend.
@@ -41,7 +51,7 @@ COPY services/backend/src ./services/backend/src
 RUN cd services/backend && bun run typecheck
 
 # --- runtime: prod deps + source (backend + shared), non-root ---
-FROM oven/bun:1-alpine AS runtime
+FROM oven/bun:1.3.5-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 # Hoisted workspace node_modules + the regenerated @suize/* symlinks.

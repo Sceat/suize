@@ -53,6 +53,8 @@ export function Loader({ label, className }: LoaderProps) {
             background: 'radial-gradient(circle, color-mix(in srgb, var(--cyan) 26%, transparent), transparent 70%)',
           }}
         />
+        {/* the sweeping accent ring — clearly-animated proof of work */}
+        <span aria-hidden className="suize-loader-ring" />
         <Logo size={40} />
       </div>
 

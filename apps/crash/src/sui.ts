@@ -19,10 +19,28 @@ export type ReadClient = {
   getCoins: (args: { owner: string; coinType: string }) => Promise<{
     data: Array<{ coinObjectId: string; balance: string }>
   }>
+  // suix_queryEvents — only the slice we read. The full dapp-kit client exposes a
+  // richer filter/cursor; this structural shape covers our event-history reads.
+  queryEvents: (args: {
+    query: { MoveEventType: string }
+    cursor?: { txDigest: string; eventSeq: string } | null
+    limit?: number
+    order?: 'ascending' | 'descending'
+  }) => Promise<{
+    data: Array<{
+      parsedJson?: unknown
+      timestampMs?: string | null
+      id?: { txDigest: string; eventSeq: string }
+    }>
+    hasNextPage: boolean
+    nextCursor?: { txDigest: string; eventSeq: string } | null
+  }>
 }
 import {
   CLOCK_OBJECT,
   DUSDC_TYPE,
+  EVENT_POSITION_MINTED,
+  EVENT_POSITION_REDEEMED,
   MOD_MANAGER,
   MOD_MARKET_KEY,
   MOD_PREDICT,
@@ -31,6 +49,7 @@ import {
   PREDICT_MANAGER_TYPE,
   PREDICT_OBJECT,
   ROUTER_CONFIG,
+  VERSION_ID,
 } from './config'
 
 // ============================================================================
@@ -148,6 +167,176 @@ export const read_trade_amounts = async (
   return { ask_cost, bid_payout }
 }
 
+// ============================================================================
+// Read the MINTABLE ASK-PRICE BAND for an oracle via devInspect.
+//   predict::ask_bounds(predict, oracle_id) -> (min_ask, max_ask)   [1e9-scaled]
+// This is the resolved band (global ∩ per-oracle override). A bet whose executed
+// per-contract ask falls outside [min_ask, max_ask] aborts with
+// EAskPriceOutOfBounds (code 7). The bounds are PRICE_SCALE (1e9) per-contract.
+// Used to gate the per-side bet button (too-lopsided sides go inert, not a fake
+// 1.9x) and to fail-fast on the fresh re-quote. Cheap, read-only.
+// ============================================================================
+export type AskBounds = {
+  min_ask_1e9: bigint // lower mintable per-contract ask (1e9)
+  max_ask_1e9: bigint // upper mintable per-contract ask (1e9)
+}
+
+export const read_ask_bounds = async (
+  client: ReadClient,
+  oracle_id: string,
+  sender?: string,
+): Promise<AskBounds> => {
+  const tx = new Transaction()
+  tx.moveCall({
+    target: `${MOD_PREDICT}::ask_bounds`,
+    arguments: [tx.object(PREDICT_OBJECT), tx.pure.id(oracle_id)],
+  })
+  const res = await client.devInspectTransactionBlock({
+    transactionBlock: tx,
+    sender: safe_sender(sender),
+  })
+  if (res.error) throw new Error(`ask_bounds devInspect: ${res.error}`)
+  const ret = res.results?.[res.results.length - 1]?.returnValues
+  if (!ret || ret.length < 2)
+    throw new Error('ask_bounds returned no values')
+  return {
+    min_ask_1e9: u64_from_bytes(ret[0][0]),
+    max_ask_1e9: u64_from_bytes(ret[1][0]),
+  }
+}
+
+// ============================================================================
+// REALIZED HISTORY — query the on-chain PositionMinted / PositionRedeemed events.
+// ----------------------------------------------------------------------------
+// PositionRedeemed is the ONLY source of the EXACT realized amount + the
+// settlement-vs-cashout discriminator the indexer feed lacks:
+//   parsedJson: { manager_id, oracle_id, is_up, strike, expiry, quantity, payout,
+//                 bid_price, is_settled, owner, executor }
+//   is_settled:true  = settlement claim (won; payout == quantity)
+//   is_settled:false = early cash-out (payout < quantity)
+// PositionMinted carries the per-bucket cost:
+//   parsedJson: { manager_id, oracle_id, is_up, strike, expiry, quantity, cost, ... }
+// We page recent events (cap ~200) DESC and filter client-side to OUR manager_id.
+// ============================================================================
+export type RedeemedEvent = {
+  manager_id: string
+  oracle_id: string
+  is_up: boolean
+  strike: string // u64 as string (exact)
+  expiry: string
+  quantity: string
+  payout: string
+  is_settled: boolean
+}
+export type MintedEvent = {
+  manager_id: string
+  oracle_id: string
+  is_up: boolean
+  strike: string
+  expiry: string
+  quantity: string
+  cost: string
+}
+
+// A predict event's parsedJson is loosely typed; pull the fields we need as
+// strings (Sui returns u64s as strings) without trusting the shape blindly.
+const ev_str = (o: Record<string, unknown>, k: string): string => {
+  const v = o[k]
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' && Number.isFinite(v)) return String(Math.trunc(v))
+  return ''
+}
+const ev_bool = (o: Record<string, unknown>, k: string): boolean =>
+  o[k] === true || o[k] === 'true'
+
+// Page `move_event_type` events (DESC, newest first) up to `cap`, mapping each
+// parsedJson via `map`. Read-only; on any RPC error returns whatever was gathered
+// so far (best-effort history — a hiccup never blocks the UI).
+// Hard ceiling on pages scanned. The MoveEventType filter is GLOBAL (every
+// manager's events), and `map` filters to OURS client-side — so a SPARSE manager
+// buried in a huge global feed would never hit `cap` matched rows and the loop
+// would walk the entire predict history. Bound the walk to MAX_PAGES × limit
+// events scanned (10 × 50 = 500) — plenty for a recent history, never unbounded.
+const MAX_EVENT_PAGES = 10
+const query_events = async <T>(
+  client: ReadClient,
+  move_event_type: string,
+  map: (j: Record<string, unknown>) => T | null,
+  cap = 200,
+): Promise<T[]> => {
+  const out: T[] = []
+  let cursor: { txDigest: string; eventSeq: string } | null = null
+  let pages = 0
+  try {
+    while (out.length < cap && pages < MAX_EVENT_PAGES) {
+      pages++
+      const page = await client.queryEvents({
+        query: { MoveEventType: move_event_type },
+        cursor,
+        limit: 50,
+        order: 'descending',
+      })
+      for (const e of page.data) {
+        const j = e.parsedJson
+        if (j && typeof j === 'object') {
+          const row = map(j as Record<string, unknown>)
+          if (row) out.push(row)
+        }
+      }
+      if (!page.hasNextPage || !page.nextCursor) break
+      cursor = page.nextCursor
+    }
+  } catch {
+    // best-effort — return what we have
+  }
+  return out
+}
+
+// All PositionRedeemed events for OUR manager (newest first, capped).
+export const fetch_redeemed_events = (
+  client: ReadClient,
+  manager_id: string,
+): Promise<RedeemedEvent[]> =>
+  query_events<RedeemedEvent>(
+    client,
+    EVENT_POSITION_REDEEMED,
+    j => {
+      if (ev_str(j, 'manager_id') !== manager_id) return null
+      return {
+        manager_id,
+        oracle_id: ev_str(j, 'oracle_id'),
+        is_up: ev_bool(j, 'is_up'),
+        strike: ev_str(j, 'strike'),
+        expiry: ev_str(j, 'expiry'),
+        quantity: ev_str(j, 'quantity'),
+        payout: ev_str(j, 'payout'),
+        is_settled: ev_bool(j, 'is_settled'),
+      }
+    },
+  )
+
+// All PositionMinted events for OUR manager (newest first, capped).
+export const fetch_minted_events = (
+  client: ReadClient,
+  manager_id: string,
+): Promise<MintedEvent[]> =>
+  query_events<MintedEvent>(
+    client,
+    EVENT_POSITION_MINTED,
+    j => {
+      if (ev_str(j, 'manager_id') !== manager_id) return null
+      return {
+        manager_id,
+        oracle_id: ev_str(j, 'oracle_id'),
+        is_up: ev_bool(j, 'is_up'),
+        strike: ev_str(j, 'strike'),
+        expiry: ev_str(j, 'expiry'),
+        quantity: ev_str(j, 'quantity'),
+        cost: ev_str(j, 'cost'),
+      }
+    },
+  )
+
 // Per-contract implied probability for an UP/DOWN side, derived from the
 // quantity used in the preview. cost_1e6 / quantity_1e6 == per-unit price in $,
 // and a binary contract's per-unit price IS its implied probability.
@@ -171,7 +360,10 @@ export const implied_pct_from_cost = (
 // predict::* directly).
 export const build_create_manager_tx = (): Transaction => {
   const tx = new Transaction()
-  tx.moveCall({ target: `${MOD_ROUTER}::create_manager`, arguments: [] })
+  tx.moveCall({
+    target: `${MOD_ROUTER}::create_manager`,
+    arguments: [tx.object(VERSION_ID)],
+  })
   return tx
 }
 
@@ -196,8 +388,8 @@ export const find_created_manager_id = (
 
 // ============================================================================
 // Place a bet through the on-chain router (the ONLY mint path).
-//   router::bet<Quote>(config, predict, manager, oracle, oracle_id, expiry,
-//                      strike, is_up, quantity, payment, clock, ctx)
+//   router::bet<Quote>(version, config, predict, manager, oracle, oracle_id,
+//                      expiry, strike, is_up, quantity, payment, clock, ctx)
 // The router DEPOSITS `payment` into the manager, builds the MarketKey itself
 // (from oracle_id/expiry/strike/is_up — the client does NOT build a key here),
 // skims the 3% rake to the on-chain treasury, then mints. So the client only has
@@ -207,6 +399,14 @@ export const find_created_manager_id = (
 // We always split a fresh coin for `payment` (even when payment_amount === 0:
 // the router's deposit of a 0-value coin is harmless), so the user's source
 // coins are never consumed wholesale — only the exact shortfall moves.
+//
+// FULLY-MANAGER-FUNDED RE-BET: after a cash-out the manager holds the funds and
+// the wallet may have ZERO dUSDC coin objects (`dusdc_coin_ids` empty). The mint
+// is then fully funded from the manager, so `payment_amount` is 0n and there is no
+// wallet coin to split from. In that case we mint a zero Coin<DUSDC> on-chain via
+// `0x2::coin::zero` as the (harmless) 0-value payment — the caller MUST only pass
+// an empty coin list when payment_amount is 0n (the funding check guarantees the
+// manager covers the bet). `coin::zero` is on the sponsor allowlist (CRASH).
 // ============================================================================
 export const build_bet_tx = (opts: {
   manager_id: string
@@ -218,29 +418,40 @@ export const build_bet_tx = (opts: {
   // Exact dUSDC base units (1e6) to fund the bet with (the manager shortfall).
   // May be 0n when the manager already holds enough — we still pass a 0-coin.
   payment_amount: bigint
-  // The user's Coin<DUSDC> object ids to source `payment` from (merged here).
+  // The user's Coin<DUSDC> object ids to source `payment` from (merged here). MAY
+  // be empty ONLY when payment_amount is 0n (manager fully funds) — then we use a
+  // freshly-minted zero coin instead of splitting a wallet coin.
   dusdc_coin_ids: string[]
 }): Transaction => {
   const tx = new Transaction()
 
-  // Merge the user's dUSDC coins into one, then split off EXACTLY the shortfall
-  // as the payment coin. SplitCoins/MergeCoins are native commands (not Move
-  // targets), so they do not need Enoki allowlisting.
-  const [primary, ...rest] = opts.dusdc_coin_ids
-  const primary_coin = tx.object(primary)
-  if (rest.length > 0)
-    tx.mergeCoins(
-      primary_coin,
-      rest.map(id => tx.object(id)),
-    )
-  const [payment] = tx.splitCoins(primary_coin, [
-    tx.pure.u64(opts.payment_amount),
-  ])
+  // Build the payment coin. With wallet coins: merge them into one and split off
+  // EXACTLY the shortfall (SplitCoins/MergeCoins are native commands, no Enoki
+  // allowlisting). With NO wallet coins (manager fully funds, payment_amount 0n):
+  // mint a zero Coin<DUSDC> via 0x2::coin::zero (allowlisted) so we never call
+  // tx.object(undefined).
+  let payment
+  if (opts.dusdc_coin_ids.length > 0) {
+    const [primary, ...rest] = opts.dusdc_coin_ids
+    const primary_coin = tx.object(primary)
+    if (rest.length > 0)
+      tx.mergeCoins(
+        primary_coin,
+        rest.map(id => tx.object(id)),
+      )
+    ;[payment] = tx.splitCoins(primary_coin, [tx.pure.u64(opts.payment_amount)])
+  } else {
+    payment = tx.moveCall({
+      target: '0x2::coin::zero',
+      typeArguments: [DUSDC_TYPE],
+    })
+  }
 
   tx.moveCall({
     target: `${MOD_ROUTER}::bet`,
     typeArguments: [DUSDC_TYPE],
     arguments: [
+      tx.object(VERSION_ID),
       tx.object(ROUTER_CONFIG),
       tx.object(PREDICT_OBJECT),
       tx.object(opts.manager_id),
@@ -268,8 +479,9 @@ type RedeemOpts = {
   quantity: bigint
 }
 
-// router::<fn><Quote>(predict, manager, oracle, oracle_id, expiry, strike,
-//                     is_up, quantity, clock, ctx) — 9 args, no Config, no key.
+// router::<fn><Quote>(version, predict, manager, oracle, oracle_id, expiry,
+//                     strike, is_up, quantity, clock, ctx) — 10 args, no Config,
+//                     no key (version gate is the new FIRST arg).
 const build_router_redeem_tx = (
   fn: 'cash_out' | 'claim',
   opts: RedeemOpts,
@@ -279,6 +491,7 @@ const build_router_redeem_tx = (
     target: `${MOD_ROUTER}::${fn}`,
     typeArguments: [DUSDC_TYPE],
     arguments: [
+      tx.object(VERSION_ID),
       tx.object(PREDICT_OBJECT),
       tx.object(opts.manager_id),
       tx.object(opts.oracle_id),
@@ -290,10 +503,21 @@ const build_router_redeem_tx = (
       tx.object(CLOCK_OBJECT),
     ],
   })
+  // ATOMIC AUTO-SWEEP: the redeem above credits the payout into the manager's
+  // internal balance; this second leg sweeps the FULL manager balance back to the
+  // sender on-chain (no amount arg, version-gated), so a settle/cash-out lands in
+  // the wallet in ONE tx and never piles up invisibly in the manager (which a
+  // block explorer can't surface). router::withdraw_all<Quote>(version, manager).
+  tx.moveCall({
+    target: `${MOD_ROUTER}::withdraw_all`,
+    typeArguments: [DUSDC_TYPE],
+    arguments: [tx.object(VERSION_ID), tx.object(opts.manager_id)],
+  })
   return tx
 }
 
-// Cash out early (router::cash_out -> predict::redeem). Payout -> manager balance.
+// Cash out early ONE bucket (router::cash_out -> predict::redeem). Payout -> manager
+// balance. Per-side cash-out (two distinct positions) uses one of these per side.
 export const build_cash_out_tx = (opts: RedeemOpts): Transaction =>
   build_router_redeem_tx('cash_out', opts)
 
@@ -320,6 +544,7 @@ export const build_claim_all_tx = (positions: RedeemOpts[]): Transaction => {
       target: `${MOD_ROUTER}::claim`,
       typeArguments: [DUSDC_TYPE],
       arguments: [
+        tx.object(VERSION_ID),
         tx.object(PREDICT_OBJECT),
         tx.object(opts.manager_id),
         tx.object(opts.oracle_id),
@@ -332,6 +557,14 @@ export const build_claim_all_tx = (positions: RedeemOpts[]): Transaction => {
       ],
     })
   }
+  // ONE trailing sweep: every claim above credited the SAME manager (a user has a
+  // single manager), so one withdraw_all collects them all to the wallet — settle
+  // -> wallet, atomically. positions[0] is safe (empty list throws above).
+  tx.moveCall({
+    target: `${MOD_ROUTER}::withdraw_all`,
+    typeArguments: [DUSDC_TYPE],
+    arguments: [tx.object(VERSION_ID), tx.object(positions[0].manager_id)],
+  })
   return tx
 }
 
@@ -377,7 +610,7 @@ export const read_manager_balance = async (
 
 // ============================================================================
 // Withdraw from the manager back to the user's wallet (round-trip cash-out).
-//   router::withdraw<Quote>(manager, amount, ctx)
+//   router::withdraw<Quote>(version, manager, amount, ctx)
 // The router calls predict_manager::withdraw (which asserts sender == owner) and
 // transfers the resulting Coin<DUSDC> to ctx.sender() ON-CHAIN — so the client
 // passes no recipient and adds no transferObjects (one allowlisted target).
@@ -390,7 +623,11 @@ export const build_withdraw_tx = (opts: {
   tx.moveCall({
     target: `${MOD_ROUTER}::withdraw`,
     typeArguments: [DUSDC_TYPE],
-    arguments: [tx.object(opts.manager_id), tx.pure.u64(opts.amount)],
+    arguments: [
+      tx.object(VERSION_ID),
+      tx.object(opts.manager_id),
+      tx.pure.u64(opts.amount),
+    ],
   })
   return tx
 }
@@ -398,8 +635,8 @@ export const build_withdraw_tx = (opts: {
 // ============================================================================
 // BE THE HOUSE — liquidity provision (LP) through the router.
 // ============================================================================
-// router::supply<Quote>(predict, payment: Coin<Quote>, clock, ctx) — deposits
-// `payment` dUSDC into Predict's shared LP vault and `public_transfer`s the
+// router::supply<Quote>(version, predict, payment: Coin<Quote>, clock, ctx) —
+// deposits `payment` dUSDC into Predict's shared LP vault and `public_transfer`s the
 // minted Coin<PLP> shares back to ctx.sender() ON-CHAIN. So the client passes
 // only the payment coin (split to the exact amount); it adds no recipient and no
 // transferObjects. We split EXACTLY `amount` from the user's merged dUSDC so the
@@ -422,13 +659,18 @@ export const build_supply_tx = (opts: {
   tx.moveCall({
     target: `${MOD_ROUTER}::supply`,
     typeArguments: [DUSDC_TYPE],
-    arguments: [tx.object(PREDICT_OBJECT), payment, tx.object(CLOCK_OBJECT)],
+    arguments: [
+      tx.object(VERSION_ID),
+      tx.object(PREDICT_OBJECT),
+      payment,
+      tx.object(CLOCK_OBJECT),
+    ],
   })
   return tx
 }
 
-// router::redeem_lp<Quote>(predict, lp_coin: Coin<PLP>, clock, ctx) — burns the
-// supplied PLP shares and `public_transfer`s the underlying dUSDC back to
+// router::redeem_lp<Quote>(version, predict, lp_coin: Coin<PLP>, clock, ctx) —
+// burns the supplied PLP shares and `public_transfer`s the underlying dUSDC back to
 // ctx.sender() ON-CHAIN (no recipient / transferObjects client-side). We merge
 // the user's PLP coins into one, then split EXACTLY `shares` to burn — so a
 // partial "cash out of the house" leaves the remaining shares intact. Passing
@@ -449,7 +691,12 @@ export const build_redeem_lp_tx = (opts: {
   tx.moveCall({
     target: `${MOD_ROUTER}::redeem_lp`,
     typeArguments: [DUSDC_TYPE],
-    arguments: [tx.object(PREDICT_OBJECT), lp_coin, tx.object(CLOCK_OBJECT)],
+    arguments: [
+      tx.object(VERSION_ID),
+      tx.object(PREDICT_OBJECT),
+      lp_coin,
+      tx.object(CLOCK_OBJECT),
+    ],
   })
   return tx
 }

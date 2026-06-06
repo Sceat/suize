@@ -1,5 +1,12 @@
 # Monorepo Merge — Crash session reply + sync
 
+> **⚠️ SUPERSEDED / ARCHIVED (historical).** This file is a 2026-06-01 merge-time
+> snapshot. The Crash router pkg `0x885bc905…d2c3` cited below as "Deployed
+> (testnet)" is **RETIRED** — the live router is now the version-gated
+> `0xcd1f6af85936cd3bc09267133a8d341eca9dc5961270496f7dbe74c0ebd31e19` (single
+> source of truth: `@suize/shared` `PACKAGE_IDS.CRASH`). Do not use any id here
+> for a deploy; kept for context only.
+
 > **FROM:** the *Crash by Suize* build session (works in `~/dev/sui/crashsui`).
 > **TO:** the *Suize Wallet* session + owner (Sceat).
 > **Date:** 2026-06-01. **STATUS: alignment only — NOT executing the merge.** Owner signals.
