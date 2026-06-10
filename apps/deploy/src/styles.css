@@ -398,10 +398,6 @@ a {
   border-left: 1px solid var(--hair);
   padding-left: 0.875rem;
 }
-.ed-rail-blue {
-  border-left: 2px solid var(--blue);
-  padding-left: 0.875rem;
-}
 /* dotted leader — the broadsheet ledger connector (key ···· value) */
 .ed-leader {
   flex: 1 1 auto;
@@ -638,9 +634,154 @@ a {
 .dx-main {
   flex: 1 1 auto;
   width: 100%;
-  max-width: 1040px;
+  max-width: 1180px;
   margin: 0 auto;
   padding: clamp(22px, 4vw, 48px) var(--pad) 72px;
+}
+
+/* ===================================================================== */
+/*  HOME — two regions: the user's OWN sites (center) + a reduced        */
+/*  "Recently deployed" log rail (side). Mirrors Crash's main+side-log   */
+/*  shape (the e05 bottom-left tape) in the deploy palette.              */
+/* ===================================================================== */
+.dx-home {
+  display: flex;
+  align-items: flex-start;
+  gap: clamp(20px, 3vw, 40px);
+}
+.dx-home__main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* the side log — a condensed feed, lighter + narrower than the main column. */
+.dx-log {
+  flex: 0 0 auto;
+  width: 268px;
+  position: sticky;
+  top: clamp(22px, 4vw, 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-left: 20px;
+  border-left: 1px solid var(--hair);
+}
+.dx-log__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+.dx-log__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--blue);
+  flex: 0 0 auto;
+}
+.dx-log__lbl {
+  font-family: var(--sans);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.dx-log__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* one COMPACT row — the whole row is the open-control (Crash-tape density). */
+.dx-log__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  margin: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease;
+}
+.dx-log__row:hover {
+  background: var(--blue-wash);
+}
+.dx-log__row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--blue-wash);
+  background: var(--blue-wash);
+}
+.dx-log__name {
+  font-family: var(--sans);
+  font-weight: 600;
+  color: var(--ink-2);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dx-log__row:hover .dx-log__name {
+  color: var(--blue-deep);
+}
+.dx-log__host {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-4);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dx-log__ago {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-4);
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.dx-log__empty {
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  margin: 0;
+  padding: 2px 8px;
+}
+/* NARROW — the log drops BELOW the main column as a horizontal strip. */
+@media (max-width: 900px) {
+  .dx-home {
+    flex-direction: column;
+  }
+  .dx-log {
+    width: 100%;
+    position: static;
+    margin-top: 36px;
+    padding-left: 0;
+    padding-top: 22px;
+    border-left: 0;
+    border-top: 1px solid var(--hair);
+  }
+  /* lay the rows out as a wrapping strip rather than a tall column on mobile. */
+  .dx-log__rows {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+  }
+  .dx-log__row {
+    width: auto;
+    border: 1px solid var(--hair);
+  }
+  .dx-log__ago {
+    margin-left: 6px;
+  }
 }
 
 .dx-pagehead {
@@ -776,6 +917,21 @@ a {
   flex: 0 0 auto;
 }
 
+/* the PROMINENT sign-in CTA on the anonymous (public feed) home — keeps the
+   accent fill of .dx-btn.is-accent (a real call to action, not the quiet
+   masthead .dx-signin), with the Google mark holding its own brand colours. */
+.dx-signin-cta {
+  gap: 8px;
+}
+.dx-signin-cta svg {
+  flex: 0 0 auto;
+}
+.dx-signin-cta .spin {
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+}
+
 .dx-chip {
   display: inline-flex;
   align-items: center;
@@ -803,31 +959,6 @@ a {
   color: var(--blue-deep);
   border-color: var(--hair-blue);
   background: var(--blue-wash);
-}
-.dx-chip__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 0 0 currentColor;
-}
-/* the live dot breathes — a quiet "on air" pulse (stilled under reduced-motion) */
-.dx-chip.is-live .dx-chip__dot {
-  animation: dx-live-pulse 2.6s ease-in-out infinite;
-}
-@keyframes dx-live-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 var(--bull-edge);
-  }
-  50% {
-    box-shadow: 0 0 0 3px transparent;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .dx-chip.is-live .dx-chip__dot {
-    animation: none;
-  }
 }
 
 /* ==========================================================================
@@ -878,13 +1009,31 @@ a {
 .dx-card:hover::before {
   transform: scaleY(1);
 }
-.dx-card:focus-visible {
-  outline: none;
+/* Keyboard focus lands on the covering open-control (.dx-card__open); render the
+   card's focus ring + press-rail when it's focus-visible (mouse clicks don't
+   trigger :focus-visible, so the ring stays keyboard-only as before). */
+.dx-card:has(.dx-card__open:focus-visible) {
   border-color: var(--blue);
   box-shadow: 0 0 0 3px var(--blue-wash);
 }
-.dx-card:focus-visible::before {
+.dx-card:has(.dx-card__open:focus-visible)::before {
   transform: scaleY(1);
+}
+/* The stretched-link overlay: a transparent button covering the whole card that
+   opens the detail. Inherits the card's pointer cursor; carries no visuals of its
+   own (the card draws hover/focus). Sits below the genuinely-interactive children
+   (the live-URL row) so those stay independently clickable. */
+.dx-card__open {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
 }
 .dx-card__head {
   display: flex;
@@ -919,8 +1068,11 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* the live URL — the serif HEADLINE of the edition */
+/* the live URL — the serif HEADLINE of the edition. Lifted ABOVE the stretched
+   open-overlay so the link + CopyButton stay independently clickable. */
 .dx-card__url {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -1139,8 +1291,8 @@ a {
   }
 }
 
-/* the "chain pending" notice strip — a stop-press dispatch with a blue rail,
-   an italic-serif kicker, and a fine ink note. */
+/* the "chain pending" notice strip — a stop-press dispatch on a full
+   blue hairline + faint blue wash, an italic-serif kicker, and a fine ink note. */
 .dx-banner {
   display: flex;
   align-items: flex-start;
@@ -1148,8 +1300,6 @@ a {
   padding: 13px 16px 13px 15px;
   margin-bottom: 24px;
   border: 1px solid var(--hair-blue);
-  border-left-width: 2px;
-  border-left-color: var(--blue);
   background:
     linear-gradient(90deg, var(--blue-wash), transparent 70%),
     var(--card);
@@ -1411,6 +1561,90 @@ a {
   color: var(--ink);
   word-break: break-all;
   flex: 1 1 auto;
+}
+
+/* record head — the ①/② step label on the left, its ✓/✗ check pill on the right */
+.dx-record__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.dx-record__head .dx-record__type {
+  margin-bottom: 0;
+}
+
+/* the per-record verification pill — ✓ found (bull) / ✗ not found (bear) / idle */
+.dx-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--hair);
+}
+.dx-check.is-ok {
+  color: var(--bull-ink);
+  background: var(--bull-fill);
+  border-color: var(--bull-edge);
+}
+.dx-check.is-bad {
+  color: var(--bear-ink);
+  background: var(--bear-fill);
+  border-color: var(--bear-edge);
+}
+.dx-check.is-idle {
+  color: var(--ink-3);
+  background: transparent;
+}
+.dx-check__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+.dx-check__x {
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* the linked-state SSL line + the "<domain> is linked" success mark */
+.dx-linked-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--bull-ink);
+}
+.dx-ssl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dx-ssl.is-ok {
+  color: var(--bull-ink);
+  font-weight: 600;
+}
+.dx-ssl.is-bad {
+  color: var(--bear-ink);
+}
+.dx-ssl.is-pending {
+  color: var(--blue);
+}
+.dx-ssl.is-idle {
+  color: var(--ink-2);
+}
+.dx-ssl .spin {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
 }
 
 /* ==========================================================================

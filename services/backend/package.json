@@ -1,12 +1,13 @@
 {
   "name": "@suize/backend",
-  "version": "0.2.2",
+  "version": "0.2.9",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "typecheck": "tsc --noEmit",
+    "deploy-as-agent": "bun run scripts/deploy-as-agent.ts",
     "push": "bash scripts/push.sh",
     "push:patch": "bash scripts/push.sh patch",
     "push:minor": "bash scripts/push.sh minor",

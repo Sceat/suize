@@ -1,6 +1,6 @@
 import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { registerEnokiWallets } from '@mysten/enoki'
-import { RPC_URL } from './config'
+import { CRASH_NETWORK, RPC_URL } from './config'
 
 // ============================================================================
 // Enoki (zkLogin + sponsored gas) registration.
@@ -47,10 +47,10 @@ export const setup_enoki = (): void => {
     return
   }
   try {
-    const client = new SuiJsonRpcClient({ url: RPC_URL, network: 'testnet' })
+    const client = new SuiJsonRpcClient({ url: RPC_URL, network: CRASH_NETWORK })
     const result = registerEnokiWallets({
       client,
-      network: 'testnet',
+      network: CRASH_NETWORK,
       apiKey: ENOKI_API_KEY,
       providers: {
         google: {

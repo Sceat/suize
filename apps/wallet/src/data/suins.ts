@@ -28,7 +28,7 @@
  */
 
 import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
-import { NETWORK } from '@suize/shared';
+import { NETWORK } from '../lib/env';
 import type {
   WsExecuteResponse as ExecuteResponse,
   WsHandleAvailableResponse as HandleAvailableResponse,

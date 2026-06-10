@@ -1,37 +1,79 @@
 # Suize Deploy — serving worker.
-# Resolves *.deploy.suize.io (and linked custom domains) to an on-chain `Site`
+# Resolves *.suize.site (and linked custom domains) to an on-chain `Site`
 # object, then streams the site's files from the Walrus aggregator with serve-time
 # integrity verification (manifest hash + per-blob re-hash). See ./README.md.
 
 name = "suize-deploy-worker"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
+# Sceat Cloudflare account — same account as the api.suize.io tunnel + the suize.io zone.
+account_id = "88b50dc737d080644ddd4cf3193dd3c2"
 
-# Wildcard subdomain route. The zone `deploy.suize.io` must exist on the Cloudflare
-# account and have a wildcard DNS record (`*.deploy.suize.io`) pointing at the worker
+# Wildcard subdomain route. The zone `suize.site` must exist on the Cloudflare
+# account and have a wildcard DNS record (`*.suize.site`) pointing at the worker
 # (proxied / orange-cloud). Linked custom domains are added as additional routes
 # (or via Cloudflare for SaaS custom hostnames) by the operator — the same worker
 # code resolves them via the on-chain DomainRegistry.
+# `*/*` (not just `*.suize.site/*`) so the worker also serves Cloudflare-for-SaaS
+# CUSTOM HOSTNAMES (a user's example.com) — those don't match `*.suize.site`. The
+# worker reads the Host header → on-chain domain_registry → serves. base36
+# subdomains still resolve the same way; the apex + plumbing hosts 404 cleanly.
 routes = [
-  { pattern = "*.deploy.suize.io/*", zone_name = "deploy.suize.io" },
+  { pattern = "*/*", zone_name = "suize.site" },
 ]
 
 # Plaintext, non-secret operator config. These are PUBLIC on-chain ids + public
-# endpoints — safe to commit. The two `…_ID` values are PLACEHOLDERS until the
-# `deploy_sui` package is published to testnet (see §13 of docs/deploy/SPEC.md).
+# endpoints — safe to commit. Network selection is ENV-ONLY repo-wide: the worker's
+# "env" is these [vars] — the DEFAULT (top-level) deploy is TESTNET; the mainnet
+# flip is `wrangler deploy --env mainnet` (see [env.mainnet] below), no code change.
 [vars]
-# Sui testnet fullnode JSON-RPC (network is locked to testnet repo-wide).
+# Sui TESTNET fullnode JSON-RPC (the default deploy serves testnet sites).
 SUI_RPC_URL = "https://fullnode.testnet.sui.io:443"
 
 # Walrus testnet aggregator — serves blobs + quilt patches.
 WALRUS_AGGREGATOR = "https://aggregator.walrus-testnet.walrus.space"
 
-# PLACEHOLDER — the `deploy_sui` Move package id (write after publish). Currently
+# The base zone sites are served under: <base36(siteId)>.<BASE_DOMAIN>. The code
+# falls back to "suize.site" when unset, so the existing deploy is unchanged.
+BASE_DOMAIN = "suize.site"
+
+# The `deploy_sui` v2 Move package id (testnet republish 2026-06-10 — the v1
+# 0xadcc8d… publish is abandoned; its sites/domains are orphaned). Currently
 # unused at runtime by the worker (it reads the shared `Site`/`DomainRegistry`
 # objects by id), but kept here so the operator records the published id alongside
 # the other deploy config and a future type-checked resolve can use it.
-DEPLOY_PACKAGE_ID = "0xDEPLOY_PACKAGE_ID_PLACEHOLDER"
+DEPLOY_PACKAGE_ID = "0x9a769a50014208e54c9deb446fd694e54e0d3000fd7d4ceebe5391df01a90ad4"
 
-# PLACEHOLDER — the shared `DomainRegistry` object id (created at publish). Required
+# The shared `DomainRegistry` object id (created at the v2 publish init). Required
 # for custom-domain resolution; subdomain serving works without it.
-DOMAIN_REGISTRY_ID = "0xDOMAIN_REGISTRY_ID_PLACEHOLDER"
+DOMAIN_REGISTRY_ID = "0x7e7fe6245aed8ed86b81bb0c793de06639a2eb595fbe17700f5be6599151041e"
+
+# Durable global blob cache (edge cache → R2 → aggregator; see src/index.ts).
+# Keys are content sha256 (verified on every fill) so the bucket can never serve
+# stale or wrong bytes — and ONE bucket is safely shared across testnet/mainnet.
+[[r2_buckets]]
+binding = "BLOB_CACHE"
+bucket_name = "suize-deploy-blob-cache"
+
+# ---------------------------------------------------------------------------
+# MAINNET — `wrangler deploy --env mainnet` is the ONLY flip (LOCKED #12: Deploy
+# goes mainnet; the testnet default above stays untouched). Named envs do NOT
+# inherit top-level [vars], so every var is restated. The two `…_ID` values are
+# '0x0' PLACEHOLDERS until `deploy_sui` is REPUBLISHED on mainnet — write the real
+# ids here at publish time. NOTE: `routes` is also not inherited; the operator
+# assigns the production routes to this env at cut-over (two workers cannot share
+# the same route pattern — move the `*/*` route on the suize.site zone here then).
+# ---------------------------------------------------------------------------
+[env.mainnet]
+
+[env.mainnet.vars]
+SUI_RPC_URL = "https://fullnode.mainnet.sui.io:443"
+WALRUS_AGGREGATOR = "https://aggregator.walrus-mainnet.walrus.space"
+BASE_DOMAIN = "suize.site"
+DEPLOY_PACKAGE_ID = "0x0"
+DOMAIN_REGISTRY_ID = "0x0"
+
+# Same content-addressed bucket as the default env (sha256 keys — network-agnostic).
+[[env.mainnet.r2_buckets]]
+binding = "BLOB_CACHE"
+bucket_name = "suize-deploy-blob-cache"

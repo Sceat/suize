@@ -1,0 +1,218 @@
+/* ==========================================================================
+   /deploy — Deploy by Suize (CHARGE). Page-scoped styles for the FEATURED
+   merchant room: the ship flow ladder, the integrity (X-Suize-Integrity:
+   verified) proof card, and the closing ledger. Built on theme.css tokens +
+   the room-accent vars (the deploy indigo) already in scope under `.sx-room`.
+   Blue stays a scalpel — only the `verified` value + the response header value
+   take the accent; everything else is ink/mono. No glassmorphism, no gradient
+   fields, no left-edge accent bar, no casino-green on routine state.
+   ========================================================================== */
+
+/* ---- 01 · THE SHIP FLOW — a numbered ladder, dotted-leader rows. ---------- */
+.dx-flow {
+  display: flex;
+  flex-direction: column;
+  max-width: 760px;
+}
+.dx-flow__step {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 18px 2px;
+}
+.dx-flow__step + .dx-flow__step {
+  border-top: 1px solid var(--hair-2);
+}
+.dx-flow__no {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  flex: 0 0 auto;
+  width: 22px;
+}
+.dx-flow__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.dx-flow__title {
+  font-family: var(--sans);
+  font-size: clamp(15px, 1.9vw, 18px);
+  font-weight: 600;
+  color: var(--fg);
+}
+.dx-flow__desc {
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--fg-2);
+  max-width: 46ch;
+}
+.dx-flow__tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: -0.01em;
+  color: var(--fg-3);
+  flex: 0 0 auto;
+  white-space: nowrap;
+  align-self: center;
+}
+@media (max-width: 640px) {
+  .dx-flow__step {
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+  .dx-flow__tag {
+    width: 100%;
+    padding-left: 38px;
+    align-self: auto;
+  }
+}
+
+/* ---- 02 · THE INTEGRITY CARD — the differentiator beat. ------------------- */
+.dx-integrity {
+  max-width: 640px;
+  padding: 20px 22px 22px;
+}
+.dx-integrity__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+/* the one status badge — the only place "verified" reads as a state. Ink-quiet
+   pill (NOT casino-green); the accent lands on the value, not a fill. */
+.dx-integrity__verified {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-bright);
+  border: 1px solid var(--accent-hair);
+  background: var(--accent-wash);
+  border-radius: var(--r-pill-100);
+  padding: 5px 11px;
+}
+/* the served response-header line — the header IS the proof. Mono, the value
+   takes the accent (a scalpel mark). */
+.dx-integrity__header {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 13px 14px;
+  background: var(--ink-0);
+  border: 1px solid var(--hair-2);
+  border-radius: var(--r-3);
+  font-family: var(--mono);
+  font-size: clamp(11px, 1.4vw, 13px);
+  letter-spacing: -0.01em;
+  overflow-x: auto;
+}
+.dx-integrity__hk {
+  color: var(--fg-2);
+  flex: 0 0 auto;
+}
+.dx-integrity__hsep {
+  color: var(--fg-3);
+  flex: 0 0 auto;
+}
+.dx-integrity__hv {
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+
+/* the two checks — a plain ledger of what the worker re-hashes before serving */
+.dx-integrity__checks {
+  display: flex;
+  flex-direction: column;
+  margin-top: 16px;
+}
+.dx-integrity__check {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 0;
+}
+.dx-integrity__check + .dx-integrity__check {
+  border-top: 1px solid var(--hair-2);
+}
+.dx-integrity__cno {
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--fg-3);
+  flex: 0 0 auto;
+  width: 16px;
+}
+.dx-integrity__ck {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  flex: 0 0 auto;
+}
+.dx-integrity__clead {
+  flex: 1 1 auto;
+  height: 0;
+  border-bottom: 1px dotted var(--hair-strong);
+  transform: translateY(-3px);
+  min-width: 16px;
+}
+.dx-integrity__cv {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: -0.01em;
+  color: var(--fg-2);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.dx-integrity__foot {
+  margin-top: 16px;
+  padding-top: 15px;
+  border-top: 1px solid transparent;
+  border-image: var(--rule-fade) 1;
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--fg-2);
+  margin-bottom: 0;
+  max-width: 54ch;
+}
+@media (max-width: 560px) {
+  .dx-integrity__check {
+    flex-wrap: wrap;
+    gap: 4px 12px;
+  }
+  .dx-integrity__clead {
+    display: none;
+  }
+}
+
+/* ---- 03 · THE CLOSE — the honest line + the dual exit. -------------------- */
+.dx-deploy__close {
+  margin-top: clamp(36px, 5vw, 56px);
+  padding-top: clamp(28px, 4vw, 40px);
+  border-top: 1px solid transparent;
+  border-image: var(--rule-fade) 1;
+}
+.dx-deploy__closeline {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(18px, 2.4vw, 26px);
+  color: var(--fg);
+  margin: 0 0 26px;
+  max-width: 24ch;
+}
+.dx-deploy__actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}

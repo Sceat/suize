@@ -2685,7 +2685,9 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     window.clearTimeout(copiedTimer)
     copiedTimer = window.setTimeout(() => {
       if (acctAddrLabelEl) {
-        acctAddrLabelEl.textContent = host.data.addressShort
+        // Restore the label to the handle when present, else the hex fallback.
+        acctAddrLabelEl.textContent =
+          host.data.handle ?? host.data.addressShort
         acctAddrLabelEl.classList.remove('e05-acct-copied')
       }
     }, 1200)
@@ -2701,7 +2703,10 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   }
   function renderAcct(): void {
     const d = host.data
-    const key = `${d.signedIn}|${d.googleWallet}|${d.connecting}|${d.addressShort}|${d.managerHasBalance}`
+    // Include `handle` in the rebuild key: it resolves ASYNC after the first
+    // render, so when it arrives (or clears) the cluster must rebuild to swap the
+    // hex fallback for the `<name>@suize` label (and vice-versa on sign-out).
+    const key = `${d.signedIn}|${d.googleWallet}|${d.connecting}|${d.handle ?? ''}|${d.addressShort}|${d.managerHasBalance}`
     if (key === acctState) return
     acctState = key
     // The theme toggle is a PERMANENT sibling that lives OUTSIDE this rebuilt
@@ -2731,14 +2736,16 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
       acctBalEl.textContent = d.balanceStr
       balRow.append(balLbl, acctBalEl)
 
-      // Identity: truncated, click-to-copy hex address (no SuiNS resolver wired).
+      // Identity: the `<name>@suize` SuiNS handle when resolved, else the
+      // truncated hex fallback. Click-to-copy ALWAYS copies the full address
+      // (copyAddr reads host.data.addressFull), never the handle label.
       const addrBtn = document.createElement('button')
       addrBtn.type = 'button'
       addrBtn.className = 'e05-acct-addr'
       addrBtn.title = 'Copy address'
       addrBtn.setAttribute('aria-label', 'Copy wallet address')
       acctAddrLabelEl = document.createElement('span')
-      acctAddrLabelEl.textContent = d.addressShort
+      acctAddrLabelEl.textContent = d.handle ?? d.addressShort
       addrBtn.appendChild(acctAddrLabelEl)
       addrBtn.addEventListener('click', copyAddr)
 

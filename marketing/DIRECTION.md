@@ -1,4 +1,163 @@
-# Suize — Marketing Direction
+# Suize — Brand & Marketing Direction
+
+> **⚠ SUPERSEDED IN PART (2026-06-10) — root `CLAUDE.md` + `apps/landing/SPEC.md` OVERRIDE this doc wherever they conflict.** Specifically DEAD in PART I: the remote connector / `connect.suize.io` paste-block (the remote zero-install connector is DEAD — LOCKED #6), "paste into Claude/ChatGPT → your agent pays" as CONSUMER onboarding (the consumer product is the self-contained AI wallet app; the MCP survives only as an optional dev/CHARGE-side integration), "the payments standard" as the lead positioning (consumer-first: *"the AI wallet that makes life easier"*; business-side ACTION-FIRST: *"start accepting payments from AI agents"*), and ANY "built on x402" claim (integration claims are STANDARDS-ONLY — "402-shaped, x402-compatible by design, built for the same standards as Stripe/Coinbase/Google AP2"; NEVER "on x402"). Consumer-vocabulary laws (sub-account, no jargon, no pricing outside /pricing) also apply to every asset this doc produces.
+>
+> **This doc has two parts:**
+> - **PART I — Brand & Visual Direction.** The visual/typographic system (broadsheet tokens, type triad, ledger language) remains the house DNA; the POSITIONING + connector-hero copy in it are superseded as above.
+> - **PART II — Marketing & asset-production bible (kept in full).** The mascot canon (the Droplet), palette, typography, card/video series, image-gen playbook, social cadence, and risks. The production system that ships everything that leaves the building.
+>
+> Where the two reference different surfaces: **PART I** owns the standard/builder-facing landing (type-as-product-shot, no mascot, the editorial broadsheet); **PART II** owns the social/consumer feed (the Droplet mascot, carbon-dark cards, the video pipeline). Both palettes are intentional — the broadsheet for builders, the carbon-dark mascot world for the feed.
+
+---
+
+# PART I — Brand & Visual Direction (current positioning)
+
+> **Positioning:** Suize is the Sui payments standard for AI agents. *"Stripe + Revolut for AI agents on Sui."*
+>
+> This is a DIRECTION, not a hedge. It is opinionated on purpose. React to it.
+
+## I.0 The one sentence
+
+~~**Suize gives your AI agent a wallet — paste one URL, sign in with Google, and it can pay anywhere, with a receipt for everything.**~~ **SUPERSEDED (2026-06-10):** consumer line — *"The AI wallet that makes life easier."* Business line — *"Start accepting payments from AI agents."* ("Paste one URL" was the dead remote connector — never say it.)
+
+If we can't say it in one line, we've over-built it. We can. Everything below defends that line.
+
+## I.1 What we're actually selling (and to whom)
+
+Two faces, one rail:
+
+| Side | They want | The line |
+|---|---|---|
+| **Agents PAY** (devs / agent builders) | their agent to spend money without writing a payments stack | *"Give your agents a wallet."* |
+| **Sellers CHARGE** (anyone with an API/MCP) | to get paid by agents — one-off + subscription | *"Get paid by agents."* |
+
+The brand leads with the **PAY** side because that's the wedge: it's the magic moment, the screenshot, the tweet. The CHARGE side is the business. Stripe led with "accept payments in 7 lines"; the marketplace came after. Same move.
+
+**The three product truths we must make a person feel in 8 seconds:**
+
+1. **No install.** Paste ONE connector URL into Claude / ChatGPT. That's the integration. There is nothing to read.
+2. **It's safe by construction.** Non-custodial, gasless (USDC is the only thing anyone sees), one-tap kill switch.
+3. **You can prove it.** Every action your agent takes is a verifiable trace — on-chain + Walrus. Not a log you trust. A receipt you can check.
+
+## I.2 Voice & tone (the standard/builder surface)
+
+The siblings (Crash, Deploy, the wallet) already speak in **calibrated honesty** — every reassurance is true, no alpha claims, "coming soon means coming soon." Suize-the-standard inherits this and adds **infra confidence**: the unglamorous, load-bearing certainty of Stripe / Resend. We are plumbing. Plumbing brags by being boring and exact.
+
+**Rules:**
+
+- **Declarative, present tense, second person.** "Your agent can pay." Not "Agents will be able to pay."
+- **Number-led when there's a number.** "$19.99/mo. 2% on payments. Unlimited deploys." Say the price louder than the feature.
+- **Verbs over nouns.** "Paste. Sign in. Pay." Not "Seamless onboarding experience."
+- **Never crypto-jargon at the consumer/agent-builder.** No "PTB," no "gas," no "zkLogin" in the hero. *USDC, sign in with Google, receipt, kill switch* — words a non-crypto dev already owns. (Inherited memory: ban crypto jargon in the consumer surface.)
+- **The receipt is the flex.** Where competitors say "trust us," we say "check it." Lead with the trace.
+- **Three taglines, three jobs:**
+  - **`Give your agents a wallet.`** — the headline. The product in four words.
+  - **`Let them pay, anywhere.`** — the supporting promise (third parties + Suize's own products).
+  - **`Nothing to read.`** — the kicker / closer. The anti-docs flex. This is the line that makes a tired developer smile.
+
+**Anti-voice (never):** "revolutionary," "seamless," "unlock," "empower," "the future of," any emoji, any exclamation in body copy.
+
+## I.3 How the broadsheet language EVOLVES (do not reinvent)
+
+The locked system is a **light blue-on-white editorial broadsheet**: paper floor, deep-blue ink, ONE blue accent, fading hairlines, dotted leaders, money always in mono, titles in serif. Crash and Deploy already live here; the wallet v3 is locked in it. We **keep the tokens verbatim** (`--paper #fbfcfe`, `--ink #0a1b2e`, `--blue #1e7fd6 / --blue-bright #4da2ff`, `--rule-fade`, `--blue-wash`, the Hashgraph wordmark, the dot+ring cursor).
+
+What changes for a **payments-standard / dev-infra** product vs a betting game or a wallet:
+
+1. **The broadsheet becomes a FINANCIAL broadsheet — a ledger, not a casino.** Crash needed green/red and a live chart hero. Suize-the-standard is calmer and colder. The hero of the page is **a single block of monospace** — the connector URL — treated with the reverence Stripe gives `curl`. Type IS the product shot. No mascot, no shader on the standard page (the Droplet stays on the consumer/social surface — Part II; the standard speaks to builders).
+2. ~~**The "Stripe moment" replaces the chart.** Ours is **the paste-block**: a wide, hairline-framed monospace card holding `https://connect.suize.io/...` with a copy affordance, then a three-beat ladder (paste → sign in with Google → your agent pays).~~ **DEAD (LOCKED #6 — the remote connector no longer exists; never build this).** The shipped "Stripe moment" is the conversation-first hero (chat thread + wallet chrome) — see `apps/landing/SPEC.md` §2.
+3. **Numbers carry more weight, so the mono face gets more air.** Pricing (`$19.99`, `2%`), the trace amounts, the connector string — all mono, tabular, `-0.01em`. Give the price its own line at a large size; a number can be a *headline-sized* object. **Money is always blue.**
+4. **Dotted leaders do real work.** The label→value dotted leader (`ed-leader`) becomes the spine of the spec list and the pricing rows — it reads as a receipt/ledger, which is exactly the verifiable-trace metaphor. Lean on it harder than Crash did.
+5. **The "working" dot becomes the agent's heartbeat.** The same breathing blue dot means **"agent is acting"** — it sits in the trace teaser next to a live line. One dot, one accent, one meaning per surface.
+6. **Serif (Newsreader) is the editorial voice of an infrastructure house.** It sets the hero headline (`Give your agents a wallet.`) and section kickers ONLY. Never on a number, never on the connector string, never in a field. Serif says "considered." Mono says "exact." Grotesk says "operational." That tri-vocal contrast is the whole personality.
+7. **Wordmark:** `SUIZE` in Hashgraph Title, ink→blue gradient (the locked `.crash-logo__mark` treatment, generalized). The standard's lockup is `SUIZE` + a hairline + a spaced-grotesk descriptor `THE PAYMENTS STANDARD FOR AI AGENTS` — no "· by Suize" sub, because here Suize IS the brand, not the parent.
+
+## I.4 The hero idea (the thing the founder reacts to)
+
+**"The connector is the hero. Type is the product shot."**
+
+Stripe's genius was making `curl` aspirational. Vercel made `git push` aspirational. We make **one URL pasted into a chat** aspirational — because that genuinely IS the entire integration, and that's absurd in the best way. The page is built to deliver one feeling: *"wait, that's it?"*
+
+The hero is a two-column editorial spread:
+
+- **Left (the claim):** serif headline `Give your agents a wallet.` → one-line subhead in grotesk → the price stated as fact in mono → primary CTA. Restraint. Lots of paper.
+- **Right (the proof):** the **paste-block** — the connector URL in a hairline card, then the 3-beat ladder, then a sliver of the **verifiable trace** at the bottom so you see the receipt before you scroll. The right column answers "...and then what?" before you ask.
+
+Below the fold, in order: **two-sided strip** (Agents pay / Sellers charge) → **the trace** (full verifiable-receipt teaser) → **pricing** (rendered as a ledger) → **the safety rail** (non-custodial / gasless / kill switch as three plain facts) → footer.
+
+The kicker that closes the page: **`Nothing to read.`** in serif, alone, over a fading rule. That's the mic drop.
+
+## I.5 The key surfaces, specified
+
+### I.5a. Landing hero
+- Wordmark top-left (Hashgraph), thin nav right (grotesk, uppercase, 0.16em). One blue CTA, the rest quiet ink links.
+- Eyebrow: `ed-eyebrow` — `THE SUI PAYMENTS STANDARD FOR AI AGENTS · LIVE`, with the breathing blue dot.
+- Headline: Newsreader, `clamp(2.6rem, 6vw, 5rem)`, weight 400–500, tracking tight, line-height ~1.02. "agents" can take the ink→blue gradient — **accent used once** in the headline.
+- Subhead: grotesk, ink-2, ~20px. One sentence. The promise.
+- Price-as-fact line: mono, `$19.99/mo` blue, `· unlimited deploys` ink-3. Below it, `2% on payments` — a second mono fact.
+- CTA: `Start free →` (use `.btn.accent` — `--blue-wash` fill, `--hair-blue` border, blue ink). Secondary: `Read the 12-line quickstart` as a quiet link (wink: there's almost nothing to read).
+
+### I.5b. ~~The "paste this connector" Stripe moment~~ — **DEAD SECTION (LOCKED #6: the remote connector does not exist; never build any of this).** Kept only as a typographic reference; the shipped centerpiece is the conversation-first hero (`apps/landing/SPEC.md` §2).
+- A card: pure `--card` white face, `1px var(--hair)` border, `3px` radius, soft low shadow. **NO left accent rail** (the #1 slop tell — banned).
+- Card header: a tiny grotesk eyebrow `CONNECT IN ONE PASTE` + a single dotted-leader label. Editorial, not fake browser chrome.
+- The URL: Martian Mono, ink for the path, **blue for the `suize.io` host** (money/brand-blue used once), with a `Copy` affordance. A subtle blue selection highlight on the host segment hints "this is the magic word."
+- Below: the **3-beat ladder**, each beat a numbered row with a serif numeral, a grotesk verb, a dotted leader to a mono micro-detail:
+  1. **Paste into Claude or ChatGPT** ···· `no install`
+  2. **Sign in with Google** ···· `non-custodial`
+  3. **Your agent pays** ···· `gasless · USDC`
+- A footer hairline + one line: `That's the whole integration.` (serif, ink-2). The "wait, that's it?" payoff.
+
+### I.5c. The verifiable-trace teaser
+- A compact "receipt" card. Header eyebrow `VERIFIABLE TRACE` + the breathing blue dot (agent acting).
+- 2–3 ledger rows: grotesk action label left, dotted leader, **mono blue amount** right.
+  - `Paid · api.weather.pro` ···· `−$0.02 USDC`
+  - `Subscribed · datafeed.xyz` ···· `−$9.00 USDC /mo`
+  - `Refunded · gpu-rental.io` ···· `+$1.40 USDC`
+- A bottom row, ink-3 mono: a truncated tx digest + a Walrus blob id, each with a quiet "verify ↗" link. **The flex: every line is checkable.** Status green (`--bull-ink #0e7048`) ONLY on a true `confirmed` token. A `KILL` micro-control top-right of this card — hairline, ink, red (`--bear-ink`) on hover — the one-tap kill switch made visible.
+
+### I.5d. Pricing (rendered as a ledger, not cards)
+- No pricing "cards" with feature checklists. A **ledger**: dotted-leader rows, mono values.
+  - `Subscription` ···· `$19.99 /mo`
+  - `Payments` ···· `2%`
+  - `Deploys` ···· `unlimited`
+  - `Setup` ···· `$0`
+- One line under it in serif: `No seats. No tiers. No sales call.` The infra flex.
+
+## I.6 What makes this EXCEPTIONAL vs slop (the standard surface)
+
+| Exceptional (us) | Slop (everyone) |
+|---|---|
+| Type is the product shot; the connector URL is the hero | Floating 3D dashboard mockup, glassmorphic cards |
+| ONE blue accent, used maybe four times on the whole page | Purple→pink gradient on every button + heading |
+| Money always mono+blue; serif never touches a number | One font for everything, faux-bold "gradient text" headlines |
+| Fading hairlines + dotted leaders (a ledger you can read) | Hard 1px gray borders + drop-shadow card soup |
+| Verifiable trace shown as a real checkable receipt | "Enterprise-grade security 🔒" badge row |
+| `Nothing to read.` — the anti-docs mic drop | "Powerful. Flexible. Scalable." three-column feature grid |
+| Custom dot+ring cursor, breathing agent dot | Default cursor, Lottie confetti |
+
+**The non-negotiable anti-slop laws (enforced on every surface):**
+
+1. **NEVER an accent bar/rail on a card's LEFT edge.** Top hairline or none.
+2. No generic SaaS gradients, no glassmorphism, no purple, no emoji in UI, no stock-illustration blobs.
+3. **Accent-used-once.** Blue is a scalpel. If the page has more than ~5 blue marks, cut one.
+4. **Size-not-chrome.** Hierarchy comes from type size, weight, and whitespace — never from boxes, badges, or shadows.
+5. **Strict type roles.** Grotesk = words. Mono = numbers. Serif = titles. Cross one and it reads wrong.
+6. Green/red ONLY for true status (`confirmed`, `failed`, `refund`). Never decorative. No gold (on the standard surface; gold lives only on the Droplet's coin — Part II).
+
+## I.7 Motion (restraint = premium, standard surface)
+
+- **Reveal:** sections stream up 7px + fade over ~420ms, `cubic-bezier(0.16, 1, 0.3, 1)` (the locked `ed-stream`). Staggered, gentle.
+- **The breathing dot:** the agent heartbeat, `ed-pulse` 2.4s, on the eyebrow and the trace.
+- **Cursor:** dot + lagging ring (lerp 0.18), the locked `CustomCursor`. Fine pointers only.
+- **Copy interaction:** the connector host segment gets a one-shot blue selection sweep on hover. No bounce, no spring on the standard page (springs live on the consumer wallet's toggles).
+- Everything respects `prefers-reduced-motion`.
+
+## I.8 The deliverable (status)
+
+The flagship landing mockup (formerly `docs/brand/landing.html` + its screenshots, now retired into this doc as spec) put all of the above on the table: wordmark, serif headline, the paste-block centerpiece, the 3-beat ladder, the verifiable-trace receipt with a kill control, mono pricing-as-ledger, the custom cursor, the breathing dot, the `Nothing to read.` closer. Real fonts (Space Grotesk, Martian Mono, Newsreader; Hashgraph at the wordmark). Rebuild from this spec; `apps/landing` is the home for it.
+
+---
+
+# PART II — Marketing & asset-production bible
 
 > "Agents discover, agents pay, humans don't touch it."
 
@@ -123,8 +282,8 @@ The 2026 meta. Models are good enough. What they lack is *paid, structured, low-
 ### Pillar 4 — **Objectomics (the IP angle)**
 The arXiv paper is the credibility multiplier. Drip-feed the theory: type-quotient convergence, PTB structural fingerprinting, hot-potato intent atoms, the case-id property of Sui object IDs. Engineer-Twitter loves a paper. *"Every object on Sui writes its own autobiography"* is the headline metaphor — use it.
 
-### Pillar 5 — **The x402 rail**
-Don't fight the ecosystem — ride it. Co-occur with @coinbase, @CircleCoin, @base, @SuiNetwork, x402 maintainers. Every relevant post tags "built on x402." Their distribution is our distribution. The narrative is already wide open (x402 ecosystem ~$7B valuation, ~$28K/day real volume — we ship the real volume).
+### Pillar 5 — **The agent-payments standards wave**
+Don't fight the ecosystem — ride it. Co-occur with @coinbase, @CircleCoin, @base, @SuiNetwork, x402 maintainers. The claim is STANDARDS-ONLY (`CLAUDE.md` LOCKED #7): **"402-shaped, x402-compatible by design — built for the same standards as Stripe, Coinbase, and Google AP2."** NEVER tag/say "built on x402" or "on x402" (Sui is NOT on the official x402 network list). Their distribution is our distribution; the narrative is already wide open — we ship the real working product.
 
 ---
 

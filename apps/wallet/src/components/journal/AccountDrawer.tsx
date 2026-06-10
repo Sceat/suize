@@ -2,22 +2,25 @@
  * AccountDrawer + AccountLedger — the three accounts as FLAT, SELECTABLE,
  * DRAGGABLE cards (the editorial redesign).
  *
- * Three paper cards — your MAIN account (your own money, untouchable) and the two
- * AI SUB ACCOUNTS: AI SPENDING (sends/pays, chat-only) and AI INVESTING (runs the
- * strategies you choose). Each card is a flat `--paper-2` fill on ONE hairline —
- * no shadow, no gradient wash — laid out as a VERTICAL big-number stack:
+ * Three v3 dashboard cards — your MAIN account (your own money, untouchable) and the
+ * two AI SUB ACCOUNTS: AI SPENDING (sends/pays, chat-only) and AI INVESTING (runs the
+ * strategies you choose). Each card is a white `--paper-2` face on ONE hairline (3px
+ * corners, a soft 1px shadow, a -3px hover lift) — laid out as a VERTICAL editorial
+ * stack in the smoothed Suize language:
  *
  *     ┌──────────────────────────────┐
- *     │ MAIN · YOUR MONEY            │  ← .acct__label  (tiny mono name)
- *     │ $11,200.00                  │  ← .acct__hero (huge serif, a USD total)
- *     │ Where your money lives.     │  ← .acct__cap    (one plain line)
- *     │ ● Working                    │  ← .kill row (AI accounts only)
+ *     │ YOUR MONEY                   │  ← .acct__label (Space Grotesk eyebrow, tracked)
+ *     │ Main                         │  ← .acct__title (Space Grotesk name)
+ *     │ $11,200.00                   │  ← .acct__hero  (muted $ + BLUE Martian Mono)
+ *     │ Where your money lives.      │  ← .acct__cap   (one plain line)
+ *     │ ● Working          [Pause]   │  ← .kill row (AI Investing only)
  *     └──────────────────────────────┘
  *
- * The label → hero → cap live in `.acct__body`, which dims to ~50% when an AI
- * account is paused; the `.kill` status row stays full opacity so it can be turned
- * back on. MAIN carries the three REAL money actions (Add money / Send / Convert)
- * in its `.acct__foot`; the AI accounts carry just their Working/Paused row.
+ * The eyebrow → title → hero → cap live in `.acct__body`, which dims to ~50% when an AI
+ * account is paused; the status foot / `.kill` row stay full opacity so it can be turned
+ * back on. The balance is ALWAYS blue Martian Mono — NEVER serif on a number (the v3
+ * lock). MAIN carries the three REAL money actions (Add / Send / Convert) in its
+ * `.acct__foot` with ONE solid-accent primary; the AI accounts carry their status row.
  *
  * ── THE CARD IS A role="button" DIV (not a <button>) ─────────────────────────
  *   So the MAIN card can hold real nested `<button>`s (Add money / Send / Convert),
@@ -26,8 +29,10 @@
  *   `stopPropagation()` so they don't also select/drag the card.
  *
  * ── TWO GESTURES ON ONE CARD ─────────────────────────────────────────────────
- *   • CLICK selects the account → its detail fills the right pane (via `onSelect`).
- *     The selected card carries `.selected` (a 2px accent left-edge bar).
+ *   • CLICK selects the account → its detail fills the detail panel (via `onSelect`).
+ *     The selected card carries `.selected` = a FULL hairline-blue border + faint
+ *     blue-wash fill + a soft blue lift. NEVER a left-edge accent bar (the locked
+ *     AI-slop tell) — the 1px border only changes color, so selecting never shifts a px.
  *   • DRAG the whole card moves money: the card is the `[data-drag]` source AND the
  *     `[data-acct]` drop target. The drag machine (MoveMoney) engages only after a
  *     movement threshold, so a plain click still selects.
@@ -77,19 +82,53 @@ export const DRAWER_LABEL: Record<DrawerKey, string> = {
   invest: 'AI Investing',
 };
 
-/** The tiny mono uppercase name label on TOP of each card. */
-const DRAWER_TAGLINE: Record<DrawerKey, string> = {
-  main: 'Main · Your currencies',
-  spend: 'AI Spending',
-  invest: 'AI Investing',
+/** The v3 editorial EYEBROW on top of each card — what kind of account it is. */
+const DRAWER_EYEBROW: Record<DrawerKey, string> = {
+  main: 'Your money',
+  spend: 'Auto-pay',
+  invest: 'Auto-invest',
 };
 
-/** Format a USD number — "$11,200.00". */
+/** The card TITLE — the account's short name. */
+const DRAWER_TITLE: Record<DrawerKey, string> = {
+  main: 'Main',
+  spend: 'Spending',
+  invest: 'Investing',
+};
+
+/** Format a USD number WITHOUT the sign — "11,200.00" (the $ is its own muted span). */
 function usd(n: number): string {
-  return `$${n.toLocaleString('en-US', {
+  return n.toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })}`;
+  });
+}
+
+/** Shorten a 0x address — "0x1234… abcd". */
+function shortAddr(addr: string): string {
+  if (!addr) return '';
+  if (addr.length <= 12) return addr;
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+/** The breathing "Working" pill (the v3 status — dot pulses). */
+function WorkingPill() {
+  return (
+    <span className="jstatus jstatus-ok">
+      <span className="jstatus__dot j-breathe" aria-hidden="true" />
+      Working
+    </span>
+  );
+}
+
+/** The quiet "Turned off" pill. */
+function TurnedOffPill() {
+  return (
+    <span className="jstatus jstatus-off">
+      <span className="jstatus__dot" aria-hidden="true" />
+      Turned off
+    </span>
+  );
 }
 
 export interface AccountDrawerProps {
@@ -115,6 +154,10 @@ export interface AccountDrawerProps {
   busy?: boolean;
   /** MAIN only: the data hook, used to mount the Add money / Send / Convert sheets. */
   home?: HomeApi;
+  /** MAIN only: how many coins the user holds (shown in the card's status foot). */
+  coinCount?: number;
+  /** MAIN only: the user's 0x address (shortened in the card's status foot). */
+  address?: string;
 }
 
 export function AccountDrawer({
@@ -127,6 +170,8 @@ export function AccountDrawer({
   onToggle,
   busy = false,
   home,
+  coinCount,
+  address,
 }: AccountDrawerProps) {
   const label = DRAWER_LABEL[drawer];
   const isMain = drawer === 'main';
@@ -177,17 +222,47 @@ export function AccountDrawer({
       onClick={() => onSelect(drawer)}
       onKeyDown={onKeyDown}
     >
-      {/* the body dims to ~50% when paused; the status row + footer below stay lit */}
+      {/* the body dims to ~50% when paused; the status row + footer below stay lit.
+          v3 card stack: editorial EYEBROW → account TITLE → the BLUE Martian-Mono
+          balance → one plain capability line. */}
       <div className="acct__body">
-        <div className="acct__label">{DRAWER_TAGLINE[drawer]}</div>
-        {/* USD total across whatever the account holds (SUI/USDC/…), so we show the
-            `$` from usd() WITHOUT a coin unit — a fixed "USDC" suffix would mislabel a
-            mixed-asset balance as if it were all USDC. */}
-        <div className="acct__hero">
-          <span className="acct__num ng">{usd(balanceUsd)}</span>
+        <div className="acct__label">{DRAWER_EYEBROW[drawer]}</div>
+        <div className="acct__title">{DRAWER_TITLE[drawer]}</div>
+        {/* USD total across whatever the account holds (SUI/USDC/…) — no coin unit, a
+            fixed "USDC" suffix would mislabel a mixed-asset balance. The v3 card hero:
+            a muted `$` (.acct__cur, --ink-4) + the blue Martian-Mono figure (.acct__num
+            on .acct__hero, solid --blue-deep). NEVER serif on a number, NO .ng gradient
+            (the v3 card uses solid blue money). */}
+        <div className="acct__hero tnum">
+          <span className="acct__cur">$</span>
+          <span className="acct__num">{usd(balanceUsd)}</span>
         </div>
         <div className="acct__cap">{capability}</div>
       </div>
+
+      {/* the v3 STATUS FOOT — pinned to the card bottom, stays lit when paused.
+            MAIN     → "N coins · 0xaddr…" (honest holdings + address)
+            SPENDING → the breathing Working pill (on-demand; no kill switch)
+          AI INVESTING keeps its real KillToggle below (its Working/Turned-off +
+          the only toggle), so it gets NO duplicate pill here. */}
+      {isMain ? (
+        <div className="acct__foot-status">
+          <span className="acct__foot-words">
+            {coinCount ?? 0} coin{coinCount === 1 ? '' : 's'}
+            {address ? (
+              <>
+                {' · '}
+                <span className="tnum">{shortAddr(address)}</span>
+              </>
+            ) : null}
+          </span>
+        </div>
+      ) : null}
+      {drawer === 'spend' ? (
+        <div className="acct__foot-status">
+          {on ? <WorkingPill /> : <TurnedOffPill />}
+        </div>
+      ) : null}
 
       {/* AI INVESTING only: the calm Working/Paused status row (+ its own inline
           error). Turning it OFF routes through the InvestingKillModal first. AI
@@ -291,6 +366,8 @@ export function AccountLedger({ home, selected, onSelect }: AccountLedgerProps) 
         selected={selected === 'main'}
         onSelect={onSelect}
         home={home}
+        coinCount={state.currencies.filter((c) => c.ui > 0).length}
+        address={state.address}
       />
 
       {/* AI SPENDING sub account — sends money and pays for you (chat-only). It's

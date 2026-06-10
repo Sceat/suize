@@ -10,7 +10,12 @@
 // used by the shared /ready endpoint.
 import { EnokiClient } from "@mysten/enoki";
 import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
-import { CRASH_MOVE_TARGETS, WALLET_MOVE_TARGETS } from "@suize/shared";
+import {
+  CRASH_MOVE_TARGETS,
+  WALLET_MOVE_TARGETS,
+  ACCOUNT_MOVE_TARGETS,
+  ACCOUNT_PUBLISHED,
+} from "@suize/shared";
 import type { SponsorRequest, SponsorResponse, ExecuteRequest, ExecuteResponse } from "@suize/shared";
 import { config } from "../config";
 import { sponsorDailyCeiling } from "../quota";
@@ -26,13 +31,24 @@ export const maskKey = (key: string) => (key.length <= 6 ? "***" : `***${key.sli
 // gas pool with arbitrary move calls. These are public on-chain ids.
 //
 // The target lists are the SINGLE SOURCE OF TRUTH in @suize/shared:
-//   - CRASH_MOVE_TARGETS  : the 7 live `…::router::*` targets (testnet).
-//   - WALLET_MOVE_TARGETS : the live wallet targets (mandate/vault/swap/navi) —
-//     the wallet Move package IS published to testnet; @suize/shared pins them.
-// The effective allow-list is the union of both apps' targets.
+//   - CRASH_MOVE_TARGETS   : the live `…::router::*` Crash targets (testnet).
+//   - ACCOUNT_MOVE_TARGETS : the v1 PAY rail (`…::account::*`) — the new wallet +
+//     the CHARGE↔Deploy join. Only valid once `account` PUBLISHES (its package id is
+//     no longer `0x0`); a `0x0::account::*` placeholder would poison the list.
+//   - WALLET_MOVE_TARGETS  : the LEGACY mandate/vault/swap/navi package — live on
+//     testnet, kept ONLY while the rail is unpublished so the existing gasless wallet
+//     keeps working. Per services/backend/SPEC §2, the effective allow-list MUST
+//     swap to [...CRASH, ...ACCOUNT] the moment the rail goes live.
+//
+// THE GATE (fixes the SPEC-flagged drift): when `account` is published, the
+// effective list is [...CRASH, ...ACCOUNT] (the rail is live; retire the legacy
+// cage). Until then it is [...CRASH, ...WALLET] (the legacy wallet is the only live
+// `account`-shaped surface). ACCOUNT is NEVER unioned in while it is `0x0`.
 // ---------------------------------------------------------------------------
 
-const ALLOWED_MOVE_TARGETS: string[] = [...CRASH_MOVE_TARGETS, ...WALLET_MOVE_TARGETS];
+const ALLOWED_MOVE_TARGETS: string[] = ACCOUNT_PUBLISHED
+  ? [...CRASH_MOVE_TARGETS, ...ACCOUNT_MOVE_TARGETS]
+  : [...CRASH_MOVE_TARGETS, ...WALLET_MOVE_TARGETS];
 
 // ---------------------------------------------------------------------------
 
@@ -58,7 +74,7 @@ const MAX_TX_KIND_B64_LEN = Math.ceil((MAX_TX_KIND_BYTES * 4) / 3) + 4;
 const enokiClient = new EnokiClient({ apiKey: ENOKI_PRIVATE_API_KEY ?? "" });
 // Exported so the WS server (src/ws/balance) reuses the SAME RPC client for the
 // initial getBalance push — one client, one place, no second config.
-export const suiClient = new SuiJsonRpcClient({ url: config.suiRpcUrl, network: "testnet" });
+export const suiClient = new SuiJsonRpcClient({ url: config.suiRpcUrl, network: config.suiNetwork });
 
 export const sponsorReady = async (): Promise<boolean> => {
   if (!ENOKI_PRIVATE_API_KEY) return false;
@@ -131,7 +147,13 @@ export const createSponsor = async (input: Partial<SponsorRequest>): Promise<Spo
   const transactionKindBytes = typeof input?.transactionKindBytes === "string" ? input.transactionKindBytes : "";
   const sender = typeof input?.sender === "string" ? input.sender : "";
 
-  if (network !== "testnet") throw new SponsorError("unsupported network (testnet only)", 400);
+  // Accept the CONFIGURED network, with 'testnet' ADDITIONALLY allowed always:
+  // Crash is network-pinned to testnet (LOCKED #11), so its sponsorship must
+  // survive a future mainnet flip of the rest of the stack (Enoki sponsors
+  // per-network — the `network` field rides through to createSponsoredTransaction).
+  if (network !== config.suiNetwork && network !== "testnet") {
+    throw new SponsorError("unsupported network", 400);
+  }
   if (!SUI_ADDRESS_RE.test(sender)) throw new SponsorError("invalid sender address", 400);
   if (!transactionKindBytes || !BASE64_RE.test(transactionKindBytes)) {
     throw new SponsorError("invalid transactionKindBytes", 400);
@@ -199,5 +221,24 @@ export const executeSponsor = async (input: Partial<ExecuteRequest>): Promise<Ex
 export const sponsorInfo = {
   allowedMoveTargetCount: ALLOWED_MOVE_TARGETS.length,
   crashTargetCount: CRASH_MOVE_TARGETS.length,
-  walletTargetCount: WALLET_MOVE_TARGETS.length,
+  // The rail (account) targets are only in the effective list once published; the
+  // legacy wallet targets are only in it until then. Report which is live so the
+  // startup log makes the gate state obvious.
+  accountPublished: ACCOUNT_PUBLISHED,
+  accountTargetCount: ACCOUNT_PUBLISHED ? ACCOUNT_MOVE_TARGETS.length : 0,
+  walletTargetCount: ACCOUNT_PUBLISHED ? 0 : WALLET_MOVE_TARGETS.length,
 };
+
+/**
+ * Build + Enoki-SPONSOR an arbitrary transaction-kind for a caller, returning the
+ * sponsored bytes + digest. Thin wrapper over {@link createSponsor} that the
+ * deploy-charge join (and any future in-process builder) calls directly with bytes
+ * it already built `onlyTransactionKind`. The `sender` is the trusted subject — the
+ * caller MUST pass the VERIFIED owner address (never a raw body field). Throws
+ * {@link SponsorError} on bad input / Enoki failure / quota, exactly like the wire path.
+ */
+export const sponsorKindBytes = async (
+  sender: string,
+  transactionKindBytes: string,
+): Promise<SponsorResponse> =>
+  createSponsor({ network: config.suiNetwork, sender, transactionKindBytes });

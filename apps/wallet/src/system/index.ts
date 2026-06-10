@@ -17,8 +17,9 @@ export { Logo } from './Logo';
 export type { LogoProps } from './Logo';
 export { GradText } from './GradText';
 export type { GradTextProps } from './GradText';
-export { Wordmark } from './Wordmark';
+export { Wordmark, SuizeWordmark } from './Wordmark';
 export type { WordmarkProps } from './Wordmark';
+export { CustomCursor } from './CustomCursor';
 
 // theme
 export { ThemeProvider, useTheme, ThemeToggle } from './theme';

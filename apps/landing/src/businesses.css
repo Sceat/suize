@@ -1,0 +1,1290 @@
+/* ==========================================================================
+   /for-business (CHARGE) — THE BUSINESS ROOM. A darker, deeper-blue, CORPORATE
+   environment vs the airy consumer home. The page reuses home.css for the
+   floating-station chassis (.sx-station / .sx-stationhead / .sx-cta / the close)
+   and theme.css's [data-room='business'] --biz-* tokens for the palette; THIS
+   file (1) paints the deep corporate floor over the airy backdrop, (2) re-scopes
+   the gradient/fill tokens to the corporate --biz-* set, and (3) holds the
+   inverted-current artifacts (rising laminae) + the page's own premium blocks
+   (the wide masthead, the speed LEDGER, the charge-side proof card).
+
+   CONSUMES (theme.css [data-room='business']): --biz-surface, --biz-surface-2,
+   --biz-panel, --biz-panel-2, --biz-fg(-2/-3/-4), --biz-hair, --biz-hair-strong,
+   --biz-accent(-deep/-bright/-wash/-glow/-hair), --biz-grad. The semantic
+   tokens (--fg*, --blue*, --ink-*, --hair*) are ALREADY remapped to these by
+   theme.css, so the shared chassis retints for free; here we apply the NAMED
+   --biz-* tokens directly to the page's own surfaces + the gradient clips.
+
+   LAWS: every pane is a SHARP-cornered frosted lamina (3px max, never a pill);
+   ZERO decorative dots; NO phone — only free-floating glass in deep water. The
+   2% lives ONLY inside the receipt fee split (the honesty flex).
+   ========================================================================== */
+
+/* ==========================================================================
+   0 · THE ROOM — a deep corporate-blue floor painted OVER the airy blueprint
+   backdrop (backdrop.css does NOT retint for data-room='business', so without
+   this the bright paper would show through). The floor is fixed so the whole
+   scroll reads as one serious B2B environment; a faint corporate grid + a top
+   accent wash give it depth without the consumer warmth.
+   ========================================================================== */
+.bz-room {
+  position: relative;
+  isolation: isolate;
+  /* the room floor's deep edge — defined HERE (the floor element is a child of
+     .bz-room, NOT inside .bz-page) so it actually resolves. LIGHT = a cool
+     corporate paper-shadow; the dark override below flips it to near-black so
+     the floor (and the whole page mood) visibly tracks the theme toggle. */
+  --biz-floor-deep: #cdddf2;
+}
+:root[data-theme='dark'] .bz-room {
+  --biz-floor-deep: #07101d;
+}
+.bz-room__floor {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* the corporate room floor, brightening a touch toward the masthead. The deep
+     edge reads a themed token (--biz-floor-deep) so the floor flips light↔dark
+     with the toggle instead of being pinned to a hardcoded near-black. */
+  background:
+    radial-gradient(
+      120% 80% at 50% -8%,
+      var(--biz-surface-2) 0%,
+      var(--biz-surface) 52%,
+      var(--biz-floor-deep) 100%
+    );
+}
+/* a faint corporate ruling + a deep-accent top wash, layered over the floor —
+   structure, not the home's airy dot-matrix. Kept very low-contrast. */
+.bz-room__floor::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--biz-hair) 1px, transparent 1px),
+    linear-gradient(90deg, var(--biz-hair) 1px, transparent 1px);
+  background-size: 88px 88px, 88px 88px;
+  -webkit-mask-image: radial-gradient(120% 100% at 50% 0%, #000 30%, transparent 92%);
+  mask-image: radial-gradient(120% 100% at 50% 0%, #000 30%, transparent 92%);
+  opacity: 0.5;
+}
+.bz-room__floor::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(90% 60% at 50% -10%, var(--biz-accent-wash), transparent 60%),
+    radial-gradient(60% 50% at 18% 8%, var(--biz-accent-wash), transparent 70%);
+  opacity: 0.9;
+}
+
+/* ---- PAGE-SCOPED TOKEN OVERRIDES — retint the shared chassis bits that
+   theme.css's [data-room] block does NOT cover (the gradient clips + the frosted
+   fills + the panel CHROME). Scope to .bz-page so nothing leaks off-route.
+
+   THEME-AWARE (owner: "dark/white theme did nothing on the business side"): this
+   block is the LIGHT-CORPORATE chrome — the panel fills, shadows, glints, floor
+   edge, frosted CTA/notif fills are all LIGHT values that sit right on the cool
+   corporate-paper room. A second [data-theme='dark'] .bz-page block below flips
+   the SAME tokens to the deep-water dark chrome. Every lamina / ledger / revenue
+   panel reads THESE tokens (no hardcoded rgba(0,0,0,…) / rgba(180,205,240,…)),
+   so toggling the theme visibly re-skins the whole business page. -------------- */
+.bz-page {
+  /* the hot-word clip + every CTA/edge fill go to the deeper corporate gradient */
+  --grad-hot: var(--biz-grad);
+  --grad-accent: var(--biz-grad);
+  /* frosted glass fills — light corporate paper (a cool white frost, not navy) */
+  --notif-fill: rgba(255, 255, 255, 0.66);
+  --cta-fill: rgba(255, 255, 255, 0.6);
+  --cta-fill-hov: rgba(234, 241, 251, 0.78);
+  /* PANEL CHROME tokens every frosted pane reads (light = editorial paper depth):
+     the top glint, the inner top hairline, the elevation shadow. */
+  --biz-pane-glint: rgba(28, 92, 184, 0.05); /* the faint top gradient on a pane */
+  --biz-pane-inset: inset 0 1px 0 0 rgba(255, 255, 255, 0.7); /* lit top inner edge */
+  --biz-pane-shadow: 0 18px 44px -28px rgba(20, 50, 95, 0.32),
+    0 1px 2px rgba(20, 50, 95, 0.06); /* soft paper elevation */
+  --biz-pane-shadow-lg: 0 26px 60px -34px rgba(20, 50, 95, 0.34),
+    0 1px 2px rgba(20, 50, 95, 0.06); /* the big ledger / revenue panel */
+}
+
+/* ---- DARK-CORPORATE chrome — the SAME tokens, deep-water values. This is what
+   makes the toggle visible: the floor edge, frosted fills, glints, and the
+   shadows all flip to the cinema deep set under [data-theme='dark']. ---------- */
+:root[data-theme='dark'] .bz-page {
+  --notif-fill: rgba(16, 37, 68, 0.62);
+  --cta-fill: rgba(16, 37, 68, 0.58);
+  --cta-fill-hov: rgba(22, 52, 94, 0.7);
+  --biz-pane-glint: rgba(180, 205, 240, 0.05);
+  --biz-pane-inset: inset 0 1px 0 0 rgba(180, 205, 240, 0.06);
+  --biz-pane-shadow: 0 36px 80px -44px rgba(0, 0, 0, 0.8),
+    0 2px 0 0 rgba(0, 0, 0, 0.18);
+  --biz-pane-shadow-lg: 0 44px 100px -54px rgba(0, 0, 0, 0.86);
+}
+
+/* ==========================================================================
+   THE RISING LAMINA — the shared sharp frosted-glass pane, restyled to the
+   corporate room: a deeper panel fill, a corporate hairline, a heavier shadow
+   so it reads as machined glass over deep water (not airy consumer frost).
+   ========================================================================== */
+.bz-lamina {
+  position: relative;
+  border-radius: var(--r-3);
+  background:
+    linear-gradient(180deg, var(--biz-pane-glint), transparent 40%),
+    var(--biz-panel);
+  border: 1px solid var(--biz-hair-strong);
+  -webkit-backdrop-filter: blur(18px) saturate(1.1);
+  backdrop-filter: blur(18px) saturate(1.1);
+  box-shadow: var(--biz-pane-shadow), var(--biz-pane-inset);
+}
+/* the lit top hairline — the corporate accent edge catching the light */
+.bz-lamina__hair {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: var(--biz-grad);
+  opacity: 0.7;
+  pointer-events: none;
+}
+/* the inverted current: a slow UPWARD bob (money rising to the surface). */
+.bz-lamina.is-rising {
+  animation: bz-rise-bob 7s ease-in-out infinite alternate;
+  animation-delay: var(--rise-d, 0s);
+}
+@keyframes bz-rise-bob {
+  from { transform: translateY(6px); }
+  to { transform: translateY(-6px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bz-lamina.is-rising { animation: none; transform: none; }
+}
+
+/* ==========================================================================
+   STATION 0 · THE WIDE MASTHEAD — the MARKETPLACE PROMISE. Break the cramped
+   2-col grid so the headline uses the full editorial width: each sentence sits
+   on ONE big, confident line ("Get recommended to" · "millions of customers.").
+   The receipt rises BELOW the claim (so the claim is never squeezed by it) on a
+   refined corporate panel.
+   ========================================================================== */
+/* the masthead is a single full-width column — the claim leads, the receipt
+   rises beneath it at the right. No 0.88fr cage strangling the headline; the
+   column widens to the full editorial measure so each sentence fits on one line. */
+.sx-station--bzhero .sx-station__inner {
+  display: block;
+  width: 100%;
+}
+.sx-station--bzhero .sx-hero__claim {
+  width: 100%;
+  max-width: min(1320px, 96vw);
+}
+
+/* each headline sentence is its own block so CSS controls its wrap independently.
+   The lines are short enough ("Get recommended to" 18ch · "millions of
+   customers." 22ch) to each ride ONE confident line on any real viewport. */
+.sx-hero__h1--wide {
+  /* a touch tighter than the home's 7rem cap, but still big + premium — the two
+     short sentences each fill the wide column on a single line. */
+  font-size: clamp(2.6rem, 6vw, 5.4rem);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  max-width: none;
+}
+.sx-hero__line {
+  display: block;
+  /* a generous measure so each short sentence stays on ONE line — never the
+     cramped multi-line stack; only the smallest screens fall to two. */
+  max-width: 26ch;
+  white-space: nowrap;
+}
+.sx-hero__line--accent {
+  margin-top: 0.06em;
+}
+/* roomy viewport: more scale, full single-line sentences across the width. */
+@media (min-width: 1080px) {
+  .sx-hero__h1--wide {
+    font-size: clamp(4rem, 6vw, 5.4rem);
+  }
+  .sx-hero__line {
+    max-width: none;
+  }
+}
+/* mid widths: still one line each, slightly tighter scale. */
+@media (min-width: 560px) and (max-width: 1079.98px) {
+  .sx-hero__h1--wide {
+    font-size: clamp(2.8rem, 6.4vw, 4.4rem);
+  }
+}
+/* small screens: allow the wrap, drop nowrap so nothing overflows the viewport. */
+@media (max-width: 559.98px) {
+  .sx-hero__h1--wide {
+    font-size: clamp(2.3rem, 10vw, 3.4rem);
+  }
+  .sx-hero__line {
+    white-space: normal;
+    text-wrap: balance;
+    max-width: 16ch;
+  }
+}
+
+/* the SECONDARY value line beneath the sub — the marketplace-reach promise,
+   demoted from the headline (owner: "get recommended" is NOT the first value).
+   A quiet corporate mono line that reads ALL its tokens (--biz-fg-3 / --biz-grad),
+   so it themes light↔dark with the page. The accent lead-in tick marks it as a
+   supporting "and also …", never competing with the get-paid lead. */
+.sx-hero__rail {
+  font-family: var(--mono);
+  font-size: clamp(12.5px, 1.4vw, 14px);
+  letter-spacing: 0.01em;
+  line-height: 1.5;
+  color: var(--biz-fg-3);
+  margin: 18px 0 0;
+  max-width: 52ch;
+}
+.sx-hero__rail--secondary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+/* the lead-in tick — a short corporate-gradient hairline (mirrors the eyebrow
+   tick), marking this as the secondary value, not a second headline */
+.sx-hero__rail-mark {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 18px;
+  height: 2px;
+  border-radius: var(--r-1);
+  background: var(--biz-grad);
+  opacity: 0.85;
+}
+
+/* the masthead receipt rises to the right, beneath the claim */
+.sx-station--bzhero .sx-hero__float--rise {
+  justify-content: flex-end;
+  margin-top: clamp(40px, 6vw, 72px);
+}
+@media (max-width: 719.98px) {
+  .sx-station--bzhero .sx-hero__float--rise {
+    justify-content: flex-start;
+  }
+}
+
+/* ==========================================================================
+   THE MERCHANT-WALLET DASHBOARD — the hero centerpiece. A real business wallet
+   receiving an AI money flow, rising UP toward you. Replaces the small "paid by
+   agents" card with a substantial fintech panel: a settled BALANCE, a split bar
+   (card sales + the highlighted agent stream stacked on top), and a LIVE FEED of
+   incoming agent payments. Theme-aware via --biz-* + --biz-pane-* ONLY (no
+   hardcoded colours), so it re-skins light↔dark with the toggle.
+   ========================================================================== */
+.bz-merchant {
+  width: 412px;
+  max-width: 94vw;
+  padding: 20px 22px 18px;
+}
+
+/* ---- THE BALANCE HEADER — the wallet identity + a quiet live pulse --------- */
+.bz-merchant__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--biz-hair);
+}
+.bz-merchant__id {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.bz-merchant__avatar {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-8);
+  font-size: 16px;
+  color: #fff;
+  background: var(--biz-grad);
+  box-shadow: 0 0 16px -4px var(--biz-accent-glow),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.28);
+}
+.bz-merchant__name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--biz-fg);
+  min-width: 0;
+}
+.bz-merchant__handle {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--biz-fg-3);
+}
+.bz-merchant__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--bull);
+}
+.bz-merchant__pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--bull);
+  box-shadow: 0 0 0 0 var(--bull-edge);
+  animation: bz-merchant-pulse 2.4s ease-out infinite;
+}
+@keyframes bz-merchant-pulse {
+  0% { box-shadow: 0 0 0 0 var(--bull-edge); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* ---- THE BALANCE — a real business wallet figure (settled funds) ----------- */
+.bz-merchant__balance {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 18px 0 16px;
+}
+.bz-merchant__bal-v {
+  font-family: var(--mono);
+  font-size: clamp(34px, 4.4vw, 44px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+  line-height: 1;
+  color: var(--biz-fg);
+}
+.bz-merchant__bal-delta {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--biz-accent-bright);
+}
+
+/* ---- THE SPLIT BAR — card sales (baseline) + the agent stream HIGHLIGHTED on
+   top, so the merchant literally sees income added by the agent flow. -------- */
+.bz-merchant__split {
+  display: flex;
+  height: 10px;
+  border-radius: var(--r-5);
+  overflow: hidden;
+  background: var(--ink-0);
+  border: 1px solid var(--biz-hair);
+}
+.bz-merchant__split-seg--card {
+  flex: 1 1 auto;
+  background: var(--biz-panel-2);
+}
+.bz-merchant__split-seg--ai {
+  flex: 0 0 var(--agentic-pct, 34%);
+  background: var(--biz-grad);
+  box-shadow: inset 1px 0 0 0 rgba(255, 255, 255, 0.3),
+    0 0 18px -4px var(--biz-accent-glow);
+}
+.bz-merchant__legend {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 10px;
+}
+.bz-merchant__leg {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--sans);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--biz-fg-3);
+}
+.bz-merchant__leg--ai {
+  color: var(--biz-fg-2);
+}
+.bz-merchant__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-2);
+  flex: 0 0 auto;
+}
+.bz-merchant__dot--card {
+  background: var(--biz-panel-2);
+  border: 1px solid var(--biz-hair-strong);
+}
+.bz-merchant__dot--ai {
+  background: var(--biz-grad);
+  box-shadow: 0 0 8px -1px var(--biz-accent-glow);
+}
+.bz-merchant__leg-up {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--biz-accent-bright);
+}
+
+/* ---- THE LIVE FEED — incoming agent payments landing in the wallet. A clean
+   corporate ledger; each row lands softly with a staggered fade-up. ---------- */
+.bz-merchant__feed {
+  margin-top: 18px;
+  padding-top: 15px;
+  border-top: 1px solid var(--biz-hair);
+}
+.bz-merchant__feed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+  font-family: var(--sans);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--biz-fg-3);
+}
+.bz-merchant__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.bz-merchant__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 0;
+  border-top: 1px solid var(--biz-hair);
+  /* each row lands softly — a one-shot staggered fade-up on mount (not a loop) */
+  animation: bz-merchant-land 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: calc(0.18s + var(--row-i, 0) * 0.13s);
+}
+.bz-merchant__row:first-child {
+  border-top: 0;
+}
+@keyframes bz-merchant-land {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.bz-merchant__from {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+/* the 2-letter company wordmark badge — quiet corporate chip */
+.bz-merchant__mono {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-6);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--biz-fg-2);
+  background: var(--biz-panel-2);
+  border: 1px solid var(--biz-hair);
+}
+.bz-merchant__who {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--biz-fg);
+}
+.bz-merchant__kind {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--biz-fg-3);
+}
+.bz-merchant__cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.bz-merchant__amt {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--bull);
+}
+.bz-merchant__state {
+  font-family: var(--sans);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--biz-fg-4);
+}
+@media (prefers-reduced-motion: reduce) {
+  .bz-merchant__row { animation: none; }
+  .bz-merchant__pulse { animation: none; }
+}
+@media (max-width: 420px) {
+  .bz-merchant__kind { display: none; }
+}
+
+/* ==========================================================================
+   STANDARDS-ONLY STRIP — a restrained capability band between the payment lane
+   and the charge station. ONE confident line ("plugs in anywhere — 402-shaped,
+   same standards as Stripe/Coinbase/Google AP2"), NO platform logos, NO trust
+   marquee. A short corporate-accent rule, a quiet eyebrow, the line centred on a
+   readable measure, a closing rule — connective tissue, not a full station, so
+   the band sits TIGHT (smaller top/bottom padding than a station). Reads ONLY
+   the themed --biz-* tokens, so it flips light↔dark with the toggle. Motion is
+   inherited from the shared Reveal (a single fade-in; static under
+   prefers-reduced-motion via theme.css).
+   ========================================================================== */
+.sx-station--integ {
+  /* a connective band — much tighter than a full floating station */
+  padding: clamp(28px, 5vw, 56px) 0;
+}
+.bz-integ {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+/* the flanking corporate-accent rules — a short fading hairline top + bottom,
+   marking the band without a box. Reads --biz-grad so it themes for free. */
+.bz-integ__rule {
+  width: clamp(48px, 8vw, 84px);
+  height: 1px;
+  background: var(--biz-grad);
+  opacity: 0.6;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
+}
+.bz-integ__eyebrow {
+  /* the shared ed-eyebrow already carries the corporate tracking/colour; this
+     just removes the default left-tick margin so it centres cleanly */
+  margin: 0;
+}
+/* the capability line — a calm, premium sans line on a readable measure. Not a
+   headline (the serif stations own that scale); a confident statement. */
+.bz-integ__line {
+  font-family: var(--sans);
+  font-size: clamp(15px, 1.9vw, 19px);
+  font-weight: 450;
+  line-height: 1.55;
+  letter-spacing: -0.01em;
+  color: var(--biz-fg-2);
+  margin: 0;
+  max-width: 56ch;
+  text-wrap: balance;
+}
+
+/* ==========================================================================
+   STATION 1 · THE CHARGE — the snippet ↔ receipt pair, two rising laminae
+   side by side. Write it (left), read the receipt (right). Restyled corporate.
+   ========================================================================== */
+.bz-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(20px, 3vw, 40px);
+  align-items: start;
+  max-width: 960px;
+}
+@media (max-width: 900px) {
+  .bz-pair {
+    grid-template-columns: 1fr;
+    gap: clamp(20px, 5vw, 32px);
+  }
+}
+
+/* ---- the snippet lamina — syntax-highlit, sharp corporate frosted glass ---- */
+.bz-snippet {
+  padding: 16px 18px;
+}
+.bz-snippet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.bz-snippet__tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.bz-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--biz-fg-3);
+  border: 1px solid var(--biz-hair-strong);
+  border-radius: var(--r-2);
+  padding: 3px 8px;
+}
+.bz-snippet__code {
+  margin: 0;
+  padding: 14px 15px;
+  background: var(--ink-0);
+  border: 1px solid var(--biz-hair);
+  border-radius: var(--r-2);
+  overflow-x: auto;
+}
+.bz-snippet__code code {
+  font-family: var(--mono);
+  font-size: clamp(11px, 1.3vw, 12.5px);
+  line-height: 1.7;
+  letter-spacing: -0.01em;
+  color: var(--biz-fg-2);
+  white-space: pre;
+}
+.bz-snippet__code .c-key { color: var(--biz-accent-bright); }
+.bz-snippet__code .c-fn { color: var(--biz-fg); font-weight: 600; }
+.bz-snippet__code .c-str { color: var(--biz-fg-3); }
+.bz-snippet__code .c-num { color: var(--biz-fg); font-variant-numeric: tabular-nums; }
+
+/* ---- the on-chain receipt lamina — testnet sample, the 2% honesty flex ---- */
+.bz-receipt {
+  padding: 18px 20px;
+}
+.bz-receipt__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.bz-receipt__rows {
+  display: flex;
+  flex-direction: column;
+}
+.bz-receipt__row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 11px 0;
+}
+.bz-receipt__row + .bz-receipt__row {
+  border-top: 1px solid var(--biz-hair);
+}
+.bz-receipt__act {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--biz-fg);
+  flex: 0 0 auto;
+}
+.bz-receipt__act .host {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: -0.01em;
+  color: var(--biz-fg-3);
+  font-weight: 400;
+}
+.bz-receipt__lead {
+  flex: 1 1 auto;
+  height: 0;
+  border-bottom: 1px dotted var(--biz-hair-strong);
+  transform: translateY(-3px);
+  min-width: 14px;
+}
+.bz-receipt__amt {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--biz-fg);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.bz-receipt__foot {
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid var(--biz-hair);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 18px;
+  align-items: center;
+}
+.bz-receipt__id {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: -0.01em;
+  color: var(--biz-fg-3);
+}
+
+/* ==========================================================================
+   STATION 2 · THE SPEED LEDGER — the 3 speed facts as ONE premium corporate
+   panel (the owner: the old 3 cheap bullets were "too cheap"). A single frosted
+   ledger on --biz-panel, each fact a numbered row split by corporate hairlines:
+   a big mono index · the headline + note · a quiet "Step n" tag. Reads like an
+   enterprise spec sheet, substantial — not three throwaway columns.
+   ========================================================================== */
+.bz-ledger {
+  max-width: 900px;
+  margin-top: clamp(8px, 2vw, 20px);
+  background:
+    linear-gradient(180deg, var(--biz-pane-glint), transparent 30%),
+    var(--biz-panel);
+  border: 1px solid var(--biz-hair-strong);
+  border-radius: var(--r-4);
+  box-shadow: var(--biz-pane-shadow-lg), var(--biz-pane-inset);
+  overflow: hidden;
+}
+/* the corporate accent edge along the top of the whole panel */
+.bz-ledger::before {
+  content: '';
+  display: block;
+  height: 2px;
+  background: var(--biz-grad);
+  opacity: 0.8;
+}
+.bz-ledger__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: clamp(20px, 3vw, 40px);
+  padding: clamp(22px, 3vw, 34px) clamp(22px, 3.4vw, 40px);
+  position: relative;
+  transition: background 0.3s ease;
+}
+.bz-ledger__row + .bz-ledger__row {
+  border-top: 1px solid var(--biz-hair);
+}
+.bz-ledger__row:hover {
+  background: var(--biz-panel-2);
+}
+.bz-ledger__idx {
+  font-family: var(--mono);
+  font-size: clamp(26px, 3.4vw, 40px);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  /* the index reads as the corporate accent gradient — the only colour mark */
+  background: var(--biz-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  flex: 0 0 auto;
+}
+.bz-ledger__body {
+  min-width: 0;
+}
+.bz-ledger__title {
+  font-family: var(--serif);
+  font-size: clamp(19px, 2.1vw, 27px);
+  font-weight: 500;
+  line-height: 1.18;
+  letter-spacing: -0.01em;
+  color: var(--biz-fg);
+  margin: 0;
+}
+.bz-ledger__note {
+  font-family: var(--sans);
+  font-size: clamp(13px, 1.4vw, 14.5px);
+  line-height: 1.55;
+  color: var(--biz-fg-2);
+  margin: 9px 0 0;
+  max-width: 56ch;
+}
+.bz-ledger__step {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--biz-fg-3);
+  border: 1px solid var(--biz-hair-strong);
+  border-radius: var(--r-2);
+  padding: 6px 11px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+@media (max-width: 680px) {
+  .bz-ledger__row {
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 12px;
+  }
+  .bz-ledger__step {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+/* ==========================================================================
+   STATION 3 · THE CHARGE-SIDE PROOF — a rising lamina: the proof (left), the
+   three charge-side facts as a corporate spec column (right). NO Deploy.
+   ========================================================================== */
+.bz-proof {
+  max-width: 920px;
+}
+.bz-proofcard {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: clamp(24px, 4vw, 56px);
+  align-items: center;
+  padding: clamp(26px, 3vw, 40px);
+}
+@media (max-width: 760px) {
+  .bz-proofcard {
+    grid-template-columns: 1fr;
+    gap: clamp(22px, 5vw, 32px);
+  }
+}
+.bz-proofcard__main {
+  min-width: 0;
+}
+.bz-proofcard__lede {
+  font-family: var(--sans);
+  font-size: 14.5px;
+  line-height: 1.62;
+  color: var(--biz-fg-2);
+  margin: 16px 0 0;
+  max-width: 46ch;
+}
+.bz-proofcard__link {
+  margin: 18px 0 0;
+}
+.bz-proofcard__facts {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.bz-proofcard__fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 2px;
+  border-top: 1px solid var(--biz-hair);
+}
+.bz-proofcard__fact:first-child {
+  border-top: 0;
+}
+.bz-proofcard__fk {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--biz-accent-bright);
+  flex: 0 0 auto;
+}
+.bz-proofcard__fv {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  color: var(--biz-fg-2);
+  text-align: right;
+}
+
+/* ==========================================================================
+   STATION 3.5 · TRUSTED BY THOUSANDS — moved here from the home (the rail is the
+   merchant trust signal). A full-bleed band that deliberately BREAKS the floating
+   -station rhythm: a BOLD, high-contrast heading you FEEL, then a single seamless
+   wordmark marquee. The track is duplicated and slid -50% so the loop has NO seam;
+   the edges are masked to fog so wordmarks drift in/out instead of popping.
+   Tighter top/bottom padding than a full station so it reads as a connective band.
+   ========================================================================== */
+.sx-station--trust {
+  padding: clamp(72px, 11vw, 132px) 0;
+  text-align: center;
+}
+/* the heading block — centred, with real weight + contrast (we want to FEEL it) */
+.bz-trust {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 0 clamp(40px, 6vw, 72px);
+}
+.bz-trust__eyebrow {
+  margin-bottom: 18px;
+}
+.bz-trust__title {
+  font-family: var(--serif);
+  /* big + heavy — the highest-contrast type on the page; this section lands */
+  font-size: clamp(2.2rem, 5vw, 4rem);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
+  color: var(--biz-fg);
+  margin: 0;
+  /* a faint accent lift so it glows off the deep floor */
+  text-shadow: 0 2px 40px var(--biz-accent-glow);
+}
+
+/* the seamless wordmark marquee — full-bleed, masked edges, no seam */
+.bz-trust__marquee {
+  position: relative;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent);
+}
+.bz-trust__track {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  will-change: transform;
+  animation: bz-trust-marquee 40s linear infinite;
+}
+.bz-trust__marquee:hover .bz-trust__track {
+  animation-play-state: paused;
+}
+/* each name as a logo-style wordmark — uppercase, wide-tracked, quiet ink that
+   lifts toward the corporate fg on hover so the row feels alive but stays sober */
+.bz-trust__mark {
+  font-family: var(--sans);
+  font-size: clamp(16px, 2vw, 24px);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--biz-fg-3);
+  padding: 0 clamp(28px, 4vw, 56px);
+  transition: color 0.3s ease;
+}
+.bz-trust__mark:hover {
+  color: var(--biz-fg);
+}
+@keyframes bz-trust-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bz-trust__track { animation: none; }
+}
+
+/* ==========================================================================
+   STATION 4 · THE CLOSE — the FOMO 2-liner with corporate impact. Reuses the
+   home close chassis; here the honesty line gets a readable measure and the
+   closer title gets a corporate accent weight on the deep floor.
+   ========================================================================== */
+.bz-close__honest {
+  max-width: 62ch;
+  margin: 0 auto;
+  line-height: 1.7;
+  color: var(--biz-fg-3);
+}
+/* the FOMO 2-liner — bigger, tighter, more pressure than the home close; the
+   2nd line ("Don't get left out.") carries the corporate accent clip. */
+.sx-station--bzclose .sx-close__title {
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  color: var(--biz-fg);
+}
+.sx-station--bzclose .sx-close__line {
+  display: inline-block;
+}
+.sx-station--bzclose .sx-close__line:last-child {
+  background: var(--biz-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* ==========================================================================
+   BEAT 0.5 · THE REVENUE-STREAM PANEL (the page centerpiece). Owner-locked: it
+   must read "revenue went UP because of the new agent stream," not just "agents
+   pay." So this is a real revenue dashboard — a monthly TOTAL with a "+x% from
+   the agent stream" delta, a STACKED BAR (the human baseline + the agentic
+   portion HIGHLIGHTED on top, so revenue is literally seen rising above the old
+   line), and a SPLIT LEDGER (Customers / AI agents highlighted = a higher total).
+   Professional + LIGHT — a fintech panel, not a game.
+
+   THEME: reads ONLY the themed --biz-* + --biz-pane-* chrome tokens (set in
+   .bz-page light + the [data-theme='dark'] .bz-page override), so the whole panel
+   flips light↔dark with the toggle. NO hardcoded rgba(0,0,0,…) shadow.
+   MOTION: minimal — the bar + the ledger rows ride the shared `.sx-lines` reveal
+   (one staggered fade/slide on scroll, then at rest). NO loop, NO JS. Static
+   under prefers-reduced-motion (theme.css).
+   HONESTY: NO pricing — every figure is illustrative merchant revenue inside the
+   artifact (sales a business takes), never a Suize tier/fee.
+   ========================================================================== */
+.bz-rev {
+  position: relative;
+  margin-top: clamp(8px, 2vw, 24px);
+  border-radius: var(--r-6);
+  background:
+    linear-gradient(180deg, var(--biz-pane-glint), transparent 26%),
+    var(--biz-panel);
+  border: 1px solid var(--biz-hair-strong);
+  box-shadow: var(--biz-pane-shadow-lg), var(--biz-pane-inset);
+  padding: clamp(24px, 3vw, 38px) clamp(20px, 3vw, 40px) clamp(20px, 2.4vw, 32px);
+  overflow: hidden;
+  text-align: left;
+}
+
+/* ---- THE TOP ROW — revenue this month + the agent-stream lift delta ------ */
+.bz-rev__top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding-bottom: clamp(18px, 2.2vw, 24px);
+}
+.bz-rev__total {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bz-rev__total-v {
+  font-family: var(--mono);
+  font-size: clamp(30px, 4.6vw, 48px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--biz-fg);
+}
+/* the lift delta — a quiet status-green credit + its attribution */
+.bz-rev__delta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  text-align: right;
+}
+.bz-rev__delta-v {
+  font-family: var(--mono);
+  font-size: clamp(15px, 1.8vw, 19px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+  color: var(--bull);
+}
+.bz-rev__delta-k {
+  font-family: var(--sans);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--biz-fg-3);
+}
+
+/* ---- THE STACKED BAR — the human baseline (calm) with the agentic portion
+   HIGHLIGHTED on top. --agentic-pct (set inline) sizes the highlighted segment;
+   the rest is the baseline. A dotted marker sits where the old line ended. ---- */
+.bz-rev__bar {
+  position: relative;
+  display: flex;
+  height: clamp(40px, 6vw, 56px);
+  border-radius: var(--r-4);
+  overflow: hidden;
+  border: 1px solid var(--biz-hair);
+  background: var(--ink-0);
+}
+.bz-rev__seg {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  min-width: 0;
+  overflow: hidden;
+}
+/* the baseline — the sales you already had: a calm corporate ink wash */
+.bz-rev__seg--base {
+  flex: 1 1 auto;
+  background:
+    linear-gradient(180deg, var(--biz-pane-glint), transparent 70%),
+    var(--biz-panel-2);
+}
+/* the NEW agent stream — HIGHLIGHTED: the corporate accent gradient, the eye
+   lands here. A lit left edge separates it from the baseline. */
+.bz-rev__seg--agentic {
+  flex: 0 0 var(--agentic-pct, 24%);
+  background: var(--biz-grad);
+  box-shadow:
+    inset 1px 0 0 0 rgba(255, 255, 255, 0.28),
+    0 0 28px -6px var(--biz-accent-glow);
+  justify-content: flex-start;
+}
+.bz-rev__seg-label {
+  font-family: var(--sans);
+  font-size: clamp(10px, 1.2vw, 12px);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bz-rev__seg--base .bz-rev__seg-label {
+  color: var(--biz-fg-2);
+}
+.bz-rev__seg--agentic .bz-rev__seg-label {
+  /* on the accent fill the label reads near-white in both themes */
+  color: #fff;
+}
+/* the baseline marker — a dotted vertical at the seam (your previous line) */
+.bz-rev__baseline {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  right: var(--agentic-pct, 24%);
+  width: 0;
+  border-left: 1px dashed var(--biz-hair-strong);
+  pointer-events: none;
+}
+
+/* ---- THE SPLIT LEDGER — baseline + the highlighted new stream = a higher
+   total. Rides the shared staggered reveal, then sits still. ----------------- */
+.bz-rev__rows {
+  list-style: none;
+  margin: clamp(20px, 2.4vw, 28px) 0 0;
+  padding: 0;
+}
+.bz-rev__rowhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 12px;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--biz-fg-4);
+}
+.bz-rev__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: clamp(12px, 2vw, 28px);
+  padding: clamp(13px, 1.7vw, 17px) 2px;
+  border-top: 1px solid var(--biz-hair);
+}
+/* the source cell — a swatch + the label (+ a note or the New-stream tag) */
+.bz-rev__src {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: clamp(14px, 1.5vw, 16px);
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  color: var(--biz-fg);
+  min-width: 0;
+}
+.bz-rev__swatch {
+  align-self: center;
+  width: 11px;
+  height: 11px;
+  border-radius: var(--r-2);
+  flex: 0 0 auto;
+}
+.bz-rev__swatch--base {
+  background: var(--biz-panel-2);
+  border: 1px solid var(--biz-hair-strong);
+}
+.bz-rev__swatch--agentic {
+  background: var(--biz-grad);
+  box-shadow: 0 0 12px -2px var(--biz-accent-glow);
+}
+.bz-rev__src-note {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  color: var(--biz-fg-3);
+}
+/* the New-stream tag on the agentic row — the highlighted accent chip */
+.bz-rev__tag {
+  font-family: var(--sans);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--biz-accent-bright);
+  background: var(--biz-accent-wash);
+  border: 1px solid var(--biz-accent-hair);
+  border-radius: var(--r-2);
+  padding: 3px 7px;
+  white-space: nowrap;
+}
+.bz-rev__amt {
+  font-family: var(--mono);
+  font-size: clamp(14px, 1.5vw, 16px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--biz-fg);
+  white-space: nowrap;
+  justify-self: end;
+}
+/* the agentic credit — HIGHLIGHTED in the corporate accent (the lift) */
+.bz-rev__amt--agentic {
+  color: var(--biz-accent-bright);
+  font-weight: 600;
+}
+/* the total row — a stronger top rule + heavier ink, the summed-up payoff */
+.bz-rev__row--total {
+  border-top: 1px solid var(--biz-hair-strong);
+  margin-top: 2px;
+}
+.bz-rev__src--total {
+  font-weight: 650;
+  color: var(--biz-fg);
+}
+.bz-rev__amt--total {
+  font-size: clamp(16px, 1.8vw, 19px);
+  font-weight: 650;
+  color: var(--biz-fg);
+}
+
+.bz-pay__cta {
+  justify-content: center;
+}
+
+/* the revenue station centres its head + CTA (the panel reads as a stage) */
+.sx-station--lane .sx-stationhead {
+  text-align: center;
+}
+.sx-station--lane .sx-stationhead__title,
+.sx-station--lane .sx-stationhead__sub {
+  margin-left: auto;
+  margin-right: auto;
+}
+.sx-station--lane .sx-stationhead__title {
+  max-width: 18ch;
+}
+
+@media (max-width: 520px) {
+  /* keep the bar legible: hide the inline labels, the ledger carries the split */
+  .bz-rev__seg-label {
+    display: none;
+  }
+  /* let the source note / tag wrap under the label on very narrow screens */
+  .bz-rev__src {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+}

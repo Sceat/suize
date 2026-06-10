@@ -30,9 +30,9 @@ APP="${1:-}"
 BUMP="${2:-}"
 
 case "$APP" in
-  wallet | crash | landing) ;;
+  wallet | crash | landing | deploy) ;;
   *)
-    echo "usage: bun run deploy <wallet|crash|landing> [patch|minor|major]"
+    echo "usage: bun run deploy <wallet|crash|landing|deploy> [patch|minor|major]"
     exit 1
     ;;
 esac

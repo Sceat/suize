@@ -3,6 +3,15 @@
 // provisions a Cloudflare Custom Hostname (auto-SSL via HTTP/TXT validation);
 // otherwise we skip it and return manual-CNAME instructions. NEVER a build
 // blocker — the on-chain link + worker resolution work regardless.
+//
+// OPERATOR REQUIREMENT (auto-SSL): set CF_API_TOKEN (a Cloudflare API token with
+// the "SSL and Certificates: Edit" / Custom Hostnames edit scope) + CF_ZONE_ID
+// (the zone for the deploy base domain) AND enable Cloudflare-for-SaaS (Custom
+// Hostnames) on the account/zone. With all three, linking a custom domain
+// auto-provisions SSL (sslStatus → pending → active). WITHOUT them the module runs
+// in manual-CNAME mode: the user CNAMEs the domain themselves and terminates SSL on
+// their side (sslStatus is reported as "manual"). Either way the on-chain link +
+// worker resolution work.
 import { config } from "../config";
 
 export type CustomHostnameStatus =
@@ -58,6 +67,31 @@ export const provisionCustomHostname = async (domain: string): Promise<CustomHos
     };
   } catch (err) {
     return { provisioned: false, reason: "error", detail: (err as Error).message };
+  }
+};
+
+/**
+ * Read the current SSL provisioning state of a Custom Hostname by name. Used by the
+ * verify response to surface a LIVE `sslStatus` (the POST result can lag — CF returns
+ * `pending` initially and flips to `active` once validation lands). Best-effort: a CF
+ * error or a missing hostname returns null (the caller falls back to the provision
+ * result). Returns CF's raw `ssl.status` string (e.g. `pending`/`active`/`error`...).
+ */
+export const customHostnameSslStatus = async (domain: string): Promise<string | null> => {
+  if (!cloudflareEnabled()) return null;
+  try {
+    const url = `https://api.cloudflare.com/client/v4/zones/${config.cfZoneId}/custom_hostnames?hostname=${encodeURIComponent(domain)}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${config.cfApiToken}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = (await res.json().catch(() => null)) as
+      | { success?: boolean; result?: Array<{ ssl?: { status?: string } }> }
+      | null;
+    if (!res.ok || !body?.success) return null;
+    return body.result?.[0]?.ssl?.status ?? null;
+  } catch {
+    return null;
   }
 };
 

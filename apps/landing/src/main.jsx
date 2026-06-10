@@ -1,7 +1,16 @@
+import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import './index.css'
+import { boot } from './lib/theme'
+import './theme.css'
+import './sections.css'
+import './product.css'
 import App from './App.jsx'
 
-// Note: StrictMode is intentionally omitted. Double-invocation of useEffect
-// breaks imperative GL libraries (OGL) that hold context across renders.
-createRoot(document.getElementById('root')).render(<App />)
+// set <html data-theme> before first paint (default LIGHT) — no flash.
+boot()
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)

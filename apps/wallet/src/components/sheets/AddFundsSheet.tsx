@@ -90,6 +90,7 @@ function CopyRow({
       }}
     >
       <span
+        className={mono ? 'tnum' : undefined}
         style={{
           fontFamily: mono ? 'var(--mono)' : 'var(--sans)',
           fontSize: mono ? 14 : 16,
@@ -242,7 +243,6 @@ function AddTab({ handle, address }: { handle: string; address: string }) {
           display={handle}
           ariaLabel="Tap your name to copy"
           copiedLabel="Copied your name"
-          mono={false}
         />
         <CopyRow
           value={address}
@@ -332,15 +332,18 @@ function ReceiveTab({ handle }: { handle: string }) {
 
   return (
     <>
-      {/* the @handle, large */}
+      {/* the @handle, large — Martian Mono (a handle is a number-class token in v3,
+          never serif); kept ink, not blue (identity, not money). */}
       <div style={{ display: 'grid', placeItems: 'center', marginBottom: 18, textAlign: 'center' }}>
         <div
+          className="tnum"
           style={{
-            fontFamily: 'var(--serif)',
-            fontWeight: 400,
-            fontSize: 'clamp(1.5rem, 6vw, 1.9rem)',
+            fontFamily: 'var(--mono)',
+            fontWeight: 600,
+            fontSize: 'clamp(1.3rem, 5vw, 1.65rem)',
             letterSpacing: '-0.01em',
             color: 'var(--ink)',
+            wordBreak: 'break-word',
           }}
         >
           {handle}
@@ -382,7 +385,7 @@ function ReceiveTab({ handle }: { handle: string }) {
             background: 'var(--paper)',
           }}
         >
-          <span style={{ fontFamily: 'var(--sans)', fontSize: 18, color: 'var(--ink-3)' }}>$</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 17, color: 'var(--ink-4)' }}>$</span>
           <input
             value={amount}
             onChange={(e) => setAmount(e.currentTarget.value)}
@@ -390,6 +393,7 @@ function ReceiveTab({ handle }: { handle: string }) {
             inputMode="decimal"
             spellCheck={false}
             aria-label="Request amount in dollars"
+            className="tnum"
             style={{
               flex: '1 1 auto',
               minWidth: 0,
@@ -397,9 +401,10 @@ function ReceiveTab({ handle }: { handle: string }) {
               border: 'none',
               outline: 'none',
               background: 'transparent',
-              fontFamily: 'var(--sans)',
+              // money input → Martian Mono, blue (the v3 number language).
+              fontFamily: 'var(--mono)',
               fontSize: 18,
-              color: 'var(--ink)',
+              color: 'var(--blue-deep)',
             }}
           />
           <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-3)' }}>USDC</span>

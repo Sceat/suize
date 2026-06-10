@@ -11,3 +11,4 @@ bun.lockb
 # Screenshots / scratch images (never commit)
 *.png
 .playwright-mcp/
+.vercel

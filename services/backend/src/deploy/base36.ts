@@ -1,6 +1,6 @@
 // Base36 ↔ Sui object id codec — the SHARED contract with the deploy-worker and
 // the dashboard. A 256-bit Sui object id (0x + 64 hex) encodes to a FIXED-WIDTH,
-// DNS-safe base36 subdomain (`<base36(siteId)>.deploy.suize.io`); the worker
+// DNS-safe base36 subdomain (`<base36(siteId)>.suize.site`); the worker
 // decodes it back to the object id. The two MUST stay BYTE-IDENTICAL, so this
 // mirrors `encodeObjectIdToBase36`/`decodeBase36ToObjectId` in
 // `services/deploy-worker/src/index.ts` exactly.

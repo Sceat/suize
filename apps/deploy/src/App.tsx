@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ConnectButton } from '@mysten/dapp-kit'
 import { useAuth } from './auth'
+import { useSuizeHandle } from './suins'
 import { fmt_id } from './format'
 import { DEPLOY_PACKAGE_PUBLISHED } from './config'
 import { SitesList } from './screens/SitesList'
@@ -38,11 +39,10 @@ const apply_theme = (dark: boolean): void => {
 
 export const App = () => {
   const auth = useAuth()
+  const handle = useSuizeHandle(auth.address)
   const { toasts, ok, err } = useToasts()
 
   const [view, setView] = useState<View>({ kind: 'list' })
-  // "My sites" scoping: only meaningful once an address is connected.
-  const [scoped, setScoped] = useState(false)
   const [dark, setDark] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false
     const saved = window.localStorage.getItem(THEME_KEY)
@@ -54,11 +54,6 @@ export const App = () => {
     apply_theme(dark)
     window.localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light')
   }, [dark])
-
-  // Drop the owner filter if we lose the connection.
-  useEffect(() => {
-    if (!auth.address) setScoped(false)
-  }, [auth.address])
 
   const open = useCallback((siteId: string) => {
     setView({ kind: 'detail', siteId })
@@ -81,7 +76,7 @@ export const App = () => {
             <span className="dx-logo__sub">· by suize</span>
           </button>
           <span className="dx-masthead__tag">
-            Permanent web editions, pressed to Walrus
+            Static sites, permanent on Walrus
           </span>
         </div>
 
@@ -112,18 +107,6 @@ export const App = () => {
         <div className="dx-top__spacer" />
 
         <div className="dx-top__actions">
-          {/* owner scope toggle — only when connected */}
-          {auth.address && (
-            <button
-              type="button"
-              className={`dx-btn is-sm${scoped ? ' is-accent' : ''}`}
-              onClick={() => setScoped(s => !s)}
-              title="Filter to sites you deployed while signed in"
-            >
-              {scoped ? 'My sites' : 'All sites'}
-            </button>
-          )}
-
           {/* auth: Enoki Google sign-in if configured, else dapp-kit button */}
           {auth.address ? (
             <button
@@ -132,7 +115,7 @@ export const App = () => {
               onClick={auth.sign_out}
               title="Disconnect"
             >
-              <span className="dx-acct">{fmt_id(auth.address)}</span>
+              <span className="dx-acct">{handle ?? fmt_id(auth.address)}</span>
             </button>
           ) : auth.enoki_enabled && auth.google_wallet ? (
             <button
@@ -165,11 +148,11 @@ export const App = () => {
       <main className="dx-main">
         {!DEPLOY_PACKAGE_PUBLISHED && (
           <div className="dx-banner" role="note">
-            <span className="dx-banner__kicker">Stop press</span>
+            <span className="dx-banner__kicker">Heads up</span>
             <span className="dx-banner__body">
               <b>Chain pending.</b> The <code>deploy_sui</code> Move package isn't
               published to testnet yet, so on-chain Site registration is offline.
-              The dashboard + backend wiring are ready; editions appear here once
+              The dashboard + backend wiring are ready; sites appear here once
               the backend's deploy module is configured + the package ships.
             </span>
           </div>
@@ -178,7 +161,9 @@ export const App = () => {
         {view.kind === 'list' && (
           <SitesList
             owner={auth.address}
-            scoped={scoped}
+            canSignIn={auth.enoki_enabled && !!auth.google_wallet}
+            connecting={auth.connecting}
+            onSignIn={auth.sign_in_google}
             onOpen={open}
             onDeploy={() => setView({ kind: 'deploy' })}
             onAgents={() => setView({ kind: 'agents' })}
@@ -188,6 +173,7 @@ export const App = () => {
         {view.kind === 'detail' && (
           <SiteDetail
             siteId={view.siteId}
+            viewerAddress={auth.address}
             onBack={goList}
             onLinked={ok}
             onError={err}
@@ -197,6 +183,9 @@ export const App = () => {
         {view.kind === 'deploy' && (
           <DeployView
             owner={auth.address}
+            canSignIn={auth.enoki_enabled && !!auth.google_wallet}
+            connecting={auth.connecting}
+            onSignIn={auth.sign_in_google}
             onBack={goList}
             onOpen={open}
             onDeployed={ok}

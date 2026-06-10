@@ -148,7 +148,7 @@ export function StepSettingUp({
 
   return (
     <div className="grid flex-1 place-items-center px-6">
-      <Loader label="setting up your wallet" />
+      <Loader eyebrow="Almost there" label="setting up your wallet" />
     </div>
   );
 }

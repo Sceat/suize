@@ -13,3 +13,4 @@
 @import 'tailwindcss';
 @import '../system/tokens.css';
 @import '../system/tokens-journal.css';
+@import '../system/pay.css';

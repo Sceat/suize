@@ -24,49 +24,86 @@
    `.journal` vars override the unscoped `:root` ones inside the journal subtree only.
    ========================================================================== */
 
-/* ── LIGHT (default · blue ether) — scoped journal token ramp ─────────────── */
+/* ==========================================================================
+   THE SUIZE WORDMARK FACE — Hashgraph-Title (LOGO ONLY: ink→blue gradient text,
+   never body/number/input). Space Grotesk sits behind it as a clean fallback for
+   any missing glyph. Loaded globally (not scoped) so the masthead can clip it.
+   ========================================================================== */
+@font-face {
+  font-family: 'Hashgraph Title';
+  src: url('/fonts/Hashgraph-Title.woff2') format('woff2');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── LIGHT (default · v3 broadsheet — light blue-on-white editorial) ─────────
+   The SMOOTHED Suize language (ported from design-variants.css): a deep-blue ink
+   ramp on cool off-white paper, ONE blue accent (money is ALWAYS blue), low-alpha
+   deep-blue hairlines, 2/3px radii. GOLD RETIRED in light. green/red = TRUE
+   status only. Martian Mono is now --mono (every NUMBER). */
 .journal {
-  --paper: #f6f8fa;
+  /* ---- PAPER (surfaces — never pure white as the page floor) ---- */
+  --paper: #fbfcfe;
   --paper-2: #ffffff;
-  --paper-3: #eef3f7;
-  --ink: #0b1b2b;
-  --ink-2: #38505f;
-  --ink-3: #7c95a6;
-  --ink-4: #a9bcc9;
-  --hair: rgba(11, 27, 43, 0.11);
-  --hair-2: rgba(11, 27, 43, 0.055);
-  --hair-3: rgba(11, 27, 43, 0.028);
-  --accent: #1e8fe6;
+  --paper-3: #eef3f9;
+  --frost-rgb: 251, 252, 254;
+
+  /* ---- DEEP-BLUE INK SCALE (text · structure) ---- */
+  --ink: #0a1b2e;
+  --ink-2: #324a5e;
+  --ink-3: #5d7388;
+  --ink-4: #8499ad;
+
+  /* ---- BLUE HAIRLINES (the only borders — low-alpha deep blue, fading) ---- */
+  --hair: rgba(10, 27, 46, 0.12);
+  --hair-2: rgba(10, 27, 46, 0.06);
+  --hair-3: rgba(10, 27, 46, 0.028);
+  --hair-strong: rgba(10, 27, 46, 0.2);
+  --hair-blue: rgba(30, 127, 214, 0.28);
+
+  /* ---- BLUE ACCENT (the only chrome highlight — links, money, selected) ---- */
+  --accent: #1e7fd6;
+  --accent-deep: #1668c9;
   --accent-bright: #4da2ff;
   --accent-soft: #9fd2ff;
-  --accent-wash: rgba(30, 143, 230, 0.07);
-  --accent-line: rgba(30, 143, 230, 0.3);
-  --good: #15976b;
-  --good-wash: rgba(21, 151, 107, 0.1);
-  --warn: #b26b14;
+  --accent-wash: rgba(30, 127, 214, 0.07);
+  --accent-line: rgba(30, 127, 214, 0.3);
+  /* legacy aliases kept so existing leaves keep resolving */
+  --blue: var(--accent);
+  --blue-deep: var(--accent-deep);
+  --blue-bright: var(--accent-bright);
+
+  /* ---- TRUE STATUS ONLY (never decoration) ---- */
+  --good: #0e7048;
+  --good-wash: rgba(14, 112, 72, 0.1);
+  --warn: #b5342b;
+  --ok: var(--good);
+  --err: var(--warn);
 
   /* THE SIGNATURE GRADIENT — used sparingly */
   --g1: #9fd2ff;
   --g2: #4da2ff;
-  --g3: #1e8fe6;
+  --g3: #1e7fd6;
   --grad: linear-gradient(100deg, var(--g1) 0%, var(--g2) 42%, var(--g3) 78%, var(--g2) 100%);
-  --grad-soft: linear-gradient(120deg, rgba(159, 210, 255, 0.16), rgba(30, 143, 230, 0.05));
+  --grad-soft: linear-gradient(120deg, rgba(159, 210, 255, 0.16), rgba(30, 127, 214, 0.05));
   --grad-edge: linear-gradient(135deg, var(--g2), var(--g3));
-  /* THE NUMBER "DISCORD" GRADIENT — the signature two-tone on the balance figures.
-     Light = bright→deep blue, every stop visible on the white paper (the earlier
-     white→blue ghosted out; these stops all read). Applied via `.ng` to the grand
-     total + each card's number; the $ + USDC label stay muted solid (NOT this).
-     Founder lock: NUMBERS are BLUE in BOTH themes — the dark gold gilt was scrapped. */
-  --num-grad: linear-gradient(110deg, #4da2ff 0%, #1e8fe6 55%, #4da2ff 100%);
+  /* THE NUMBER GRADIENT — the signature two-tone on big balance figures. Money is
+     ALWAYS blue. Applied via `.ng` to the grand total + each card's number; the $
+     + USDC label stay muted solid (NOT this). */
+  --num-grad: linear-gradient(110deg, #4da2ff 0%, #1e7fd6 55%, #4da2ff 100%);
   /* NAMES / ADDRESSES — the "Discord-perk" orange→red→orange signature. Applied via
      .rcpt (chat recipient) + the shared .handle class (any @suize handle / 0x address).
      Distinct from the blue numbers so money vs identity never blur. */
   --grad-name: linear-gradient(110deg, #ff9a4d 0%, #ff4d5e 55%, #ff9a4d 100%);
-  --scrim: rgba(11, 27, 43, 0.3);
+  --scrim: rgba(10, 27, 46, 0.28);
 
+  /* ---- TYPE STACKS (Space Grotesk = words · Martian Mono = NUMBERS · Newsreader
+     = editorial titles ONLY · Hashgraph Title = the SUIZE wordmark) ---- */
   --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
   --sans: 'Space Grotesk', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --mono: 'Martian Mono', ui-monospace, 'JetBrains Mono', monospace;
+  --wordmark: 'Hashgraph Title', 'Space Grotesk', system-ui, sans-serif;
   --e-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --e-quart: cubic-bezier(0.25, 1, 0.5, 1);
   --e-spring: cubic-bezier(0.34, 1.4, 0.55, 1);
@@ -75,14 +112,36 @@
   --sel: var(--accent);
   --sel-ink: #fff;
 
-  /* RADIUS TOKENS — editorial, near-square. Outer >= inner so corners nest.
+  /* RADIUS TOKENS — v3 editorial: 2px chips, 3px cards/buttons/fields, 100px pills.
      control=buttons/inputs/chips/steppers/split-bar+segments · card=the 3 account
-     cards + the Activity widget · max=the move-money popup only. Every hardcoded
-     radius elsewhere is replaced by one of these (the only exception: genuine
-     CIRCLES at 50%). */
-  --r-control: 4px;
-  --r-card: 7px;
+     cards + the detail panel + the Activity widget · max=the move-money popup only. */
+  --r-chip: 2px;
+  --r-control: 3px;
+  --r-card: 3px;
   --r-max: 10px;
+  --r-pill: 100px;
+
+  /* ── LEGACY-TOKEN BRIDGE (the v3 reskin for the sheets) ────────────────────
+     The Add / Send / Convert sheets (+ the shared system Button / Field /
+     CurrencySelect) read the ORIGINAL tokens.css names via inline styles:
+     `--corner` / `--sheet-corner` (radii), `--cyan*` (the accent channel), and
+     `--btn-cy-*` (the primary-button gradient). Those sheets portal to <body>,
+     so we wrap each one in `.journal` (Sheet.tsx) and remap those legacy names
+     to the v3 ramp HERE — one source of truth, no hex hardcoded in any sheet.
+     `--corner`/`--sheet-corner` → 3px (v3 fields/cards/sheet top). `--cyan*` →
+     the single blue accent. The primary CTA gradient (--btn-cy-*) → the v3
+     accent gradient so each sheet has exactly ONE accent CTA. */
+  --corner: var(--r-control);
+  --sheet-corner: var(--r-control);
+  --cyan: var(--accent);
+  --cyan-bright: var(--accent-bright);
+  --cyan-soft: var(--accent-soft);
+  --cyan-wash: var(--accent-wash);
+  --btn-cy-from: var(--accent-bright);
+  --btn-cy-to: var(--accent);
+  --btn-cy-ink: var(--sel-ink);
+  --btn-cy-line: var(--accent);
+  --btn-cy-glow: var(--accent-line);
 }
 
 /* ── DARK (warm GOLD) — the mockup gold ramp, scoped to the journal subtree ── */
@@ -97,14 +156,27 @@
   --hair: rgba(231, 193, 110, 0.15);
   --hair-2: rgba(231, 193, 110, 0.075);
   --hair-3: rgba(231, 193, 110, 0.04);
+  --hair-strong: rgba(231, 193, 110, 0.3);
+  --hair-blue: rgba(91, 176, 255, 0.32);
   --accent: #e7c16e;
+  --accent-deep: #f4d98a;
   --accent-bright: #f4d98a;
   --accent-soft: #7a6a45;
   --accent-wash: rgba(231, 193, 110, 0.08);
   --accent-line: rgba(231, 193, 110, 0.32);
+  /* MONEY stays BLUE in both themes (founder lock) — the blue ramp the v3 cards use
+     for balances + the selected-card hairline, a touch brighter for the dark paper. */
+  --blue: #5bb0ff;
+  --blue-deep: #2e9bff;
+  --blue-bright: #7ac4ff;
   --good: #7fcba3;
   --good-wash: rgba(127, 203, 163, 0.1);
   --warn: #e0a04d;
+  --ok: var(--good);
+  --err: var(--warn);
+  --wordmark: 'Hashgraph Title', 'Space Grotesk', system-ui, sans-serif;
+  --r-chip: 2px;
+  --r-pill: 100px;
   --g1: #fbefcb;
   --g2: #e7c16e;
   --g3: #c99a3c;
@@ -275,6 +347,105 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   GLOBAL v3 LANGUAGE — number helper + motion keyframes + the custom cursor.
+   These live UNSCOPED (or on `.journal`) so the whole signed-in wallet breathes,
+   streams in, and shows the lagging-ring cursor — not just the design harness.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* MARTIAN MONO tabular helper — every NUMBER (balances, %, dates, handle, addr).
+   `.tnum` is the v3 name; the journal's own `.mono` already does the same job. */
+.journal .tnum {
+  font-family: var(--mono);
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.01em;
+}
+
+/* the breathing "Working" dot — a 2.6s box-shadow pulse (the heartbeat). */
+@keyframes journalBreathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(14, 112, 72, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(14, 112, 72, 0);
+  }
+}
+.journal .j-breathe {
+  animation: journalBreathe 2.6s ease-in-out infinite;
+}
+
+/* stream-in entrance — opacity + a 7px lift, eased; stagger via `--i`. */
+@keyframes journalStreamIn {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.journal .j-stream {
+  animation: journalStreamIn 0.42s var(--e-expo) both;
+  animation-delay: calc(var(--i, 0) * 55ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .journal .j-breathe,
+  .journal .j-stream {
+    animation: none;
+  }
+}
+
+/* THE CUSTOM CURSOR — the soft blue dot + lagging hairline ring, mounted globally
+   by App.tsx's Shell. The layers are FIXED + live OUTSIDE `.journal`, so they read
+   plain :root-resolvable values. Hidden on touch/coarse; on fine pointers the OS
+   cursor is hidden over the app. (Tokens are inlined as literals here because these
+   layers render outside any token scope.) */
+.j-cursor-dot,
+.j-cursor-ring {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 90;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  will-change: transform;
+}
+.j-cursor-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #1e7fd6;
+  box-shadow: 0 0 10px 1px rgba(30, 127, 214, 0.35);
+}
+.j-cursor-ring {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(30, 127, 214, 0.28);
+  box-shadow: 0 0 12px rgba(30, 127, 214, 0.18);
+}
+@media (hover: none), (pointer: coarse) {
+  .j-cursor-dot,
+  .j-cursor-ring {
+    display: none;
+  }
+}
+@media (hover: hover) and (pointer: fine) {
+  .journal,
+  .journal a,
+  .journal button,
+  .journal input,
+  .journal select,
+  .journal textarea {
+    cursor: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    MASTHEAD — a quiet journal masthead, NOT a header. No mode toggle.
    ════════════════════════════════════════════════════════════════════════ */
 .journal .masthead {
@@ -289,9 +460,43 @@
 }
 .journal .mh__left {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 16px;
   flex-wrap: wrap;
+}
+/* the SUIZE wordmark — Hashgraph Title, ink→blue gradient text (the masthead logo). */
+.journal .mh__suize {
+  font-family: var(--wordmark);
+  font-weight: 700;
+  font-size: clamp(1.4rem, 3vw, 1.9rem);
+  letter-spacing: 0.02em;
+  line-height: 1;
+  background: linear-gradient(120deg, var(--ink) 8%, var(--accent) 92%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: var(--accent);
+}
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .journal .mh__suize {
+    -webkit-text-fill-color: var(--accent);
+    color: var(--accent);
+  }
+}
+/* the handle sits next to the wordmark — plain mono, a quiet hairline separator. */
+.journal .mh__sep {
+  width: 1px;
+  height: 18px;
+  background: var(--hair-strong);
+  align-self: center;
+}
+.journal .mh__handle2 {
+  font-family: var(--mono);
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.005em;
+  font-size: 12px;
+  color: var(--ink-3);
 }
 .journal .mh__mark {
   align-self: center;
@@ -324,8 +529,8 @@
 }
 .journal .mh__right {
   display: flex;
-  align-items: baseline;
-  gap: 22px;
+  align-items: flex-end;
+  gap: clamp(14px, 2vw, 22px);
 }
 .journal .mh__issue {
   font-family: var(--mono);
@@ -334,6 +539,77 @@
   text-transform: uppercase;
   color: var(--ink-3);
   white-space: nowrap;
+}
+
+/* ── v3 GRAND TOTAL block (right of the top bar) — "EVERYTHING TOGETHER" eyebrow
+   + the blue Martian-Mono grand total, right-aligned. The single biggest figure. */
+.journal .mh__grand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.journal .mh__grand-lab {
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+.journal .mh__grand-num {
+  font-family: var(--mono);
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.01em;
+  font-size: clamp(22px, 4.4vw, 30px);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--blue-deep);
+}
+.journal .mh__grand-cur {
+  color: var(--ink-4);
+  font-weight: 500;
+  margin-right: 1px;
+  font-size: 0.78em;
+}
+
+/* ── v3 HEALTH PILL ("ALL GOOD") — a 100px status pill, green when healthy. */
+.journal .mh__health {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--ink-3);
+  padding: 5px 11px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+.journal .mh__health-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+.journal .mh__health.is-ok {
+  color: var(--good);
+  border-color: var(--good-wash);
+}
+.journal .mh__health.is-ok .mh__health-dot {
+  background: var(--good);
+}
+.journal .mh__health.is-warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 22%, transparent);
+}
+.journal .mh__health.is-warn .mh__health-dot {
+  background: var(--warn);
 }
 /* tiny unobtrusive theme mark — a hairline glyph, no button chrome */
 .journal .thememark {
@@ -373,14 +649,17 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   THE PAGE — full-screen editorial, vast whitespace.
-   On MOBILE: natural top-to-bottom journal flow (scrolls).
-   On DESKTOP (>=901px): a fixed-height dashboard-journal that HOLDS in one frame.
+   THE PAGE (v3 dashboard) — a centered broadsheet shell: the account GRID on top,
+   the wide DETAIL PANEL below. Natural top-to-bottom flow (scrolls) on every
+   breakpoint — the v3 calm layout (no fixed two-column frame). The CornerLog stays
+   a fixed corner widget; the page reserves bottom clearance for it.
    ════════════════════════════════════════════════════════════════════════ */
 .journal .page {
   position: relative;
   z-index: 1;
-  padding: 0 var(--pad) clamp(80px, 16vh, 200px);
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: clamp(18px, 3vh, 30px) var(--pad) clamp(120px, 18vh, 200px);
 }
 
 /* a journal SECTION — mono eyebrow + hairline rule, reads top-to-bottom */
@@ -532,28 +811,27 @@
   font-weight: 500;
 }
 
-/* ── ACCOUNTS LEDGER — the three accounts as FLAT HAIRLINE cards ────────────── */
-/* FOUNDER LOCK: flat hairline depth ONLY. No ::before gradient wash, no box-shadow
-   (card/hover/drop/selected/left-edge bar). Each card is a single faint --paper-2 fill
-   on ONE hairline; hierarchy comes from SIZE (the huge serif balance is the hero), and
-   selection is a faint accent WASH only (the founder killed the accent left-edge bar —
-   "screams AI slop"). */
+/* ── ACCOUNTS GRID — the three accounts as v3 DASHBOARD cards in a responsive
+   grid (repeat(auto-fill,minmax(240px,1fr))). Each card: a white lifted face on
+   ONE hairline; editorial eyebrow → title → BLUE Martian-Mono balance → status
+   foot. Hover lifts -3px. SELECTION = a FULL hairline-blue border + faint blue-wash
+   fill (NEVER a left-edge bar — the #1 AI-slop tell). */
 .journal .ledger {
-  display: flex;
-  flex-direction: column;
-  gap: clamp(12px, 1.6vh, 18px);
+  display: grid;
+  gap: clamp(12px, 1.6vw, 16px);
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 .journal .acct {
   position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: clamp(9px, 1.4vh, 14px);
-  padding: clamp(16px, 2.4vh, 24px) clamp(18px, 2vw, 26px);
-  background: var(--paper-2);
-  /* one faint hairline — bumped to the full --hair (not --hair-2) so the frame
-     never dissolves on white; flat, no shadow, no wash. */
+  gap: 6px;
+  padding: clamp(16px, 2vh, 20px) clamp(16px, 1.8vw, 20px);
+  background: var(--card, var(--paper-2));
   border: 1px solid var(--hair);
   border-radius: var(--r-card);
+  box-shadow: 0 1px 2px rgba(10, 27, 46, 0.03);
   /* the whole card SELECTS (click) — pointer cursor whether it renders as a
      <button> or a <div role="button">. The drag affordance overrides this below. */
   cursor: pointer;
@@ -562,8 +840,15 @@
   -webkit-user-select: none;
   user-select: none;
   transition:
-    background 0.4s var(--e-quart),
-    border-color 0.5s var(--e-quart);
+    transform 0.18s var(--e-expo),
+    box-shadow 0.18s var(--e-expo),
+    background 0.3s var(--e-quart),
+    border-color 0.3s var(--e-quart);
+}
+/* HOVER LIFT — a -3px float + a soft blue-tinted shadow (the v3 card hover). */
+.journal .acct:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 22px rgba(10, 27, 46, 0.07);
 }
 /* DRAGGABLE CARD — the whole card moves money (no dot grip). A "grab" cursor signals
    it; pressing and dragging onto another card (or Main) opens the move-money popup.
@@ -592,51 +877,117 @@
 }
 
 /* the VERTICAL STACK — everything that dims when paused lives in .acct__body:
-   tiny mono name label → HUGE serif balance hero → one plain capability line.
-   The status row (.kill) + the action footer (.acct__foot) sit BELOW it and stay
-   full opacity even when paused. */
+   editorial eyebrow → account title → the BLUE Martian-Mono balance → one plain
+   capability line. The status row (.kill) + the action footer (.acct__foot) sit
+   BELOW it and stay full opacity even when paused. */
 .journal .acct__body {
   display: flex;
   flex-direction: column;
-  gap: clamp(7px, 1vh, 11px);
+  gap: 5px;
   min-width: 0;
   transition:
     opacity 0.4s var(--e-quart),
     filter 0.4s var(--e-quart);
 }
+/* the editorial eyebrow — Space Grotesk uppercase, tracked (the v3 card kicker). */
 .journal .acct__label {
-  font-family: var(--mono);
-  font-size: 9.5px;
-  letter-spacing: 0.16em;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--ink-3);
 }
-/* the HERO — the big balance number; the card's reason to exist. */
-.journal .acct__hero {
-  font-family: var(--serif);
-  font-weight: 400;
-  letter-spacing: -0.02em;
-  line-height: 1;
-  font-size: clamp(1.9rem, 4.4vw, 2.6rem);
-  font-variant-numeric: tabular-nums;
+/* the account TITLE — Space Grotesk, the card's name ("Main" / "Spending" …). */
+.journal .acct__title {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--ink);
+}
+/* the BALANCE — the card's hero figure. Martian Mono, BLUE money (NEVER serif on a
+   number — the v3 lock). Tabular + lining figures with the signature tracking. */
+.journal .acct__hero {
+  font-family: var(--mono);
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+  line-height: 1.1;
+  font-size: clamp(1.55rem, 3.2vw, 1.85rem);
+  color: var(--blue-deep);
   display: flex;
   align-items: baseline;
-  gap: 0.4em;
+  gap: 0.2em;
+  margin-top: 2px;
 }
 .journal .acct__cur {
   font-family: var(--mono);
-  font-weight: 400;
-  font-size: 9.5px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-3);
+  font-weight: 500;
+  font-size: 0.78em;
+  letter-spacing: -0.01em;
+  color: var(--ink-4);
 }
 .journal .acct__cap {
-  font-family: var(--mono);
-  font-size: 11.5px;
+  font-family: var(--sans);
+  font-size: 12px;
   color: var(--ink-3);
-  letter-spacing: 0.005em;
+  letter-spacing: 0;
+  margin-top: 2px;
+}
+
+/* the card STATUS FOOT — a thin row pinned to the card bottom (Main: "N coins ·
+   0xaddr"; AI: a Working/Turned-off pill or "up N% today"). Stays full opacity
+   even when the body dims. */
+.journal .acct__foot-status {
+  margin-top: auto;
+  padding-top: 8px;
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+}
+.journal .acct__foot-words {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* ── v3 STATUS PILL ("WORKING" / "TURNED OFF") — a 100px pill with a dot. The
+   Working pill's dot BREATHES (the heartbeat). Shared by the AI card foot + the
+   detail-panel head. */
+.journal .jstatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 4px 10px 4px 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--hair);
+}
+.journal .jstatus-ok {
+  color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 22%, transparent);
+  background: var(--good-wash);
+}
+.journal .jstatus-off {
+  color: var(--ink-3);
+  background: var(--paper-3);
+}
+.journal .jstatus__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.journal .jstatus-ok .jstatus__dot {
+  background: var(--good);
+}
+.journal .jstatus-off .jstatus__dot {
+  background: var(--ink-4);
 }
 
 /* the docked action footer (Main card) — the REAL Add money (.action--primary, the
@@ -678,14 +1029,17 @@
   cursor: grabbing;
 }
 
-/* SELECTED — a faint accent WASH only. The founder killed the 2px accent left-edge
-   bar ("screams AI slop"): NO left border, NO border-color change, NO shadow. The
-   wash sits a touch stronger than the drop-ok wash so the selected card reads without
-   any chrome. The 1px hairline + symmetric padding are UNCHANGED from the base .acct,
-   so selecting/deselecting never shifts the card a pixel (no left-bar to compensate
-   for). color-mix doubles --accent-wash's opacity in both themes. */
+/* SELECTED — the v3 selection indicator: a FULL hairline-BLUE border all the way
+   around + a faint blue-wash fill + a soft blue lift. NEVER a left-edge accent bar
+   (the #1 AI-slop tell — locked). The 1px border is UNCHANGED in width from the base
+   .acct (only its color changes), so selecting never shifts the card a pixel. */
 .journal .acct.selected {
-  background: color-mix(in srgb, var(--accent-wash) 100%, var(--accent) 6%);
+  border-color: var(--hair-blue);
+  background: var(--accent-wash);
+  box-shadow: 0 6px 18px rgba(30, 127, 214, 0.1);
+}
+.journal .acct.selected:hover {
+  box-shadow: 0 8px 22px rgba(30, 127, 214, 0.14);
 }
 
 /* PAUSED — the body dims to ~50% + desaturates so it reads as "off", while the
@@ -719,66 +1073,14 @@
   margin-top: clamp(2px, 0.6vh, 6px);
 }
 
-/* ── ACTIVE AI CARD — the two AI accounts read as "alive" vs the plain Main card. A
-   very faint accent wash (color-mix --accent ~6% over --paper-2) plus a barely-there
-   slow diagonal shimmer. Painted on a ::before overlay so it composes UNDER the content
-   and does NOT fight the `background` property (which .selected / .drop-ok set on the
-   card itself). Editorial, not a bootstrap glow. Main (.acct--main) gets no ::before. */
-.journal .acct--ai::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  /* the static accent wash — barely there, just enough to feel warm/active */
-  background:
-    linear-gradient(
-      120deg,
-      color-mix(in srgb, var(--accent) 6%, transparent),
-      color-mix(in srgb, var(--accent) 2%, transparent)
-    );
-}
-/* the slow shimmer — a faint diagonal sheen sweeping ~6s. Its own overlay so it can
-   animate background-position without disturbing the static wash. Very low opacity. */
-.journal .acct--ai::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(
-    115deg,
-    transparent 30%,
-    color-mix(in srgb, var(--accent) 9%, transparent) 50%,
-    transparent 70%
-  );
-  background-size: 220% 100%;
-  background-position: 120% 0;
-  opacity: 0.7;
-  animation: aiSheenJ 6s var(--e-quart) infinite;
-}
-/* keep the card's real content above both overlays */
+/* ── ACTIVE AI CARD — v3 calm restraint: the AI cards read as "alive" through the
+   breathing "Working" dot in their status row, NOT a per-card gradient wash or
+   shimmer (that fought the clean white card + the blue-wash selection). The old
+   ::before/::after sheen overlays were RETIRED for v3 (the lock: don't add chrome).
+   `.acct--ai > *` keeps content above any future overlay; the card stays flat. */
 .journal .acct--ai > * {
   position: relative;
   z-index: 1;
-}
-@keyframes aiSheenJ {
-  0% {
-    background-position: 120% 0;
-  }
-  60%,
-  100% {
-    background-position: -120% 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .journal .acct--ai::after {
-    animation: none;
-    background-position: 50% 0;
-    opacity: 0.4;
-  }
 }
 
 /* ── STATUS ROW (.kill) — split into a plain STATE LABEL (left) + an explicit ACTION
@@ -885,12 +1187,25 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   DETAIL PANE — the right column shows the SELECTED account's own view.
-   One pane, switched by which account card is selected (Main / Spending /
-   Investing). The pane has a quiet eyebrow header + a hairline rule, then the
-   account-specific body (currency list / chat / strategies). On desktop it
-   fills the frame and the body scrolls internally — the no-scroll contract.
+   DETAIL PANEL (v3) — a wide, full-width panel BELOW the account grid that shows
+   the SELECTED account's own view. One panel, switched by which card is selected
+   (Main / Spending / Investing). It's a white card on ONE hairline (the v3 panel
+   chrome); inside it sits the existing `.pane` (eyebrow head + hairline rule + the
+   account-specific body: currency list / chat / strategies). CornerLog stays a
+   separate fixed widget. The panel streams in on selection change.
    ════════════════════════════════════════════════════════════════════════ */
+.journal .panel {
+  margin-top: clamp(14px, 2vh, 18px);
+  background: var(--card, var(--paper-2));
+  border: 1px solid var(--hair);
+  border-radius: var(--r-card);
+  box-shadow: 0 1px 2px rgba(10, 27, 46, 0.03);
+  padding: clamp(18px, 3vw, 28px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  animation: journalStreamIn 0.36s var(--e-expo) both;
+}
 .journal .pane {
   display: flex;
   flex-direction: column;
@@ -939,15 +1254,37 @@
   }
 }
 
-/* ── MAIN: the CURRENCY LIST (coins held) + ACTION ROW ─────────────────────── */
+/* ── MAIN: the CURRENCY LIST (coins held) ──────────────────────────────────── */
+
+/* the editorial header — the ONE serif title ("What you are holding") + an honest
+   "N kinds of coin" count, on a baseline row above the ledger. */
+.journal .curr__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: clamp(10px, 1.6vh, 16px);
+}
+.journal .curr__count {
+  font-family: var(--mono);
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.005em;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
 .journal .curr {
   display: flex;
   flex-direction: column;
 }
+/* a v3 ledger LINE: disc · (name + sub-amount) · dotted leader · USD (blue mono). */
 .journal .curr__row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: clamp(12px, 2vw, 18px);
+  grid-template-columns: auto minmax(0, auto) 1fr auto;
+  gap: clamp(11px, 1.6vw, 15px);
   align-items: center;
   padding: clamp(12px, 1.8vh, 16px) 2px;
   border-top: 1px solid var(--hair-2);
@@ -957,8 +1294,8 @@
   border-bottom: 1px solid var(--hair-2);
 }
 .journal .curr__disc {
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   flex: 0 0 auto;
   display: grid;
@@ -976,10 +1313,13 @@
   flex-direction: column;
   gap: 2px;
 }
+/* the coin NAME — Space Grotesk (a WORD, never serif/mono); optional chips inline.
+   (Class kept as `.curr__sym` for the TSX; it now carries the NAME.) */
 .journal .curr__sym {
-  font-family: var(--serif);
-  font-weight: 400;
-  font-size: clamp(1rem, 1.6vw, 1.18rem);
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: -0.005em;
   color: var(--ink);
   display: flex;
   align-items: baseline;
@@ -995,25 +1335,45 @@
   border-radius: var(--r-control);
   padding: 1px 6px;
 }
+/* the SUB-AMOUNT under the name — Martian Mono ("12.5 SUI"); the held quantity. */
 .journal .curr__name {
   font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-size: 11.5px;
+  letter-spacing: -0.01em;
   color: var(--ink-3);
+}
+/* the DOTTED LEADER bridging name → value (fades the eye across the row). */
+.journal .curr__lead {
+  height: 0;
+  min-width: 18px;
+  align-self: center;
+  margin-bottom: 3px;
+  border-bottom: 1px dotted var(--hair-strong);
 }
 .journal .curr__amt {
   text-align: right;
+}
+/* the USD value — BLUE Martian Mono (money is always blue). */
+.journal .curr__usd {
   font-family: var(--mono);
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.01em;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--blue-deep);
+  white-space: nowrap;
 }
-.journal .curr__amt .ui {
-  font-size: clamp(0.95rem, 1.5vw, 1.15rem);
-  color: var(--ink);
-}
-.journal .curr__amt .usd {
-  display: block;
-  font-size: 10.5px;
+/* the HONEST "no price" line for an unknown coin — Space Grotesk, muted; never a
+   fabricated $0.00, never green/red. */
+.journal .curr__noprice {
+  font-family: var(--sans);
+  font-size: 11px;
   color: var(--ink-3);
-  margin-top: 3px;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
 }
 .journal .curr__empty {
   font-family: var(--serif);
@@ -1038,7 +1398,7 @@
 }
 
 /* "raw" hint after a best-effort amount when on-chain decimals were missing. */
-.journal .curr__amt .ui .curr__raw {
+.journal .curr__name .curr__raw {
   font-size: 8.5px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1391,10 +1751,10 @@
   color: var(--ink-3);
   margin-bottom: 3px;
 }
-/* the body — Space Grotesk (dropping the serif fixed the "font is off" feeling), ~14px
-   / 1.35, compact. tabular-nums so money columns still line up. */
+/* the body — Space Grotesk words (the v3 body type), ~14px / 1.35, compact. tabular-nums
+   so money columns still line up; inline figures use the mono --accent .b spans below. */
 .journal .msg__body {
-  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-family: var(--sans);
   font-size: 14px;
   line-height: 1.35;
   color: var(--ink);
@@ -1451,8 +1811,9 @@
   }
 }
 /* ── SUGGESTION CHIPS (.chat__suggest) — a wrap row of quick prompts sitting just ABOVE
-   the input row. Each .suggest is a small ghost chip on a hairline with a quiet hover
-   lift (accent border + wash + a 1px rise). --r-control corners. */
+   the input row. v3 chips: a faint --paper-3 fill on a hairline, 2px (--r-chip) corners,
+   Space Grotesk words. A quiet hover lifts to the blue-wash accent (border + wash + 1px
+   rise). The hover-wash IS the "selected" cue — never a left bar. */
 .journal .chat__suggest {
   display: flex;
   flex-wrap: wrap;
@@ -1465,12 +1826,13 @@
   gap: 6px;
   padding: 6px 11px;
   border: 1px solid var(--hair);
-  border-radius: var(--r-control);
-  background: transparent;
+  border-radius: var(--r-chip);
+  background: var(--paper-3);
   color: var(--ink-2);
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   white-space: nowrap;
   transition:
     color 0.3s,
@@ -1490,56 +1852,51 @@
   flex: 0 0 auto;
 }
 
-/* ── CONFIRM CARD (.chatcard) — the "FLUID" send-confirmation surface in the AI lane.
-   NOT a bootstrap card: a soft accent-tinted gradient panel lit from within, with a
-   glowing accent rail down the left edge and a feathered accent shadow. The amount
-   sits on a faint accent wash. --r-max corners. Premium-fintech hierarchy: a tiny mono
-   "SEND" kicker + lucide icon → the AMOUNT as the big tabular HERO → the recipient on a
-   quiet secondary mono line → a hairline divider → a tight right-aligned action row
-   (Cancel ghost + the ONE gradient-accent Confirm). The TSX renders per status:
-   'pending' → divider+foot; 'sending' → a calm status line; 'sent' → collapses to ONE
-   check+summary line; 'failed' → a warn line + divider + a quiet Retry. The Fluid
-   surface themes correctly via vars (blue in light, gold in dark) on its own. Compact,
-   max ~300px. */
+/* ── CONFIRM CARD (.chatcard) — the v3 send-confirmation surface in the AI lane.
+   A clean WHITE card on ONE hairline (3px / --r-card corners), v3 restraint — no
+   gradient-tinted "Fluid" surface, no glow, NO left-edge rail. Hierarchy:
+   a small kicker ("Send", Space Grotesk + lucide) → the AMOUNT as a BIG blue Martian
+   Mono HERO → the recipient on a quiet secondary mono line → a hairline divider → a
+   tight right-aligned action row (Cancel ghost + the ONE accent Confirm). The TSX
+   renders per status: 'pending' → divider+foot; 'sending' → a calm status line;
+   'sent' → collapses to ONE check+summary line; 'failed' → a warn line + divider +
+   a quiet Retry. Themes via vars (blue money in both ramps). Compact, max ~320px. */
 .journal .chatcard {
   position: relative;
   overflow: hidden;
   align-self: flex-start;
   width: 100%;
-  max-width: 300px;
+  max-width: 320px;
   margin-top: 4px;
   display: flex;
   flex-direction: column;
-  /* COMPACT (founder rework): tight + premium, not airy. Smaller gap + padding; the
-     amount/rule/foot tighten in step below. The Fluid gradient surface + glow stay. */
-  gap: 5px;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--hair));
-  border-radius: var(--r-max);
-  background:
-    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%),
-    linear-gradient(180deg, var(--paper-2), color-mix(in srgb, var(--paper-2) 86%, var(--accent) 14%));
-  box-shadow:
-    0 1px 0 color-mix(in srgb, var(--accent) 20%, transparent) inset,
-    0 14px 34px -18px color-mix(in srgb, var(--accent) 60%, transparent);
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-card);
+  background: var(--paper-2);
+  box-shadow: 0 1px 2px rgba(10, 27, 46, 0.03);
   transition: border-color 0.4s var(--e-quart);
 }
 /* NO left-edge accent rail — a colored bar on a card's left edge is the #1 AI-slop
-   tell. The Fluid look lives in the gradient SURFACE + glow, never a left stripe. */
+   tell (locked). v3 selection/emphasis is a full hairline + state colour, never a stripe. */
 /* failed card: a quiet --warn border so the state reads without flooding the card red */
 .journal .chatcard.is-failed {
   border-color: color-mix(in srgb, var(--warn) 45%, var(--hair));
 }
-/* the tiny mono KICKER ("SEND") + small lucide icon — chrome recedes, money leads. */
+/* the kicker ("Send") + small lucide icon — Space Grotesk uppercase, chrome recedes
+   so the blue money leads. */
 .journal .chatcard__head {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-family: var(--mono);
-  font-size: 9.5px;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 600;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-3);
+  margin-bottom: 2px;
 }
 .journal .chatcard__head svg {
   width: 13px;
@@ -1547,17 +1904,17 @@
   flex: 0 0 auto;
   color: var(--accent);
 }
-/* the AMOUNT — the HERO of the card. Tabular money lifted by a faint accent glow.
-   Compacted 28px → 22px so the card reads tight + premium, not airy. */
+/* the AMOUNT — the HERO of the card. BIG blue Martian Mono money (NEVER serif on a
+   number — the v3 lock), tabular + lining figures, no glow. */
 .journal .chatcard__amount {
   font-family: var(--mono);
-  font-size: 22px;
-  line-height: 1.05;
-  font-weight: 500;
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-size: clamp(1.55rem, 3vw, 1.85rem);
+  line-height: 1.1;
+  font-weight: 600;
   letter-spacing: -0.01em;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 18px color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--blue-deep);
 }
 /* the recipient — a quiet secondary line ("to landlord@suize"), mono, --ink-3. */
 .journal .chatcard__to {
@@ -1568,38 +1925,24 @@
   color: var(--ink-3);
   word-break: break-word;
 }
-/* In a chat money line, the AMOUNT and the RECIPIENT each carry their OWN semantic
-   gradient so they read apart — and apart from the muted connective text ("Sent · … to …",
-   which stays solid --ink-3). AMOUNT = the BLUE number gradient (--num-grad, the same clip
-   recipe as .ng). RECIPIENT = the orange→red name gradient (handled by the shared
-   .handle/.rcpt rule above). Clearly distinct: blue money, warm identity. */
+/* In a chat money line the AMOUNT and the RECIPIENT read apart — and apart from the
+   muted connective text ("Sent · … to …", which stays solid --ink-3). v3: the AMOUNT is
+   solid BLUE Martian Mono money (matching every other figure on the dashboard — no
+   animated clip). RECIPIENT keeps the orange→red name gradient (the shared .handle/.rcpt
+   rule above) so money (blue) vs identity (warm) never blur. */
 .journal .chatcard .amt {
-  background-image: var(--num-grad);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
+  font-family: var(--mono);
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.01em;
   font-weight: 600;
-  animation: gradShiftJ 13s ease-in-out infinite;
+  color: var(--blue-deep);
 }
-@media (prefers-reduced-motion: reduce) {
-  .journal .chatcard .amt {
-    animation: none;
-  }
-}
-@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
-  .journal .chatcard .amt {
-    -webkit-text-fill-color: var(--accent);
-    color: var(--accent);
-  }
-}
-/* the hairline divider between the money block and the action row / states. Tightened
-   margins to match the compact card. */
+/* the hairline divider between the money block and the action row / states. */
 .journal .chatcard__rule {
   height: 1px;
   background: var(--hair);
-  margin: 3px 0 1px;
+  margin: 8px 0 2px;
 }
 /* the action row — Cancel (quiet ghost text) + Confirm (the ONE accent), right-grouped. */
 .journal .chatcard__foot {
@@ -1609,8 +1952,9 @@
   gap: 6px;
   margin-top: 1px;
 }
-/* Confirm / Retry — the ONE accent: a Fluid GRADIENT fill (accent-bright → accent) with
-   a soft accent glow, small + square-ish (--r-control). --sel-ink reads on both ramps. */
+/* Confirm / Retry — the ONE accent: the v3 solid-accent CTA (accent-bright → accent,
+   matching .action--primary), small + 3px (--r-control), no heavy glow. --sel-ink reads
+   on both ramps. */
 .journal .chatcard__foot .chatcard__confirm {
   display: inline-flex;
   align-items: center;
@@ -1618,11 +1962,9 @@
   gap: 6px;
   flex: 0 0 auto;
   padding: 7px 14px;
-  border: 1px solid transparent;
+  border: 1px solid var(--accent);
   border-radius: var(--r-control);
   background: linear-gradient(180deg, var(--accent-bright), var(--accent));
-  border-color: transparent;
-  box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--accent) 80%, transparent);
   color: var(--sel-ink);
   font-family: var(--mono);
   font-size: 11px;
@@ -1633,7 +1975,7 @@
     border-color 0.3s;
 }
 .journal .chatcard__foot .chatcard__confirm:hover {
-  filter: brightness(1.06);
+  filter: brightness(1.04);
 }
 .journal .chatcard__confirm svg {
   width: 12px;
@@ -1755,18 +2097,23 @@
   color: var(--accent);
   font-size: 15px;
 }
+/* the input — Martian Mono (the v3 lock: NEVER serif on an input/number; an amount
+   typed here lands in a tx). Tabular + lining figures so a typed amount lines up. */
 .journal .chat__input input {
   flex: 1 1 auto;
   background: transparent;
   border: none;
-  font-family: var(--serif);
-  font-size: clamp(1rem, 1.6vw, 1.18rem);
+  font-family: var(--mono);
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.01em;
+  font-size: clamp(0.9rem, 1.4vw, 1rem);
   color: var(--ink);
   min-width: 0;
 }
 .journal .chat__input input::placeholder {
   color: var(--ink-4);
-  font-style: italic;
+  letter-spacing: 0;
 }
 /* AI Spending holds only USDC — a quiet single-currency tag on the input row */
 .journal .chat__cur {
@@ -1780,24 +2127,25 @@
   padding: 3px 8px;
   flex: 0 0 auto;
 }
+/* Send — the ONE accent CTA on the chat row (the v3 solid-accent fill, matching
+   .action--primary). --sel-ink reads on both ramps. */
 .journal .chat__send {
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--ink-3);
-  border: 1px solid var(--hair);
+  color: var(--sel-ink);
+  border: 1px solid var(--accent);
   border-radius: var(--r-control);
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
   padding: 8px 14px;
+  flex: 0 0 auto;
   transition:
-    color 0.4s,
-    border-color 0.4s,
-    background 0.4s;
+    filter 0.4s,
+    border-color 0.4s;
 }
 .journal .chat__send:hover {
-  color: var(--accent);
-  border-color: var(--accent-line);
-  background: var(--accent-wash);
+  filter: brightness(1.04);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1811,6 +2159,22 @@
    repeated). Because the bar is pinned to 100%, .remainder reads "All your money is
    working"; the .warn state stays available if a future flow over/under-fills.
    ════════════════════════════════════════════════════════════════════════ */
+
+/* ── EDITORIAL HEADER (.strat__title / .strat__lede) — the v3 leaf opener: ONE
+   Newsreader serif title (never on a number) + a quiet plain-words lede that explains
+   the split bar in monkey-simple terms. The serif look is inherited from .pane__name;
+   we only tune the spacing for use inside the scroll body. */
+.journal .strat__title {
+  margin: 2px 0 8px;
+}
+.journal .strat__lede {
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-3);
+  max-width: 52ch;
+  margin: 0;
+}
 
 /* the live remainder readout above the bar — a single mono line. On a fixed-100 bar
    this reads 'All your money is working'; the .warn tone stays available for any
@@ -1885,28 +2249,32 @@
   border-top-right-radius: calc(var(--r-control) - 1px);
   border-bottom-right-radius: calc(var(--r-control) - 1px);
 }
-/* the strategy NAME — mono uppercase ~10px, the ONLY place it appears. Clips to one
-   ellipsised line when the segment is too narrow. */
+/* the strategy NAME — v3: Space Grotesk WORDS, uppercase + tracked (a label is never
+   mono). The ONLY place the name appears. Clips to one ellipsised line when the
+   segment is too narrow. */
 .journal .split__name {
   max-width: 100%;
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.1em;
+  font-weight: 600;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--ink);
+  color: var(--ink-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* the % — tabular mono, a touch quieter than the name. */
+/* the % — v3: BLUE Martian Mono (a number is always mono + blue). Tabular + lining so
+   the figures line up cleanly as the dividers move. */
 .journal .split__pct {
   max-width: 100%;
   font-family: var(--mono);
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums lining-nums;
   font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
-  color: var(--ink-2);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--blue-deep);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2049,16 +2417,24 @@
   letter-spacing: 0.01em;
   color: var(--ink-3);
 }
-/* the live position — mono, a touch brighter --ink-2, right-aligned + tabular so the
-   figures line up down the column. Never wraps (it's a compact figure). */
+/* the live position — v3 Martian Mono, right-aligned + tabular so the figures line up
+   down the column. Never wraps (it's a compact figure). The honest words-only lines
+   ("Not active yet" / "waiting for your AI") read muted; the dollar figure inside is
+   wrapped in `.sd-amt` so MONEY is blue while the surrounding words stay quiet. */
 .journal .sd-pos {
   font-family: var(--mono);
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums lining-nums;
   font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
-  color: var(--ink-2);
+  letter-spacing: -0.01em;
+  color: var(--ink-3);
   text-align: right;
   white-space: nowrap;
+}
+/* the dollar figure inside a position line — BLUE money (the v3 lock). */
+.journal .sd-amt {
+  color: var(--blue-deep);
+  font-weight: 600;
 }
 /* narrow pane: drop the third column — let the position stack under the desc, both in
    the second grid column (dot stays in column 1, spanning the two text rows). */
@@ -2328,6 +2704,11 @@
   margin-top: 16px;
   line-height: 1.6;
 }
+/* the "On-chain" confirmation token after a real move — TRUE green status. The
+   digest beside it stays the mono --ink-3 of the hint line (a quiet receipt). */
+.journal .pop__hint .good {
+  color: var(--good);
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
    WARNING MODAL (.warnpop) — turning OFF AI Investing. A centered modal like .pop
@@ -2535,203 +2916,52 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   DESKTOP DASHBOARD FRAME (>=901px) — HOLD THE WHOLE JOURNAL IN ONE VIEWPORT.
-   The journal ROOT (`.journal`) owns the no-scroll height + flex column (React
-   owns a root div, not the document — so the mockup's `html,body{height:100svh}`
-   moves onto `.journal` here, matching the app's `.suize-shell` no-scroll pattern).
+   v3 DASHBOARD LAYOUT — natural top-to-bottom flow on EVERY breakpoint (the v3
+   calm stacked model: account GRID on top, wide DETAIL PANEL below, the page
+   scrolls normally). The leaf detail bodies (chat log / currency list) cap their
+   own height + scroll internally so the panel stays a comfortable size. The
+   masthead is sticky so the SUIZE wordmark + grand total stay in view.
    ════════════════════════════════════════════════════════════════════════ */
 @media (min-width: 901px) {
-  .journal {
-    height: 100dvh;
-    height: 100svh;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
   .journal .masthead {
     padding-top: clamp(18px, 2.4vh, 28px);
     padding-bottom: clamp(12px, 1.6vh, 18px);
-    flex: 0 0 auto;
   }
   .journal .amb {
     height: 46vh;
   }
 
-  /* the page fills all leftover height and never scrolls itself */
-  .journal .page {
-    flex: 1 1 auto;
-    min-height: 0;
-    padding-top: clamp(20px, 3vh, 34px);
-    padding-bottom: clamp(16px, 2.4vh, 26px);
-    display: grid;
-    grid-template-columns: minmax(360px, 0.92fr) 1.08fr;
-    gap: clamp(34px, 4.4vw, 72px);
-    align-items: stretch;
-  }
-
-  /* LEFT RAIL — balance + the three account cards (always visible). */
-  .journal .rail-left {
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    gap: clamp(14px, 2vh, 26px);
-    overflow: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
-    scrollbar-color: var(--hair) transparent;
-  }
-  .journal .rail-left::-webkit-scrollbar {
-    width: 7px;
-  }
-  .journal .rail-left::-webkit-scrollbar-thumb {
-    background: var(--hair);
-    border-radius: 99px;
-  }
-  /* RIGHT PANE — the SELECTED account's detail, fills height.
-     Reserve bottom clearance so the fixed CORNER LOG (bottom-right) never covers the
-     pane's bottom content (chat input / action buttons / crash link). */
-  .journal .rail-right {
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    padding-bottom: clamp(118px, 15vh, 150px);
-  }
-  .journal .rail-right .pane {
-    flex: 1 1 auto;
-    min-height: 0;
-  }
-  .journal .pane__head {
-    flex: 0 0 auto;
-  }
-  /* the account body fills the leftover height; its inner scroller does the work */
-  .journal .pane__body {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: hidden;
-  }
-  /* MAIN body (currency list + actions): the list scrolls, actions pinned */
-  .journal .pane__scroll {
-    flex: 1 1 auto;
-    min-height: 0;
+  /* the detail body's leaf scrollers cap their height so the panel stays calm —
+     the page (not the panel) is the primary scroll surface. */
+  .journal .pane__scroll,
+  .journal .chat__log {
+    max-height: 52vh;
     overflow: auto;
     overscroll-behavior: contain;
     scrollbar-width: thin;
     scrollbar-color: var(--hair) transparent;
     padding-right: 6px;
   }
-  .journal .pane__scroll::-webkit-scrollbar {
+  .journal .pane__scroll::-webkit-scrollbar,
+  .journal .chat__log::-webkit-scrollbar {
     width: 7px;
   }
-  .journal .pane__scroll::-webkit-scrollbar-thumb {
+  .journal .pane__scroll::-webkit-scrollbar-thumb,
+  .journal .chat__log::-webkit-scrollbar-thumb {
     background: var(--hair);
     border-radius: 99px;
-  }
-  .journal .actions {
-    flex: 0 0 auto;
-  }
-
-  /* inside the rails, sections drop their big top padding (the grid spaces them) */
-  .journal .page .jsec {
-    padding-top: 0;
-  }
-  .journal .rail-left .jsec {
-    flex: 0 0 auto;
-  }
-  .journal #s-accounts {
-    flex: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-  }
-  .journal #s-accounts .ledger {
-    flex: 0 0 auto;
-  }
-
-  /* compact the hero balance so the rail breathes without scroll */
-  .journal #s-balance .eyebrow {
-    margin-bottom: clamp(6px, 1vh, 12px);
-  }
-  .journal .hero__lab {
-    font-size: 9.5px;
-  }
-  .journal .hero__num {
-    font-size: clamp(2.4rem, 5vw, 4rem);
-  }
-  .journal .hero__sub {
-    margin-top: 8px;
-  }
-  .journal #s-accounts .lede {
-    font-size: clamp(0.95rem, 1.3vw, 1.12rem);
-    max-width: none;
-  }
-  .journal #s-accounts .rule {
-    margin: clamp(8px, 1.2vh, 14px) 0 clamp(10px, 1.4vh, 16px);
-  }
-  .journal #s-accounts > .note {
-    margin-top: 12px !important;
-  }
-
-  /* tighter account cards inside the narrow rail — compact the vertical stack so the
-     three cards + the hero hold in the no-scroll frame without scrolling. */
-  .journal .rail-left .acct {
-    padding: clamp(13px, 1.8vh, 20px) clamp(16px, 1.6vw, 22px);
-    gap: clamp(7px, 1.1vh, 11px);
-  }
-  .journal .rail-left .acct__body {
-    gap: clamp(5px, 0.8vh, 9px);
-  }
-  .journal .rail-left .acct__hero {
-    font-size: clamp(1.6rem, 2.6vw, 2.1rem);
-  }
-  .journal .rail-left .acct__cap {
-    font-size: 11px;
-  }
-
-  /* CHAT (spending pane): the chat fills the body; log scrolls, input pinned */
-  .journal .rail-right #chatDetail {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    max-height: none !important;
-    overflow: visible;
-  }
-  .journal .rail-right #chatDetail .chat {
-    flex: 1 1 auto;
-    min-height: 0;
   }
   .journal .chat {
     max-width: none;
     margin-top: clamp(10px, 1.4vh, 18px);
     display: flex;
     flex-direction: column;
-    min-height: 0;
   }
-  .journal .chat__log {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: auto;
-    overscroll-behavior: contain;
-    padding-right: 6px;
-    scrollbar-width: thin;
-    scrollbar-color: var(--hair) transparent;
-  }
-  .journal .chat__log::-webkit-scrollbar {
-    width: 7px;
-  }
-  .journal .chat__log::-webkit-scrollbar-thumb {
-    background: var(--hair);
-    border-radius: 99px;
-  }
-  .journal .chat__input {
-    flex: 0 0 auto;
-  }
-  /* INVESTING (split-bar pane): its root IS the .pane__scroll, so the generic
-     .pane__scroll rule above already fills the body + scrolls internally. */
-  .journal .foot {
-    flex: 0 0 auto;
-    padding-top: clamp(12px, 1.6vh, 18px);
-    padding-bottom: clamp(12px, 1.6vh, 18px);
+  .journal #chatDetail {
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+    max-height: none !important;
   }
 }
 
@@ -2740,14 +2970,10 @@
   .journal {
     --pad: 22px;
   }
-  /* MOBILE: natural journal flow — rails stack, the page scrolls normally. The
-     right pane (selected account's detail) sits under the cards. */
-  .journal .page {
-    display: flex;
-    flex-direction: column;
-    gap: clamp(28px, 6vh, 48px);
-    /* clearance so the fixed corner log never sits on the last content */
-    padding-bottom: clamp(120px, 22vh, 180px);
+  /* MOBILE: the grid drops to a single column; the page scrolls normally and the
+     detail panel sits under the cards. The leaf scrollers flow (no inner cap). */
+  .journal .ledger {
+    grid-template-columns: 1fr;
   }
   .journal .pane__body {
     overflow: visible;
@@ -2756,13 +2982,10 @@
   .journal .chat__log {
     overflow: visible;
   }
-  /* the card is already a vertical flex stack; just give the mobile balance hero
-     a touch more room to breathe. The split steppers stack comfortably as-is. */
-  .journal .acct__hero {
-    font-size: clamp(2rem, 9vw, 2.5rem);
-  }
   .journal .mh__right {
     gap: 16px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
   /* the corner log stays a corner widget but a touch narrower on phones */
   .journal .clog {

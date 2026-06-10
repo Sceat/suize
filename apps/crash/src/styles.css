@@ -422,10 +422,6 @@ input {
   border-left: 1px solid var(--hair);
   padding-left: 0.875rem;
 }
-.ed-rail-blue {
-  border-left: 2px solid var(--blue);
-  padding-left: 0.875rem;
-}
 .ed-leader {
   flex: 1 1 auto;
   height: 0;

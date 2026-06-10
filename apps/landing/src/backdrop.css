@@ -1,0 +1,78 @@
+/* ==========================================================================
+   SUIZE · THE CLEAN EDITORIAL SURFACE — the site-wide background.
+
+   Owner cut the global living-matter shader ("way too intense, it should not
+   steal the focus that much; it'd feel like we found a shader and just posted
+   our timeline on top"). So the whole page now sits on a CALM, CLEAN surface:
+     1. .sx-bg          — the fixed full-viewport host (paper floor + vignette).
+     2. .sx-bg::before  — a subtle FILM GRAIN (fine static motes, very low alpha).
+     3. .sx-bg::after   — a very faint VIGNETTE so type seats into the page.
+
+   No GL canvas, no cursor lens, no scroll-travel behind the whole site. The ONE
+   matter moment is now bounded + dialed-back INSIDE the hero (HeroScene). This
+   surface is themed + per-room (business). Pure CSS, ~0 main-thread, static —
+   so reduced-motion / no-WebGL need no special fallback.
+   ========================================================================== */
+
+.sx-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background: var(--bg-paper);
+}
+
+/* the page-floor colour — kept per theme/room so the surface matches the rest
+   of the page and the hero scene's paper. */
+:root {
+  --bg-paper: #f7fafe;
+}
+:root[data-theme='dark'] {
+  --bg-paper: #0a0c10;
+}
+:root[data-room='business'] {
+  --bg-paper: #0a1626;
+}
+
+/* ---- the film grain — fine suspended motes, very faint, static (no loop).
+   carries its own low alpha per theme; the tile is small so it reads as grain,
+   not a pattern. ---- */
+.sx-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--bg-grain) 0.6px, transparent 0.7px);
+  background-size: 3px 3px;
+}
+:root {
+  --bg-grain: rgba(10, 27, 46, 0.035);
+}
+:root[data-theme='dark'] {
+  --bg-grain: rgba(236, 239, 243, 0.03);
+}
+:root[data-room='business'] {
+  --bg-grain: rgba(184, 209, 244, 0.03);
+}
+
+/* ---- the very faint vignette — a barely-there frame so the editorial type
+   seats into the surface (depth, not a box). Kept extremely subtle. ---- */
+.sx-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    130% 120% at 50% 38%,
+    transparent 58%,
+    var(--bg-vig) 100%
+  );
+}
+:root {
+  --bg-vig: rgba(10, 27, 46, 0.05);
+}
+:root[data-theme='dark'] {
+  --bg-vig: rgba(0, 0, 0, 0.28);
+}
+:root[data-room='business'] {
+  --bg-vig: rgba(2, 7, 14, 0.32);
+}

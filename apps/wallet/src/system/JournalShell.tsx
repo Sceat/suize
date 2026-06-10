@@ -1,39 +1,36 @@
 /**
- * JournalShell — the post-onboarding shell, THE JOURNAL.
+ * JournalShell — the post-onboarding shell, THE JOURNAL (v3 dashboard).
  *
- * "A journal with almost nothing." Structure comes from SPACE + hairlines +
- * editorial type. The CSS lives in src/system/tokens-journal.css (scoped under
- * `.journal`, this root's class).
+ * The SMOOTHED Suize language as realized in v3: a light blue-on-white editorial
+ * broadsheet. Structure comes from SPACE + hairlines + editorial type. The CSS lives
+ * in src/system/tokens-journal.css (scoped under `.journal`, this root's class).
  *
- * ── LAYOUT (the per-account detail model) ──────────────────────────────────────
- * A no-scroll two-column frame (desktop) / natural flow (mobile):
- *   • LEFT RAIL  — the grand-total hero ON TOP, then the three account cards below
- *     (whole-then-parts: four big numbers top-to-bottom). Cards are SELECTABLE
- *     (click fills the right pane) AND DRAGGABLE (drag one onto another to move
- *     money). Your MAIN account + the two AI SUB ACCOUNTS. The selected card carries
- *     a 2px accent left-edge bar.
- *   • RIGHT PANE — the SELECTED account's OWN detail:
- *       main   → the currencies held + Add money / Send / Convert
- *       spend  → the AI Spending chat (USDC only)
- *       invest → the AI Investing split-bar + per-tier steppers
+ * ── LAYOUT (the v3 dashboard model) ─────────────────────────────────────────────
+ * A centered broadsheet that flows top-to-bottom:
+ *   • TOP BAR — the SUIZE wordmark (Hashgraph ink→blue) + the handle (mono) on the
+ *     left; an "EVERYTHING TOGETHER" eyebrow + the grand total (blue Martian Mono) +
+ *     an "ALL GOOD" health pill on the right. Then a faded hairline divider.
+ *   • ACCOUNT GRID — the three accounts as a responsive card grid
+ *     (repeat(auto-fill, minmax(240px, 1fr))). Cards are SELECTABLE (click fills the
+ *     detail panel below) AND DRAGGABLE (drag one onto another to move money). Your
+ *     MAIN account + the two AI SUB ACCOUNTS. Selection indicator = a FULL hairline-
+ *     blue border + faint blue-wash fill (NEVER a left-edge bar — the locked AI-slop
+ *     tell). Balances are blue Martian Mono; the AI cards carry the breathing dot.
+ *   • DETAIL PANEL — the SELECTED account's OWN detail, in a wide panel below:
+ *       main   → the currencies held (MainAccountView, editorial serif title)
+ *       spend  → the AI Spending chat (SpendingChat, USDC only)
+ *       invest → the AI Investing split-bar + per-tier steppers (InvestingStrategies)
  *   • CORNER LOG — the activity log as a persistent compact widget pinned
- *     bottom-right (always visible; expands on click). No longer a main section.
+ *     bottom-right (always visible; expands on click). Not a main section.
  *
- * SAME CONTRACT: props `{ home, slots, … }`. App.tsx swaps the component; nothing
- * else (auth, WS, Enoki, loader, onboarding) changes.
- *
- * ── WHAT THIS FILE OWNS ─────────────────────────────────────────────────────────
- *   • The `.journal` root + `.amb` wash.
- *   • The MASTHEAD (the real logo mark + wordmark + "the journal of @handle" + a quiet date + thememark).
- *   • The no-scroll two-column `.page` grid (rail-left / rail-right).
- *   • The SELECTION engine: which account card is selected → which detail renders.
- *   • The FOOTER + the pinned CORNER LOG slot.
+ * SAME CONTRACT: props `{ home, slots, selected, presence }`. App.tsx swaps the
+ * component; nothing else (auth, WS, Enoki, loader, onboarding) changes.
  */
 import { useMemo, type ReactNode } from 'react';
 import type { HomeApi } from '../data/types';
 import type { DrawerKey } from '../components/journal/AccountDrawer';
 import { useTheme } from './theme';
-import { Wordmark } from './Wordmark';
+import { SuizeWordmark } from './Wordmark';
 
 /** The leaf-rendered content slots. */
 export interface JournalSlots {
@@ -59,7 +56,7 @@ export interface JournalShellProps {
   /** the leaf-rendered detail views + ledger + overlays. */
   slots: JournalSlots;
   /**
-   * Which account card is selected — its detail fills the right pane. The ledger
+   * Which account card is selected — its detail fills the detail panel. The ledger
    * slot is pre-wired by JournalHome with the matching `onSelect`, so the shell only
    * needs to READ the selection to choose which detail body to render.
    */
@@ -78,36 +75,50 @@ export interface JournalPresence {
   activity: boolean;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// MASTHEAD — a quiet journal masthead (wordmark + handle + a quiet date + thememark).
-// NO issue number (the fake "Issue 214" is gone). A quiet date is fine.
-// ────────────────────────────────────────────────────────────────────────────
-
-/** A quiet date line — today, journal-style ("Mon 3 Jun"). No issue number. */
-function todayLine(): string {
-  return new Date().toLocaleDateString('en-GB', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
+/** Format a USD number with cents — "11,200.00" (no leading $; the markup adds it). */
+function usd(n: number): string {
+  return n.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   });
 }
 
-export function Masthead({ handle }: { handle: string }) {
-  const { theme, toggle } = useTheme();
-  const display = handle || '…@suize';
+// ────────────────────────────────────────────────────────────────────────────
+// MASTHEAD — the v3 top bar. SUIZE wordmark + handle (mono) left; the grand total
+// ("EVERYTHING TOGETHER") + the "ALL GOOD" health pill right.
+// ────────────────────────────────────────────────────────────────────────────
+
+export function Masthead({ home }: { home: HomeApi }) {
+  const { toggle } = useTheme();
+  const { state } = home;
+  const display = state.handle || '…@suize';
+
+  // Grand total = the user's own money + both caged accounts (the dashboard sum).
+  const grand = state.totalUsd + state.spending.usd + state.investing.usd;
+  const healthy = state.healthy;
+
   return (
     <header className="masthead">
       <div className="mh__left">
-        {/* the real Suize mark — flat logo masked to var(--accent): blue in
-            light, gold in dark (accent spent once, per-theme signature). */}
-        <span className="mh__mark" aria-hidden="true" />
-        <Wordmark size="clamp(1.5rem, 3vw, 2.1rem)" />
-        <span className="mh__handle">
-          the journal of <b>{display}</b>
-        </span>
+        <SuizeWordmark />
+        <span className="mh__sep" aria-hidden="true" />
+        <span className="mh__handle2">{display}</span>
       </div>
       <div className="mh__right">
-        <span className="mh__issue">{todayLine()}</span>
+        <div className="mh__grand">
+          <span className="mh__grand-lab">Everything together</span>
+          <span className="mh__grand-num">
+            <span className="mh__grand-cur">$</span>
+            {usd(grand)}
+          </span>
+        </div>
+        <span
+          className={`mh__health ${healthy ? 'is-ok' : 'is-warn'}`}
+          title={healthy ? 'All good' : 'Needs a look'}
+        >
+          <span className="mh__health-dot" aria-hidden="true" />
+          {healthy ? 'All good' : 'Needs a look'}
+        </span>
         <button
           className="thememark"
           type="button"
@@ -115,7 +126,6 @@ export function Masthead({ handle }: { handle: string }) {
           aria-label="Toggle theme"
         >
           <i />
-          <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
         </button>
       </div>
     </header>
@@ -123,14 +133,14 @@ export function Masthead({ handle }: { handle: string }) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// The detail-pane header (eyebrow-tightened: no "01 ·"/"The", just the name).
+// The detail-panel header copy (eyebrow + sub-line) per selected account.
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Per-account pane copy — the tightened eyebrow + sub-line + capability. */
-const PANE_META: Record<DrawerKey, { eyebrow: string; name: string; sub: string }> = {
-  main: { eyebrow: 'Your currencies', name: 'Main', sub: 'Coins you hold' },
-  spend: { eyebrow: 'Spending', name: 'AI Spending', sub: 'Ask for anything' },
-  invest: { eyebrow: 'Investing', name: 'AI Investing', sub: 'Choose strategies' },
+/** Per-account panel copy — the eyebrow + sub-line. */
+const PANE_META: Record<DrawerKey, { eyebrow: string; sub: string }> = {
+  main: { eyebrow: 'Your money', sub: 'Coins you hold' },
+  spend: { eyebrow: 'Auto-pay', sub: 'Ask for anything' },
+  invest: { eyebrow: 'Auto-invest', sub: 'Choose strategies' },
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -143,8 +153,6 @@ export function JournalShell({
   selected,
   presence,
 }: JournalShellProps) {
-  const { state } = home;
-
   // The body for the selected account. Spending/Investing show an honest "turned off"
   // line when that sub account is paused (presence false), rather than the live detail.
   const meta = PANE_META[selected];
@@ -161,44 +169,18 @@ export function JournalShell({
       {/* faint ambient wash */}
       <div className="amb" aria-hidden="true" />
 
-      <Masthead handle={state.handle} />
+      <Masthead home={home} />
 
       <main className="page">
-        {/* ── LEFT RAIL — the grand total, THEN the three account cards ──
-            Whole-then-parts: one big neutral-ink number on top, the triptych of
-            cards below. A monkey scans four big numbers top-to-bottom. */}
-        <div className="rail-left">
-          {/* Grand total — "ALL YOUR MONEY, TODAY" (the hero leaf owns the label +
-              the big neutral number; this eyebrow stays a quiet mono kicker). */}
-          <section className="jsec in" id="s-balance">
-            <div className="eyebrow">
-              <b>All your money, today</b>
-            </div>
-            {slots.balanceHero}
-          </section>
+        {/* ── ACCOUNT GRID — the triptych: Main + the two AI cards. Each card
+            selects (fills the panel below) + drags (move money). */}
+        <section id="s-accounts" aria-label="Your accounts">
+          {slots.accountLedger}
+        </section>
 
-          {/* Your accounts — the triptych: Main + the two AI cards. */}
-          <section className="jsec in" id="s-accounts">
-            <div className="eyebrow">
-              <b>Your accounts</b>
-            </div>
-            <p className="lede">
-              Your money lives in three accounts. Drag one card onto another to move
-              money; tap a card to open it.
-            </p>
-            <div className="rule" />
-            {slots.accountLedger}
-            <p className="note" style={{ marginTop: 20 }}>
-              Each AI account has its own money and its own switch. Paused means
-              stopped — nothing runs until you turn it back on.{' '}
-              <span className="cy">Your main account is never touched.</span>
-            </p>
-          </section>
-        </div>
-
-        {/* ── RIGHT PANE — the SELECTED account's own detail ── */}
-        <div className="rail-right">
-          <section className="pane" id="s-detail" aria-live="polite">
+        {/* ── DETAIL PANEL — the SELECTED account's own detail, wide + below ── */}
+        <section className="panel" id="s-detail" aria-live="polite">
+          <div className="pane">
             <div className="pane__head">
               <div className="eyebrow" style={{ marginBottom: 0 }}>
                 <b>{meta.eyebrow}</b>
@@ -210,18 +192,12 @@ export function JournalShell({
             <div className="pane__body" key={selected}>
               {detailBody}
             </div>
-          </section>
-        </div>
+          </div>
+        </section>
       </main>
 
       {/* the persistent corner log widget (fixed bottom-right) */}
       {slots.cornerLog}
-
-      <footer className="foot">
-        <span>
-          Su<span className="grad">i</span>ze
-        </span>
-      </footer>
 
       {/* drag ghost + move-money popup (the drag leaf portals these here) */}
       {slots.overlays}

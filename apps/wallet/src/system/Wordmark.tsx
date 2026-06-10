@@ -17,6 +17,19 @@ export interface WordmarkProps {
   className?: string;
 }
 
+/**
+ * SuizeWordmark — the v3 masthead lockup: "SUIZE" set in 'Hashgraph Title' with an
+ * ink→blue gradient (Space Grotesk fallback). Pure CSS class (`.mh__suize`) so it
+ * clips correctly inside the `.journal` scope. The accessible label says "Suize".
+ */
+export function SuizeWordmark({ className }: { className?: string }) {
+  return (
+    <span className={className ?? 'mh__suize'} aria-label="Suize">
+      SUIZE
+    </span>
+  );
+}
+
 export function Wordmark({ size = '1.9rem', className }: WordmarkProps) {
   return (
     <span

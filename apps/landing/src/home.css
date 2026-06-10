@@ -1,0 +1,2012 @@
+/* ==========================================================================
+   SUIZE · THE AGENTIC HOME (PAY) — Phase B. The emotional core: hero +
+   leash + the pinned confirm demo + the alive activity log + the trust
+   closer. Reads the SAME token contract as theme.css (--fg / --blue-* /
+   --grad-* / --hair / --section-pad); adds NO new colour, NO new font.
+   Every motion has a prefers-reduced-motion guard. The hot word + the one
+   accent CTA + the true green/red status rows are the only blue/colour marks.
+   ========================================================================== */
+
+/* ---- the one home CTA — a TRUE FROSTED-GLASS pane in the same family as the
+   iOS notification + activity-log cards. Owner pivot: the old fill read like a
+   solid blue gradient (saturated --grad-accent EDGE + a blue radial wash); now it
+   is a genuinely TRANSLUCENT pane — a low-alpha neutral fill so the page shows
+   THROUGH the blur, a soft light/neutral edge (NOT a painted blue border), a
+   crisp inner top highlight, a fine grain, and a gentle shadow. It keeps only a
+   FAINT blue tint (an inner glow + a hairline of accent on the top edge) so the
+   primary still reads "hot" — but as a pane of lit glass, not a blue chip. The
+   ::before is the lit top edge + highlight pool; the ::after carries the grain.
+   Soft-rounded radius (~12px) is kept; the brackets are GONE. -------------- */
+.sx-cta {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 15px 26px;
+  border-radius: var(--r-13);
+  /* a soft LIGHT/neutral glass edge (border-box) with only a whisper of blue —
+     replaces the fully-saturated --grad-accent border that made it read solid. */
+  border: 1px solid transparent;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  color: var(--fg);
+  /* translucent frosted fill (padding-box) + a soft light glass edge (border-box)
+     in ONE paint — the background subtly shows through the blur, like the convo /
+     notification cards. NO solid blue gradient anywhere. */
+  background:
+    linear-gradient(var(--cta-fill), var(--cta-fill)) padding-box,
+    var(--cta-edge) border-box;
+  /* a strong frost so the pane clearly reads as a sheet of glass, not a flat tint */
+  -webkit-backdrop-filter: blur(26px) saturate(1.7) brightness(1.05);
+  backdrop-filter: blur(26px) saturate(1.7) brightness(1.05);
+  box-shadow:
+    /* the soft outward GLOW (a wide, low-negative-spread bloom so it blooms FREELY
+       past the button — this is the halo the hover grows). NOT clipped: a box-shadow
+       on the element is never clipped by the element's own overflow. */
+    0 14px 40px -18px var(--blue-glow),
+    /* the gentle grounding shadow that seats the glass on the page */
+    0 8px 22px -14px var(--cta-shadow),
+    /* the crisp inner TOP highlight — the lit top edge of the glass */
+    inset 0 1px 0 0 var(--cta-hi),
+    /* a soft bottom sheen so the pane looks curved, not flat */
+    inset 0 -10px 22px -16px var(--cta-sheen);
+  cursor: pointer;
+  /* NO overflow:hidden — that was clipping the outward glow to a hard rectangle
+     (owner: "the shadow constricted to their div, cut"). The grain/highlight
+     pseudo-layers clip themselves to the rounded shape via border-radius:inherit,
+     so the button stays unclipped and the bloom escapes on all four edges. */
+  /* one smooth, premium curve for the whole hover (lift + glow + frost
+     brighten); the press (:active) overrides transform with a crisp, snappier
+     curve so the click still feels tactile, not mushy. */
+  transition:
+    box-shadow 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    background 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    -webkit-backdrop-filter 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    backdrop-filter 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* the lit top edge (a faint accent hairline) + a soft neutral highlight pool so
+   the pane looks curved + lit rather than flat. The accent line is the ONLY blue
+   here and it is barely-there — the glass reads neutral. */
+.sx-cta::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(
+      120% 80% at 24% -12%,
+      rgba(255, 255, 255, 0.5),
+      rgba(255, 255, 255, 0) 58%
+    );
+  opacity: 0.9;
+  pointer-events: none;
+}
+/* the GRAIN texture — a fine static noise overlay (an inline SVG fractal-noise
+   data URI) at very low opacity so the glass reads as a real frosted, textured
+   surface rather than a flat fill. Soft-light keeps it subtle in both themes. */
+.sx-cta::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  /* the grain clips to the rounded shape via its OWN border-radius + overflow —
+     a LOCAL clip on this layer only, so the button itself stays overflow-visible
+     and its glow box-shadow blooms freely (this replaces the button-wide
+     overflow:hidden that was cutting the halo). */
+  overflow: hidden;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 120px 120px;
+  mix-blend-mode: soft-light;
+  opacity: 0.14;
+  pointer-events: none;
+}
+/* ---- the glass tokens (shared by .sx-cta + .sx-nav__cta). LIGHT: a translucent
+   white pane with a faint blue tint; the edge is a soft light gradient that only
+   hints blue. DARK: a translucent cool-ink pane; the edge is a low-alpha light
+   gradient. Both stay clearly SEE-THROUGH so the background reads through. ---- */
+:root {
+  /* a confident, READABLE frost: enough fill that the white label stays
+     high-contrast, still clearly translucent so the page shows through the blur. */
+  --cta-fill: rgba(244, 249, 255, 0.42);
+  --cta-fill-hov: rgba(247, 251, 255, 0.58);
+  /* a crisp lit-glass rim: a bright top-left edge fading through a whisper of
+     blue to a soft light bottom-right — reads as a curved glass edge, not a
+     painted blue border. */
+  --cta-edge: linear-gradient(
+    150deg,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(150, 190, 240, 0.5) 48%,
+    rgba(255, 255, 255, 0.78) 100%
+  );
+  --cta-hi: rgba(255, 255, 255, 0.85);
+  --cta-sheen: rgba(255, 255, 255, 0.42);
+  --cta-shadow: rgba(20, 50, 96, 0.24);
+}
+:root[data-theme='dark'] {
+  /* deep cool-ink glass, still see-through; the fill carries the label contrast
+     against the dark page while the blur keeps it glassy. */
+  --cta-fill: rgba(40, 64, 100, 0.4);
+  --cta-fill-hov: rgba(50, 80, 122, 0.54);
+  --cta-edge: linear-gradient(
+    150deg,
+    rgba(200, 222, 252, 0.5) 0%,
+    rgba(122, 196, 255, 0.42) 48%,
+    rgba(190, 214, 246, 0.28) 100%
+  );
+  --cta-hi: rgba(220, 235, 255, 0.3);
+  --cta-sheen: rgba(170, 200, 240, 0.14);
+  --cta-shadow: rgba(0, 0, 0, 0.52);
+}
+.sx-cta:hover {
+  /* a gentle lift out of the page — the pane rises toward the light */
+  transform: translateY(-1px);
+  background:
+    linear-gradient(var(--cta-fill-hov), var(--cta-fill-hov)) padding-box,
+    var(--cta-edge) border-box;
+  /* the frost BRIGHTENS as it lifts — the glass catches more light (still
+     glassy: the page keeps showing through the blur, no solid fill). */
+  -webkit-backdrop-filter: blur(26px) saturate(1.95) brightness(1.12);
+  backdrop-filter: blur(26px) saturate(1.95) brightness(1.12);
+  box-shadow:
+    /* the outward GLOW blooms WIDE + SOFT past all four edges — a low negative
+       spread + a wide blur so the halo clearly extends beyond the button instead
+       of being pulled back to its box. This is the now-unclipped bloom. */
+    0 22px 64px -16px var(--blue-glow),
+    0 0 34px -6px var(--accent-glow),
+    /* the grounding shadow deepens a touch as it lifts */
+    0 12px 30px -14px var(--cta-shadow),
+    /* a faint accent edge-ring (the lit rim catching the god-ray) */
+    0 0 0 1px var(--accent-hair),
+    /* the inner top highlight strengthens — the curved-glass lit edge */
+    inset 0 1px 0 0 var(--cta-hi),
+    inset 0 -11px 24px -15px var(--cta-sheen);
+}
+/* the press — crisp + tactile: it settles down past rest, snappier curve so
+   the click reads, then springs back on release via the base transition. */
+.sx-cta:active {
+  transform: translateY(0);
+  transition:
+    transform 0.08s cubic-bezier(0.4, 0, 0.6, 1),
+    box-shadow 0.08s cubic-bezier(0.4, 0, 0.6, 1);
+  box-shadow:
+    /* the glow settles in close on press — tactile, the halo pulls back toward
+       the box as the glass is pushed down. */
+    0 10px 30px -18px var(--blue-glow),
+    0 6px 16px -14px var(--cta-shadow),
+    0 0 0 1px var(--accent-hair),
+    inset 0 1px 0 0 var(--cta-hi),
+    inset 0 -6px 16px -14px var(--cta-sheen);
+}
+.sx-cta:focus-visible {
+  outline: none;
+  box-shadow:
+    0 18px 44px -26px var(--blue-glow),
+    0 0 0 2px var(--accent-hair),
+    inset 0 1px 0 0 var(--cta-hi);
+}
+.sx-cta--lg {
+  padding: 18px 34px;
+  border-radius: var(--r-13);
+  font-size: 13px;
+}
+/* reduced-motion: keep the frost-brighten + glow (those are light, not motion)
+   but drop the lift/press translate so nothing moves (LAW: respect the pref). */
+@media (prefers-reduced-motion: reduce) {
+  .sx-cta,
+  .sx-cta:hover,
+  .sx-cta:active {
+    transform: none;
+  }
+}
+
+/* the ghost — a quiet ink link that grows a gradient underline */
+.sx-ghost {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fg-2);
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+.sx-ghost::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 2px;
+  border-radius: var(--r-1);
+  background: var(--grad-accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sx-ghost:hover {
+  color: var(--fg);
+}
+.sx-ghost:hover::after {
+  transform: scaleX(1);
+}
+
+/* ==========================================================================
+   STATION 0 · HERO (the surface) — the giant line floats left-of-center in
+   open water; a single frosted notification banner drifts to the right (NOT a
+   phone). No box, no veil — the dive shows through. ~60% negative space.
+   ========================================================================== */
+.sx-station--hero {
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  padding: clamp(120px, 14vw, 180px) 0 clamp(72px, 10vw, 120px);
+}
+.sx-station--hero .sx-station__inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
+  gap: clamp(32px, 5vw, 80px);
+  align-items: center;
+  width: 100%;
+}
+@media (max-width: 960px) {
+  .sx-station--hero .sx-station__inner {
+    grid-template-columns: 1fr;
+    gap: clamp(40px, 8vw, 64px);
+  }
+}
+.sx-hero__claim {
+  min-width: 0;
+}
+.sx-hero__eyebrow {
+  margin-bottom: 28px;
+}
+/* the giant serif line — break the maxw cage to ~88vw editorial scale */
+.sx-hero__h1 {
+  font-family: var(--serif);
+  font-size: clamp(3rem, 8.2vw, 7rem);
+  font-weight: 500;
+  line-height: 1.0;
+  letter-spacing: -0.03em;
+  color: var(--fg);
+  margin: 0;
+}
+/* the hot verb `spend` — clipped to --grad-hot, a slow drift; the dimension is
+   the gradient, the hue stays one blue (the only colour mark on the line). */
+.sx-hero__accent {
+  background: var(--grad-hot);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  background-size: 170% 170%;
+  /* NO filter here — a drop-shadow on a -webkit-background-clip:text element
+     re-rasterizes the gradient into a visible rectangular box (Chrome). The
+     clipped gradient fill carries the accent on its own. */
+  animation: sx-hot-drift 9s ease-in-out infinite alternate;
+}
+@keyframes sx-hot-drift {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
+}
+/* `run` — depth-treated: fog-dimmed, graded darker into the deep (not a clip,
+   a recede). It reads a half-step further down in the water than the rest. */
+.sx-hero__deep {
+  color: var(--fg-3);
+  -webkit-text-fill-color: var(--fg-3);
+  text-shadow: 0 2px 18px var(--scrim);
+  opacity: 0.82;
+}
+.sx-hero__sub {
+  font-family: var(--sans);
+  font-size: clamp(15px, 1.9vw, 19px);
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 32px 0 0;
+  max-width: 50ch;
+  opacity: 0;
+  transform: translateY(10px);
+}
+.sx-hero__actions {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-top: 36px;
+  opacity: 0;
+  transform: translateY(10px);
+}
+.sx-station--hero.is-revealed .sx-hero__sub,
+.sx-station--hero.is-revealed .sx-hero__actions {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sx-station--hero.is-revealed .sx-hero__sub {
+  transition-delay: 0.42s;
+}
+.sx-station--hero.is-revealed .sx-hero__actions {
+  transition-delay: 0.5s;
+}
+/* the floating notification banner — suspended in the water, gently adrift. NO
+   phone, NO device chrome. A slow bob is the only motion (shared clock-free CSS
+   keyframe; cheap). On reduced motion it sits still. */
+.sx-hero__float {
+  display: flex;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(18px);
+}
+.sx-station--hero.is-revealed .sx-hero__float {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.45s,
+    transform 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.45s;
+}
+.sx-hero__notif {
+  width: 340px;
+  max-width: 86vw;
+  animation: sx-banner-bob 7s ease-in-out infinite alternate;
+}
+@keyframes sx-banner-bob {
+  from { transform: translateY(-8px) rotate(-0.4deg); }
+  to { transform: translateY(8px) rotate(0.4deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sx-hero__float { opacity: 1; transform: none; }
+  .sx-hero__notif { animation: none; }
+  .sx-hero__accent { animation: none; }
+}
+
+/* (legacy hero chip styles below) */
+/* the honesty whisper-line under the CTAs — NO dot (LAW #1); the eyebrow tick
+   already carries the one mark. A quiet mono line floating in the water. */
+.sx-hero__chip {
+  display: block;
+  margin: 26px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  color: var(--fg-3);
+  opacity: 0;
+  transform: translateY(10px);
+}
+.sx-hero.is-revealed .sx-hero__chip {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.6s,
+    transform 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.6s;
+}
+/* SplitText wraps each line — clip it so the stagger rides up from nothing */
+.sx-splitline {
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sx-hero__chip {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ==========================================================================
+   THE NOTIFICATION CARD — the de-chromed confirm banner (LAW #3: NO phone, no
+   device, no notch, no status bar). A SHARP-cornered frosted-glass banner
+   suspended IN the water, used by the Hero (one static) + the LivingWallet.
+   ========================================================================== */
+/* the notification card — a SHARP-cornered frosted-glass banner (LAW #2/#3):
+   a macOS/iOS notification suspended IN the water, never inside a device. */
+.sx-notif {
+  position: relative;
+  border-radius: var(--r-3);
+  padding: 16px 17px 15px;
+  background: var(--notif-fill);
+  border: 1px solid var(--hair);
+  box-shadow:
+    0 30px 70px -36px rgba(6, 16, 30, 0.7),
+    inset 0 1px 0 0 var(--hair-2);
+  -webkit-backdrop-filter: blur(22px) saturate(1.25);
+  backdrop-filter: blur(22px) saturate(1.25);
+}
+:root {
+  --notif-fill: rgba(255, 255, 255, 0.55);
+}
+:root[data-theme='dark'] {
+  --notif-fill: rgba(14, 30, 52, 0.5);
+}
+/* the lit top hairline — the god-ray catching the glass edge */
+.sx-notif::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: var(--grad-accent);
+  opacity: 0.6;
+}
+.sx-notif__top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+.sx-notif__app {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-3);
+  background: var(--grad-accent);
+  color: #fff;
+}
+.sx-notif--save .sx-notif__app {
+  background: linear-gradient(135deg, var(--bull), color-mix(in srgb, var(--bull) 60%, var(--blue)));
+}
+.sx-notif__appname {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fg-2);
+}
+.sx-notif__time {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-4);
+}
+.sx-notif__title {
+  margin: 0 0 4px;
+  font-family: var(--sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.32;
+  color: var(--fg);
+}
+.sx-notif__body {
+  margin: 0 0 13px;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--fg-2);
+}
+.sx-notif__actions {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 8px;
+}
+.sx-notif__no,
+.sx-notif__yes {
+  padding: 10px 10px;
+  border-radius: var(--r-2);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    transform 0.09s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease;
+}
+.sx-notif__no {
+  color: var(--fg-2);
+  background: var(--ink-raised-2);
+  border: 1px solid var(--hair);
+}
+.sx-notif__no:hover {
+  color: var(--fg);
+}
+/* the Confirm — the SINGLE accent element on the card (sharp, gradient edge) */
+.sx-notif__yes {
+  color: var(--fg);
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--cta-fill), var(--cta-fill)) padding-box,
+    var(--grad-accent) border-box;
+  box-shadow: 0 6px 18px -8px var(--blue-glow);
+}
+.sx-notif__yes:hover {
+  filter: brightness(1.05);
+  box-shadow: 0 8px 24px -8px var(--blue-glow);
+}
+.sx-notif__yes.is-pressed,
+.sx-notif__yes:active {
+  transform: scale(0.96);
+}
+
+/* ==========================================================================
+   THE BEAT HEADER — eyebrow tick + serif head + grotesk sub. Shared by every
+   home beat (the open --section-pad rhythm gives the Awwwards breathing room).
+   ========================================================================== */
+/* the home beats consume the open editorial rhythm token (an explicit modifier
+   so it never bleeds onto /wallet etc., which keep their own rhythm) */
+.sx-section--open {
+  padding: var(--section-pad) 0;
+}
+.sx-beat-head {
+  max-width: 30ch;
+  margin: 0 0 clamp(36px, 5vw, 60px);
+}
+.sx-beat-head__title {
+  font-family: var(--serif);
+  font-size: clamp(30px, 4.4vw, 52px);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.02;
+  color: var(--fg);
+  margin: 16px 0 0;
+}
+.sx-beat-head__sub {
+  font-family: var(--sans);
+  font-size: clamp(15px, 1.7vw, 18px);
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 18px 0 0;
+  max-width: 46ch;
+}
+.sx-beat-cta {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-top: clamp(36px, 5vw, 56px);
+}
+
+/* ==========================================================================
+   STATION 2 · THE LIVING WALLET — a floating GLASSMORPHED NOTIFICATION banner
+   suspended in a god-ray shaft (consensus §5, LAW #3: NO phone, NO device, NO
+   slab). A flat sharp-cornered glass banner, tilted into 3D space, bobbing on
+   the water; tapping Confirm SINKS it toward the log below. ZERO dots.
+   ========================================================================== */
+.sx-lw {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-left: clamp(0px, 4vw, 80px);
+}
+.sx-lw__tagrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sx-lw__tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+/* the stage gives the banner room to SINK out of frame toward the ledger
+   below; perspective seats the tilt in real 3D space (a banner, not a device) */
+.sx-lw__stage {
+  position: relative;
+  width: 360px;
+  max-width: 86vw;
+  perspective: 1400px;
+}
+/* the banner: a sharp frosted-glass notification floating in the water. The
+   bob (translateY + rotateZ) + the perspective tilt (rotateY) are a cheap CSS
+   keyframe on the wrapper; the inner card keeps the blur + content crisp. */
+.sx-lw__banner {
+  position: relative;
+  transform-style: preserve-3d;
+  will-change: transform;
+  animation: sx-lw-bob 6s ease-in-out infinite alternate;
+}
+@keyframes sx-lw-bob {
+  from {
+    transform: perspective(1400px) rotateY(-10deg) translateY(-9px) rotateZ(-1.5deg);
+  }
+  to {
+    transform: perspective(1400px) rotateY(-10deg) translateY(9px) rotateZ(1.5deg);
+  }
+}
+.sx-lw__banner.is-busy {
+  pointer-events: none;
+}
+/* the shaft-reactive top hairline — a --grad-accent edge whose glow rides the
+   dive progress (driven from getDepth() via onTick, no extra rAF). It sits
+   above the card's own ::before edge as the brightening god-ray catch. */
+.sx-lw__hair {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 2px;
+  background: var(--grad-accent);
+  opacity: calc(0.4 + 0.55 * var(--shaft, 0.4));
+  filter: drop-shadow(0 0 6px var(--accent-glow));
+  z-index: 4;
+  pointer-events: none;
+}
+/* a cheap additive caustic dancing on the glass face (mix-blend:screen) — a
+   slow domain-drift of two soft radial pools, the water light on the pane */
+.sx-lw__caustic {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-3);
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.5;
+  background:
+    radial-gradient(40% 30% at 30% 22%, var(--accent-glow), transparent 70%),
+    radial-gradient(36% 26% at 72% 70%, var(--blue-glow), transparent 72%);
+  background-size: 180% 180%, 200% 200%;
+  animation: sx-lw-caustic 11s ease-in-out infinite alternate;
+  z-index: 3;
+}
+@keyframes sx-lw-caustic {
+  from { background-position: 0% 0%, 100% 100%; }
+  to { background-position: 100% 60%, 0% 30%; }
+}
+@media (max-width: 900px) {
+  .sx-lw { margin-left: 0; align-items: center; }
+  .sx-lw__tagrow { align-self: flex-start; }
+}
+/* reduced-motion / touch: a static, face-on banner — no bob, no tilt, no
+   caustic shimmer (LAW: respect prefers-reduced-motion). */
+@media (prefers-reduced-motion: reduce) {
+  .sx-lw__banner { animation: none; transform: none; }
+  .sx-lw__caustic { animation: none; opacity: 0.3; }
+}
+
+/* the speaker toggle — borderless, glyph-only (matches the theme toggle ethos) */
+.sx-snd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+.sx-snd:hover {
+  color: var(--accent);
+}
+.sx-snd.is-on {
+  color: var(--accent);
+}
+.sx-snd:focus-visible {
+  outline: none;
+  filter: drop-shadow(0 0 5px var(--accent-glow));
+}
+
+/* ==========================================================================
+   STATION 3 · THE ACTIVITY LOG — the alive ledger as floating glass LAMINAE
+   (consensus §3/§4). NO boxed card, NO outer border: each row is a thin,
+   SHARP-cornered liquid-glass pane at a slightly different Z, newest top,
+   bobbing, fading into the fog (history receding). The banner that sank from
+   STATION 2 springs into the top lamina. ZERO dots, sharp corners only.
+   ========================================================================== */
+.sx-laminae {
+  width: 100%;
+}
+.sx-logbeat {
+  max-width: 720px;
+}
+.sx-laminae__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 14px;
+}
+/* the panes stack with a little vertical breathing room — each is its own
+   floating sheet, not a divided row inside a box */
+.sx-laminae__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+/* one lamina — a sharp frosted-glass pane adrift. Newer panes (low --lam-z)
+   sit forward + clearer; older ones recede + dim into the fog. */
+.sx-lamina {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-radius: var(--r-3);
+  /* match the iOS notification's frosted-glass material so the ledger and the
+     confirm card read as one family — stronger blur + saturate, translucent
+     fill, the same lit inner edge. */
+  background: var(--lamina-fill);
+  border: 1px solid var(--ios-edge);
+  -webkit-backdrop-filter: blur(40px) saturate(1.9) brightness(1.05);
+  backdrop-filter: blur(40px) saturate(1.9) brightness(1.05);
+  box-shadow:
+    0 22px 50px -34px rgba(6, 16, 30, 0.6),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.4),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  /* the recede into fog: each older pane drifts back + dims, capped so the
+     deepest rows stay just readable */
+  opacity: calc(1 - min(0.34, var(--lam-z, 0) * 0.085));
+  transform: translateZ(0) scale(calc(1 - min(0.05, var(--lam-z, 0) * 0.013)));
+  transform-origin: top center;
+  animation: sx-lamina-bob 7s ease-in-out infinite alternate;
+  animation-delay: calc(var(--lam-z, 0) * -0.9s);
+}
+:root { --lamina-fill: rgba(255, 255, 255, 0.58); }
+:root[data-theme='dark'] { --lamina-fill: rgba(28, 34, 46, 0.5); }
+/* a faint lit top edge — the god-ray on the glass (no dots, just a hairline) */
+.sx-lamina__hair {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: var(--grad-accent);
+  opacity: 0.42;
+  pointer-events: none;
+}
+@keyframes sx-lamina-bob {
+  from { transform: translateY(-2.5px); }
+  to { transform: translateY(2.5px); }
+}
+.sx-arow__what {
+  font-family: var(--sans);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--fg);
+  min-width: 0;
+}
+.sx-arow__when {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+.sx-arow__amt {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  white-space: nowrap;
+  text-align: right;
+}
+/* TRUE STATUS ONLY — green on the saver, red tint on the kill (§2.2) */
+.sx-lamina--save .sx-arow__amt {
+  color: var(--bull);
+}
+.sx-lamina--kill .sx-arow__what {
+  color: var(--bear);
+}
+.sx-lamina--note .sx-arow__amt {
+  color: var(--fg-3);
+}
+/* the hero rows + a freshly-landed row pulse once, brighter (bloom catches
+   them). The two hero rows are the shareable green +$9.99 / red kill. */
+.sx-lamina.is-fresh {
+  animation:
+    sx-lamina-bob 7s ease-in-out infinite alternate,
+    sx-row-flash 1.2s ease 0.15s 1;
+}
+.sx-lamina--save.is-fresh {
+  animation:
+    sx-lamina-bob 7s ease-in-out infinite alternate,
+    sx-row-flash-bull 1.2s ease 0.15s 1;
+}
+.sx-lamina--kill.is-fresh {
+  animation:
+    sx-lamina-bob 7s ease-in-out infinite alternate,
+    sx-row-flash-bear 1.2s ease 0.15s 1;
+}
+@keyframes sx-row-flash {
+  0% { box-shadow: 0 0 0 1px var(--accent-hair), 0 22px 50px -30px var(--blue-glow); background: var(--accent-wash); }
+  100% { box-shadow: 0 22px 50px -34px rgba(6, 16, 30, 0.6), inset 0 1px 0 0 var(--hair-2); }
+}
+@keyframes sx-row-flash-bull {
+  0% { box-shadow: 0 0 0 1px var(--bull-edge), 0 22px 50px -28px var(--bull-edge); background: var(--bull-fill); }
+  100% { box-shadow: 0 22px 50px -34px rgba(6, 16, 30, 0.6), inset 0 1px 0 0 var(--hair-2); }
+}
+@keyframes sx-row-flash-bear {
+  0% { box-shadow: 0 0 0 1px var(--bear-edge), 0 22px 50px -28px var(--bear-edge); background: var(--bear-fill); }
+  100% { box-shadow: 0 22px 50px -34px rgba(6, 16, 30, 0.6), inset 0 1px 0 0 var(--hair-2); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sx-lamina,
+  .sx-lamina.is-fresh,
+  .sx-lamina--save.is-fresh,
+  .sx-lamina--kill.is-fresh {
+    animation: none;
+  }
+}
+
+/* the per-row "locked record" affordance — ICON-ONLY now (the words are NOT
+   repeated on every row; the meaning lives in the tooltip + the one header
+   caption). A small sharp gradient-bordered check tile, quiet until hovered. */
+.sx-lr {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-2);
+  background: var(--ink-raised);
+  /* gradient border via a padding-box/border-box mask */
+  border: 1px solid transparent;
+  background-image:
+    linear-gradient(var(--ink-raised), var(--ink-raised)),
+    var(--grad-accent);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  cursor: help;
+  opacity: 0.7;
+  transition: opacity 0.18s ease;
+}
+.sx-lamina:hover .sx-lr {
+  opacity: 1;
+}
+.sx-lr__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+/* the ONE "locked record" caption — surfaced once in the log header beside the
+   eyebrow, not on every row (owner: no need to repeat it). */
+.sx-laminae__locked {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  margin-left: 14px;
+  font-family: var(--sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fg-3);
+  cursor: help;
+  white-space: nowrap;
+}
+.sx-laminae__lockedcheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+@media (max-width: 560px) {
+  .sx-laminae__locked { display: none; }
+}
+@media (max-width: 560px) {
+  .sx-lamina {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      'what amt'
+      'when lr';
+    gap: 4px 12px;
+  }
+  .sx-arow__what { grid-area: what; }
+  .sx-arow__amt { grid-area: amt; }
+  .sx-arow__when { grid-area: when; }
+  .sx-lamina .sx-lr { grid-area: lr; justify-self: end; }
+}
+
+/* ==========================================================================
+   THE FLOATING EDITORIAL STATIONS (consensus §3 + §4) — type lives IN the
+   water. Each station is transparent over the fixed <OceanScene>: NO card, NO
+   border, NO fill behind the type. Legibility comes from the fog + generous
+   negative space (~60% empty water per screen). Replaces the boxed sx-section
+   ladder + the bento grid entirely.
+   ========================================================================== */
+.sx-station {
+  position: relative;
+  padding: clamp(120px, 18vw, 240px) 0;
+  /* NO background — the dive shows through. */
+}
+.sx-station__inner {
+  position: relative;
+  z-index: 2;
+}
+
+/* the station header — a huge serif line alone in open water. NO maxw cage on
+   the title (consensus §3): it breaks out to ~88vw editorial scale, fog visible
+   between the letters, 2–3 lines max. The eyebrow/sub keep a readable measure. */
+.sx-stationhead {
+  margin: 0 0 clamp(48px, 7vw, 88px);
+}
+.sx-stationhead__title {
+  font-family: var(--serif);
+  font-size: clamp(2.6rem, 6.6vw, 5.6rem);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.04;
+  color: var(--fg);
+  margin: 18px 0 0;
+  max-width: 14ch;
+}
+.sx-stationhead__sub {
+  font-family: var(--sans);
+  font-size: clamp(15px, 1.7vw, 18px);
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 26px 0 0;
+  max-width: 46ch;
+}
+.sx-station__cta {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-top: clamp(44px, 6vw, 72px);
+}
+
+/* ---- STATION 1 · THE LEASH — three floating depth-labels (NOT cards, NO dots,
+   NO borders, NO fills). A giant serif number drifts at a different Z, one plain
+   line beside it, a quiet note. They hang in the negative space. ---------- */
+.sx-depthlabels {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(40px, 6vw, 96px);
+  margin-top: clamp(20px, 3vw, 40px);
+}
+@media (max-width: 860px) {
+  .sx-depthlabels {
+    grid-template-columns: 1fr;
+    gap: clamp(48px, 9vw, 72px);
+    max-width: 30ch;
+  }
+}
+.sx-depthlabel {
+  position: relative;
+  /* each label sits a little deeper than the last — a Z stagger in the water */
+  padding-top: calc(var(--dl-i, 0) * clamp(0px, 3vw, 56px));
+}
+.sx-depthlabel__focal {
+  display: block;
+  font-family: var(--serif);
+  font-size: clamp(2.6rem, 5vw, 4rem);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  /* the number is fog — a quiet depth marker, dimmer than the line */
+  color: var(--fg-3);
+  opacity: 0.7;
+  margin-bottom: 18px;
+}
+.sx-depthlabel__title {
+  font-family: var(--serif);
+  font-size: clamp(20px, 2vw, 25px);
+  font-weight: 500;
+  line-height: 1.18;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  margin: 0;
+  max-width: 18ch;
+}
+.sx-depthlabel__note {
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 14px 0 0;
+  max-width: 30ch;
+}
+
+/* ---- STATION 2 · THE CONFIRM MOMENT — the live LivingWallet banner hangs in
+   the water under the head (the .sx-lw block owns the float/tilt/sink). ---- */
+.sx-confirm__floatwrap {
+  margin-top: clamp(8px, 2vw, 24px);
+}
+
+/* ---- STATION 3 · THE LOG — the ledger floats; widen the head's wrap. ---- */
+.sx-logbeat {
+  max-width: 720px;
+}
+
+/* ==========================================================================
+   STATION 4 · THE CLOSE (the floor) — the honesty payload + the locked 2-line
+   close title + the slow trust marquee drifting in the fog + the final sharp
+   CTA + the one bridge to CHARGE. No box anywhere; centred in deep water.
+   ========================================================================== */
+.sx-station--close {
+  text-align: center;
+}
+.sx-station__marquee {
+  position: relative;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  margin-bottom: clamp(56px, 8vw, 104px);
+}
+.sx-station__track {
+  display: inline-flex;
+  white-space: nowrap;
+  will-change: transform;
+  animation: sx-marquee 32s linear infinite;
+}
+.sx-station__marquee:hover .sx-station__track {
+  animation-play-state: paused;
+}
+.sx-station__mitem {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--sans);
+  font-size: clamp(13px, 1.5vw, 16px);
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.sx-station__msep {
+  margin: 0 26px;
+  color: var(--fg-4);
+}
+@keyframes sx-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.sx-close__inner {
+  position: relative;
+  z-index: 2;
+}
+.sx-close__benefit {
+  font-family: var(--serif);
+  font-size: clamp(24px, 3.2vw, 38px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  margin: 0 0 12px;
+}
+.sx-close__custody {
+  font-family: var(--mono);
+  font-size: clamp(12px, 1.4vw, 14px);
+  letter-spacing: 0.01em;
+  /* the load-bearing honesty line — readable, not a whisper */
+  color: var(--fg-2);
+  margin: 0;
+}
+.sx-close__closerwrap {
+  margin-top: clamp(80px, 12vw, 160px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+}
+.sx-close__title {
+  font-family: var(--serif);
+  font-size: clamp(3rem, 8vw, 7rem);
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
+  color: var(--fg);
+  margin: 0;
+  max-width: 16ch;
+}
+.sx-close__bridge {
+  margin-top: 4px;
+}
+.sx-close__cta {
+  justify-content: center;
+  margin-top: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-station__track {
+    animation: none;
+    transform: translateX(0);
+  }
+}
+
+/* ==========================================================================
+   THE REBUILT HOME BEATS — asymmetric, off-grid, choreographed. These REPLACE
+   the centered station rhythm above for the PAY home (the Businesses page still
+   uses the .sx-station / .sx-stationhead / .sx-depthlabels chassis above).
+   ========================================================================== */
+
+/* ---- BEAT 1 · THE TWO POTS — the leash made CONCRETE + GLASSY. Two frosted
+   balance cards side by side (YOUR money Suize never touches vs the capped AGENT
+   pot the AI spends from) joined by a two-headed flow arrow (top up → / ← pull
+   back) so the relationship reads instantly: I keep my money; the agent only gets
+   a capped pot I control. The cards wear the SAME frosted material as the iOS
+   notification + the activity-log laminae (blur+saturate+brightness, the lit top
+   hairline, the --ios-edge border) so they belong to one glass family. The 3
+   owner-locked trust points sit below as a quiet supporting line. The amounts are
+   the USER's OWN illustrative funds, NOT prices. The cards carry NO motion of
+   their own — only the shared <Reveal scrub> drives entrance (reduced-motion safe). */
+.sx-balancebeat {
+  text-align: center;
+  padding: clamp(96px, 14vw, 200px) 0;
+}
+.sx-balancebeat__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.sx-balancebeat__head {
+  max-width: 100%;
+}
+.sx-balancebeat__title {
+  font-family: var(--serif);
+  font-size: clamp(2.2rem, 5.2vw, 4.2rem);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.04;
+  color: var(--fg);
+  margin: 18px 0 0;
+  text-wrap: balance;
+}
+.sx-balancebeat__sub {
+  max-width: 52ch;
+  margin: 16px auto 0;
+  font-size: clamp(15px, 1.5vw, 18px);
+  line-height: 1.5;
+  color: var(--fg-2);
+  text-wrap: balance;
+}
+.sx-balances {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: clamp(14px, 2.4vw, 28px);
+  margin-top: clamp(44px, 6vw, 72px);
+  width: 100%;
+}
+/* a single pot card — a FROSTED GLASS panel in the same family as the iOS
+   notification + the log laminae: a translucent fill, strong blur+saturate, a lit
+   inner top edge + a soft outer shadow. Left-aligned inside, centered as a set. */
+.sx-pot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 7px;
+  flex: 1 1 280px;
+  max-width: 340px;
+  padding: clamp(24px, 2.8vw, 34px);
+  border-radius: var(--r-16);
+  border: 1px solid var(--ios-edge);
+  background: var(--lamina-fill, var(--ink-raised));
+  -webkit-backdrop-filter: blur(40px) saturate(1.9) brightness(1.05);
+  backdrop-filter: blur(40px) saturate(1.9) brightness(1.05);
+  box-shadow:
+    0 26px 60px -38px rgba(6, 16, 30, 0.6),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.4),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+/* the lit top hairline — the same god-ray catch the notification cards wear, so
+   the pots sit in the same glass family. */
+.sx-pot::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  border-radius: 16px 16px 0 0;
+  background: var(--grad-accent);
+  opacity: 0.5;
+  pointer-events: none;
+}
+/* the AGENT pot is the leashed, CAPPED pot — it wears the accent edge + a soft
+   accent wash so the "this is the bounded one" reads at a glance. */
+.sx-pot--agent {
+  border-color: var(--accent-hair);
+  background:
+    linear-gradient(180deg, var(--accent-wash), transparent 70%),
+    var(--lamina-fill, var(--ink-raised));
+}
+.sx-pot--agent::before {
+  opacity: 0.7;
+}
+/* the "Hard cap" marker — a tiny accent chip pinned top-right of the agent pot;
+   it names the on-chain physics (balance = the hard cap) without jargon. */
+.sx-pot__cap {
+  position: absolute;
+  top: clamp(14px, 1.6vw, 18px);
+  right: clamp(14px, 1.6vw, 18px);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  padding: 4px 8px;
+  border-radius: var(--r-6);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-hair);
+}
+.sx-pot__label {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.sx-pot__amount {
+  font-family: var(--serif);
+  font-size: clamp(2rem, 4vw, 2.9rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--fg);
+  margin-top: 2px;
+}
+.sx-pot--agent .sx-pot__amount {
+  color: var(--accent);
+}
+.sx-pot__note {
+  margin-top: 4px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--fg-2);
+  max-width: 26ch;
+}
+
+/* the FLOW CONNECTOR between the two pots — the relationship made visual. A
+   two-headed arrow (top stroke flows YOUR → AGENT = top up; bottom stroke flows
+   AGENT → YOUR = pull back) over the text caption. It self-centers between the
+   cards; on the stacked mobile layout it rotates to vertical. */
+.sx-balances__flow {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 0 clamp(2px, 0.8vw, 10px);
+  color: var(--accent);
+}
+.sx-balances__arrows {
+  width: clamp(48px, 5vw, 64px);
+  height: auto;
+  flex: 0 0 auto;
+}
+.sx-balances__flowlabel {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  color: var(--fg-3);
+  /* the caption must render IN FULL — the flow column is narrow (sized to the
+     SVG between the two pots), so a `nowrap` label was being clipped to
+     'anytim'. Let it wrap to a tidy, balanced ~2 lines on a comfortable
+     measure instead of forcing one over-wide line into a squeezed column. */
+  white-space: normal;
+  text-wrap: balance;
+  width: max-content;
+  max-width: 14ch;
+  text-align: center;
+}
+
+/* the 3 owner-locked TRUST POINTS — a quiet supporting line under the cards (NOT
+   the headline). A single centered row of small chips divided by gradient ticks. */
+.sx-balances__points {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: clamp(16px, 3vw, 40px);
+  margin-top: clamp(40px, 5vw, 60px);
+}
+.sx-balances__point {
+  position: relative;
+  font-family: var(--sans);
+  font-size: clamp(13px, 1.4vw, 15px);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+.sx-balances__point + .sx-balances__point::before {
+  content: '';
+  position: absolute;
+  left: calc(-1 * clamp(8px, 1.5vw, 20px));
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 1.1em;
+  background: var(--grad-accent);
+  opacity: 0.5;
+}
+.sx-balancebeat__cta {
+  margin-top: clamp(44px, 6vw, 72px);
+}
+@media (max-width: 720px) {
+  .sx-balances {
+    flex-direction: column;
+    align-items: center;
+  }
+  .sx-pot {
+    width: 100%;
+    max-width: 420px;
+    flex: 1 1 auto;
+  }
+  /* stacked: the arrow rotates so it points down ↓ / up ↑ between the cards */
+  .sx-balances__flow {
+    flex-direction: row;
+    gap: 12px;
+  }
+  .sx-balances__arrows {
+    transform: rotate(90deg);
+  }
+}
+@media (max-width: 480px) {
+  .sx-balances__points {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .sx-balances__point + .sx-balances__point::before {
+    display: none;
+  }
+}
+
+/* ---- BEAT 2 · THE CONFIRM MOMENT — asymmetric: quiet copy left, the iOS
+   notification → confirm → receipt sequence right. NO headline (a UI moment). */
+.sx-confirm2 {
+  padding: clamp(96px, 14vw, 200px) 0;
+}
+.sx-confirm2__inner {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  align-items: center;
+  column-gap: clamp(32px, 6vw, 96px);
+}
+.sx-confirm2__copy {
+  min-width: 0;
+}
+/* the "books the flight … waits for your thumb" line — an ELEGANT flowing
+   subtitle, NOT a hyper-compacted serif box. The old 20ch cage on a ~125-char
+   string forced a tall, bloated stack. A calmer serif size, a wider measure, and
+   relaxed leading let it read as one graceful 2–3 line block. `balance` keeps the
+   line lengths even. */
+.sx-confirm2__sub {
+  font-family: var(--serif);
+  font-size: clamp(20px, 2.3vw, 30px);
+  font-weight: 500;
+  line-height: 1.34;
+  letter-spacing: -0.015em;
+  color: var(--fg);
+  margin: 20px 0 0;
+  max-width: 34ch;
+  text-wrap: balance;
+}
+.sx-confirm2__copy .sx-station__cta { margin-top: clamp(32px, 4vw, 48px); }
+.sx-confirm2__demo {
+  display: flex;
+  justify-content: center;
+}
+@media (max-width: 900px) {
+  .sx-confirm2__inner {
+    grid-template-columns: 1fr;
+    row-gap: clamp(40px, 8vw, 64px);
+  }
+}
+
+/* ---- BEAT 3 · THE ACTIVITY LOG — asymmetric: big serif head bleeds left, the
+   ledger offset right. ---- */
+.sx-logbeat2 {
+  padding: clamp(96px, 14vw, 200px) 0;
+}
+.sx-logbeat2__inner {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  align-items: center;
+  column-gap: clamp(32px, 6vw, 88px);
+}
+.sx-logbeat2__head { min-width: 0; }
+.sx-logbeat2__title {
+  font-family: var(--serif);
+  font-size: clamp(2.4rem, 4.6vw, 4rem);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.0;
+  color: var(--fg);
+  margin: 18px 0 0;
+  max-width: 14ch;
+}
+.sx-logbeat2__sub {
+  font-family: var(--sans);
+  font-size: clamp(15px, 1.7vw, 18px);
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 22px 0 0;
+  max-width: 42ch;
+}
+.sx-logbeat2__head .sx-station__cta { margin-top: clamp(32px, 4vw, 48px); }
+.sx-logbeat2__log { min-width: 0; }
+@media (max-width: 900px) {
+  .sx-logbeat2__inner {
+    grid-template-columns: 1fr;
+    row-gap: clamp(40px, 8vw, 64px);
+  }
+}
+
+/* ==========================================================================
+   THE AUTHENTIC iOS NOTIFICATION → CONFIRM → RECEIPT (ConfirmSequence).
+   Correct iOS corner radius (~20px), an app-icon + "Suize" + "now" row, a
+   title/body hierarchy, a frosted material, a subtle drop shadow. NOT a phone,
+   NOT a skewed rectangle. Morphs into a compact receipt on Confirm.
+   ========================================================================== */
+.sx-cs {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+}
+.sx-cs__tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  align-self: center;
+}
+.sx-cs__stage {
+  width: 384px;
+  max-width: 92vw;
+  /* keep a stable height across notif↔receipt so the layout never jumps */
+  min-height: 168px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* the iOS notification card — authentic radius + frosted material + soft shadow.
+   No tilt, no rotate, no skew. */
+.sx-ios {
+  width: 100%;
+  border-radius: 20px;
+  padding: 15px 16px;
+  background: var(--ios-fill);
+  border: 1px solid var(--ios-edge);
+  /* stronger frosted material — more blur + saturate + a brightness lift so the
+     card reads as real glass sitting over the page (the blueprint grid + fog
+     bend through it). */
+  -webkit-backdrop-filter: blur(44px) saturate(2) brightness(1.06);
+  backdrop-filter: blur(44px) saturate(2) brightness(1.06);
+  box-shadow:
+    0 24px 60px -22px var(--ios-shadow),
+    0 2px 8px -2px var(--ios-shadow),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.5),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  transform-origin: center;
+}
+:root {
+  /* a touch more translucent so the frosted blur is the thing you read, not a
+     near-opaque fill */
+  --ios-fill: rgba(255, 255, 255, 0.6);
+  --ios-edge: rgba(255, 255, 255, 0.9);
+  --ios-shadow: rgba(20, 50, 96, 0.34);
+}
+:root[data-theme='dark'] {
+  --ios-fill: rgba(28, 34, 46, 0.52);
+  --ios-edge: rgba(160, 180, 210, 0.2);
+  --ios-shadow: rgba(0, 0, 0, 0.6);
+}
+:root[data-theme='dark'] .sx-ios {
+  box-shadow:
+    0 18px 50px -22px var(--ios-shadow),
+    inset 0 1px 0 0 rgba(236, 239, 243, 0.08);
+}
+.sx-ios__top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 9px;
+}
+/* the app icon — an iOS-style rounded-square (squircle-ish) gradient tile */
+.sx-ios__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-8);
+  background: var(--grad-accent);
+  color: #fff;
+  flex: 0 0 auto;
+  box-shadow: 0 2px 6px -2px var(--blue-glow);
+}
+.sx-ios__app {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--fg);
+  text-transform: uppercase;
+}
+.sx-ios__time {
+  margin-left: auto;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-3);
+}
+.sx-ios__title {
+  margin: 0 0 3px;
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.32;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+.sx-ios__msg {
+  margin: 0 0 14px;
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.42;
+  color: var(--fg-2);
+}
+.sx-ios__actions {
+  display: grid;
+  grid-template-columns: 1fr 1.25fr;
+  gap: 9px;
+}
+.sx-ios__no,
+.sx-ios__yes {
+  padding: 11px 12px;
+  border-radius: 11px;
+  font-family: var(--sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    transform 0.09s ease,
+    filter 0.2s ease,
+    background 0.2s ease;
+}
+.sx-ios__no {
+  color: var(--fg-2);
+  background: var(--ios-btn-quiet);
+  border: 0;
+}
+:root { --ios-btn-quiet: rgba(10, 27, 46, 0.06); }
+:root[data-theme='dark'] { --ios-btn-quiet: rgba(236, 239, 243, 0.08); }
+.sx-ios__no:hover { color: var(--fg); }
+/* the Confirm — the single accent: a solid gradient fill (iOS prominent action) */
+.sx-ios__yes {
+  color: #fff;
+  border: 0;
+  background: var(--grad-accent);
+  box-shadow: 0 6px 18px -8px var(--blue-glow);
+}
+.sx-ios__yes:hover { filter: brightness(1.05); }
+.sx-ios__yes.is-pressed { transform: scale(0.96); }
+
+/* the RECEIPT state — the card collapses to a compact paid confirmation */
+.sx-ios.is-receipt {
+  /* a tighter, calmer pane once paid */
+  background: var(--ios-fill);
+}
+.sx-ios__receipt {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 2px 0 2px;
+}
+.sx-ios__rcheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  color: #fff;
+  background: linear-gradient(135deg, var(--bull), color-mix(in srgb, var(--bull) 64%, var(--blue)));
+  box-shadow: 0 4px 12px -4px var(--bull-edge);
+}
+.sx-ios__rbody {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.sx-ios__rtitle {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+.sx-ios__rmeta {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+
+/* ==========================================================================
+   THE TRUSTED-BY BAND — a clear, higher-contrast "Trusted by thousands" title
+   above the seamless wordmark marquee. The title is a true social-proof heading
+   (NOT a faint whisper); the names below read as logo wordmarks.
+   ========================================================================== */
+.sx-trusted {
+  margin-bottom: clamp(56px, 8vw, 104px);
+}
+/* the social-proof heading — owner: "still too light, we don't feel the
+   section." Make it a REAL section heading with weight: a bigger serif line in
+   full --fg ink, plus a small uppercase mono kicker above the names so the band
+   reads as a deliberate "Trusted by thousands" moment, not a faint label. */
+.sx-trusted__title {
+  font-family: var(--serif);
+  font-size: clamp(26px, 4vw, 44px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  text-transform: none;
+  /* full-ink, high-contrast — the heading you feel */
+  color: var(--fg);
+  text-align: center;
+  margin: 0 0 clamp(32px, 5vw, 52px);
+}
+
+/* ==========================================================================
+   THE SEAMLESS INFINITE MARQUEE — two identical tracks translating -50% on a
+   loop = NO visible reset seam (the duplicate-track technique). Masked edges.
+   Names styled as logo wordmarks: a stronger ink, tighter tracking, no caps.
+   ========================================================================== */
+.sx-marquee {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+}
+/* the trusted band's marquee has its own bottom spacing on the wrapper, so the
+   marquee itself drops its legacy margin here. */
+.sx-trusted .sx-marquee { margin-bottom: 0; }
+.sx-marquee__track {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  will-change: transform;
+  animation: sx-marquee-loop 28s linear infinite;
+}
+.sx-marquee:hover .sx-marquee__track {
+  animation-play-state: paused;
+}
+/* the names as logo wordmarks — serif, sentence case, a stronger ink so the
+   social proof reads clearly (the old faint --fg-3 uppercase ticker was washed
+   out). They dim slightly until hovered, like a real logo wall. */
+.sx-marquee__item {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--serif);
+  font-size: clamp(17px, 2vw, 24px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--fg-2);
+  opacity: 0.78;
+  transition: opacity 0.24s ease, color 0.24s ease;
+}
+.sx-marquee:hover .sx-marquee__item {
+  opacity: 0.6;
+}
+.sx-marquee__item:hover {
+  opacity: 1;
+  color: var(--fg);
+}
+.sx-marquee__sep {
+  margin: 0 clamp(20px, 2.6vw, 40px);
+  color: var(--accent);
+  opacity: 0.55;
+}
+/* -50% because the track is the item list duplicated exactly once: when the
+   first copy has scrolled fully off, the second copy is pixel-identical at the
+   start position — no jump. */
+@keyframes sx-marquee-loop {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sx-marquee__track { animation: none; }
+}
+
+/* ==========================================================================
+   SCROLL-SCRUBBED REVEALS — the home beats opt into <Reveal scrub>, where GSAP
+   ScrollTrigger SCRUBS opacity/translate to the element's own scroll position
+   (owner: "the appearing animations are still not scroll-induced"). GSAP writes
+   the transform/opacity inline, so .sx-scrub carries NO opacity:0 of its own
+   (that would fight the tween's from-state). Under reduced motion the scrub path
+   in ui.jsx never runs — the element is left fully visible. This guard keeps it
+   visible even if a tween never attaches (no-JS / hydration edge).
+   ========================================================================== */
+.sx-scrub {
+  /* a hint to the compositor while the scrubbed transform animates */
+  will-change: opacity, transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sx-scrub {
+    opacity: 1 !important;
+    transform: none !important;
+    will-change: auto;
+  }
+}
+
+/* ==========================================================================
+   BEAT 2 · THE CAPABILITIES — the AI-wallet POWERS, editorial + DELIBERATELY
+   ASYMMETRIC (owner: "vary the layout, not a boring equal grid" + "more chaos").
+   A wide FEATURED memory card on the left with a small conversational memory
+   chip; the remaining four powers stagger off-grid down a narrower right column.
+   Reads the same token contract — no new colour, no new font. NO tech names.
+   ========================================================================== */
+.sx-caps {
+  padding: clamp(96px, 14vw, 200px) 0;
+}
+/* the head must read WIDE — the old 22ch cage + the big serif starved the long
+   title ("An AI that knows you, acts for you, and pays.") so it wrapped nearly
+   one word per line. Give it room (the eyebrow keeps its own measure) and let
+   `balance` split it cleanly across 1–2 lines. */
+.sx-caps__head {
+  max-width: 46ch;
+  margin: 0 0 clamp(44px, 6vw, 80px);
+}
+/* the title needs a GENEROUS measure so `balance` can split the long line into
+   2 long even rows (a tight cage makes balance over-break it into many short
+   lines / one word per line). A calmer clamp keeps it from forcing early breaks. */
+.sx-caps__title {
+  font-family: var(--serif);
+  font-size: clamp(1.9rem, 3.2vw, 2.9rem);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.08;
+  color: var(--fg);
+  margin: 16px 0 0;
+  max-width: 26ch;
+  text-wrap: balance;
+}
+/* the off-grid split: a wide feature + a narrower stagger column, intentionally
+   uneven so it doesn't read as a 2-up grid. */
+.sx-caps__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  align-items: start;
+  column-gap: clamp(28px, 5vw, 72px);
+}
+@media (max-width: 900px) {
+  .sx-caps__layout {
+    grid-template-columns: 1fr;
+    row-gap: clamp(32px, 7vw, 56px);
+  }
+}
+
+/* the FEATURED memory card — the "it remembers you" power. A real editorial
+   panel: a frosted glass surface (the same family as the notification + laminae)
+   so "owned by you" reads as a tangible, ownable thing, not a bullet. It sits a
+   touch lower than the column head for an asymmetric baseline. */
+.sx-caps__feature {
+  position: relative;
+  padding: clamp(26px, 3vw, 40px);
+  border-radius: var(--r-4);
+  background: var(--lamina-fill, var(--ink-raised));
+  border: 1px solid var(--ios-edge);
+  -webkit-backdrop-filter: blur(40px) saturate(1.8) brightness(1.04);
+  backdrop-filter: blur(40px) saturate(1.8) brightness(1.04);
+  box-shadow:
+    0 30px 70px -40px rgba(6, 16, 30, 0.6),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.4);
+  /* a slight downward offset = an intentional, uneven baseline vs the column */
+  margin-top: clamp(0px, 2vw, 28px);
+}
+/* the lit top edge — the same god-ray hairline the notification wears */
+.sx-caps__feature::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: var(--grad-accent);
+  opacity: 0.5;
+}
+.sx-caps__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+.sx-caps__badgeicon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-5);
+  color: #fff;
+  background: var(--grad-accent);
+  box-shadow: 0 2px 6px -2px var(--blue-glow);
+}
+.sx-caps__ftitle {
+  font-family: var(--serif);
+  font-size: clamp(26px, 3.2vw, 40px);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+  color: var(--fg);
+  margin: 0;
+  max-width: 16ch;
+}
+.sx-caps__fbody {
+  font-family: var(--sans);
+  font-size: clamp(14px, 1.6vw, 17px);
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 16px 0 0;
+  max-width: 40ch;
+}
+/* the conversational MEMORY chip — a tiny chat pair proving it remembers
+   something concrete (your passport / aisle seat). Quiet, frosted bubbles. */
+.sx-caps__memo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: clamp(22px, 3vw, 32px);
+  padding-top: clamp(20px, 2.5vw, 28px);
+  border-top: 1px solid var(--hair);
+}
+.sx-caps__memline {
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 9px 13px;
+  border-radius: var(--r-12);
+  max-width: 30ch;
+}
+.sx-caps__memline--you {
+  align-self: flex-end;
+  text-align: right;
+  color: var(--fg);
+  background: var(--ink-raised-2);
+  border: 1px solid var(--hair);
+  border-bottom-right-radius: 3px;
+}
+.sx-caps__memline--ai {
+  align-self: flex-start;
+  color: var(--fg);
+  border: 1px solid transparent;
+  border-bottom-left-radius: 3px;
+  background:
+    linear-gradient(var(--cta-fill), var(--cta-fill)) padding-box,
+    var(--grad-accent) border-box;
+}
+
+/* the stagger COLUMN — the remaining four powers, off-grid: each card is indented
+   a different amount (by --cap-i) so the column zig-zags instead of marching in a
+   straight line. A small mono index + a left gradient tick anchor each. */
+.sx-caps__col {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(28px, 4vw, 48px);
+  /* the column starts a little higher than the feature for an uneven top edge */
+  margin-top: clamp(0px, 1vw, 12px);
+}
+.sx-caps__card {
+  position: relative;
+  padding-left: 20px;
+}
+/* the zig-zag indent: every 2nd card pushes right so the column doesn't march in
+   a straight line (owner: "more chaos") — driven by position, not a custom prop,
+   so it needs no mod()/round() math support. */
+.sx-caps__col .sx-caps__card:nth-child(even) {
+  margin-left: clamp(0px, 3vw, 44px);
+}
+.sx-caps__card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: var(--r-1);
+  background: var(--grad-accent);
+  opacity: 0.55;
+}
+.sx-caps__cardidx {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--fg-4);
+  margin-bottom: 8px;
+}
+.sx-caps__ctitle {
+  font-family: var(--serif);
+  font-size: clamp(19px, 2vw, 25px);
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  line-height: 1.14;
+  color: var(--fg);
+  margin: 0;
+}
+.sx-caps__cbody {
+  font-family: var(--sans);
+  font-size: clamp(13.5px, 1.5vw, 16px);
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 10px 0 0;
+  max-width: 38ch;
+}
+/* mobile: the column un-zig-zags (the indents would crowd a 1-col layout) */
+@media (max-width: 900px) {
+  .sx-caps__card { margin-left: 0; }
+}
+
+/* ==========================================================================
+   PER-KIND NOTIFICATION ACCENTS (ConfirmSequence) — the iOS SHELL stays one
+   family; only the app-icon tile re-tints per `kind` so the deck reads as a
+   SMART ASSISTANT with range (smart-find / subscription / cancel / order / save),
+   not a single canned card. `tone: 'save'` cards wear the green saver family.
+   ========================================================================== */
+.sx-ios--save .sx-ios__icon,
+.sx-ios--save.sx-ios .sx-ios__icon {
+  background: linear-gradient(135deg, var(--bull), color-mix(in srgb, var(--bull) 60%, var(--blue)));
+  box-shadow: 0 2px 6px -2px var(--bull-edge);
+}
+/* cancel reads as a "stop / remove" — a calmer, cooler tile (still in-family) */
+.sx-ios--cancel .sx-ios__icon {
+  background: linear-gradient(135deg, var(--fg-3), color-mix(in srgb, var(--fg-3) 55%, var(--blue)));
+}
+/* a hair of differentiation for the buy-side kinds so they don't all look
+   identical — order/subscription/smart-find keep brand blue but vary the angle */
+.sx-ios--order .sx-ios__icon { background: linear-gradient(115deg, var(--blue), var(--accent)); }
+.sx-ios--subscription .sx-ios__icon { background: linear-gradient(160deg, var(--accent), var(--blue-deep, var(--blue))); }
+
+/* ==========================================================================
+   ACTIVITY-LOG PER-KIND LEADING ICON — a small monochrome tile at the head of
+   each lamina's `what`, tinted per kind, so the ledger reads as differentiated
+   actions (a saver, a spend, a kill, a note) rather than a uniform list. Matches
+   the ConfirmSequence kind language (one family across notification → log).
+   ========================================================================== */
+.sx-arow__what {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.sx-arow__kind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: var(--r-6);
+  color: var(--accent);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-hair);
+}
+.sx-arow__kind--save {
+  color: var(--bull);
+  background: var(--bull-fill);
+  border-color: var(--bull-edge);
+}
+.sx-arow__kind--kill {
+  color: var(--bear);
+  background: var(--bear-fill);
+  border-color: var(--bear-edge);
+}
+.sx-arow__kind--note {
+  color: var(--fg-3);
+  background: var(--ink-raised-2);
+  border-color: var(--hair);
+}
+@media (max-width: 560px) {
+  /* on the stacked mobile lamina the icon would push the text grid — keep it but
+     shrink the gap so the `what` cell still fits its area. */
+  .sx-arow__what { gap: 8px; }
+  .sx-arow__kind { width: 20px; height: 20px; }
+}

@@ -7,67 +7,113 @@ import { CopyButton, IconBack } from '../ui'
 // (Claude, Claude Code, Codex, a custom loop) deploys with copy-paste clarity.
 // Every block is real (it uses the LIVE VITE_DEPLOY_API_URL) and copyable.
 //
-// The contract is intentionally dumb: one open HTTP endpoint, no SDK, no auth.
+// The contract is gasless but AUTHENTICATED: every deploy carries a fresh
+// signature, so there is no anonymous deploy path (an unsigned POST /deploy 401s).
 //   gasless  — the backend's service wallet pays SUI (gas) + WAL (storage);
-//   keyless  — the agent signs nothing and holds nothing;
-//   open     — no API key today (payments will gate it later, see SPEC §12).
+//   signed   — fetch GET /auth/nonce, sign buildDeployAuthMessage(nonce), POST
+//              { nonce, signature }; the backend recovers the signer AS the owner;
+//   open     — no API key / waitlist today (payments will gate it later, SPEC §12).
+//
+// The clean agent path is the Suize MCP (OAuth) — it handles the Google login +
+// per-deploy signing for the agent, so the tool call stays one line. Below we show
+// the raw signed HTTP flow (what MCP does under the hood) honestly.
 // ============================================================================
 
-// The public-facing base in the copy text. We show https://deploy.suize.io as
-// the canonical prod host when VITE_DEPLOY_API_URL is still the local default,
-// so the snippets read as production-real; otherwise we echo the configured URL
+// The public-facing base in the copy text. We show https://api.suize.io (the
+// real backend host) when VITE_DEPLOY_API_URL is still the local default, so
+// the snippets read as production-real; otherwise we echo the configured URL
 // verbatim (so a custom backend host flows straight into every block).
 const API = DEPLOY_API_URL.startsWith('http://localhost')
-  ? 'https://deploy.suize.io'
+  ? 'https://api.suize.io'
   : DEPLOY_API_URL
 
-const CURL = `# tar your built static output (the dist/ contents, not its parent)
+const CURL = `# ILLUSTRATIVE — a deploy is SIGNED, and curl can't produce a Sui
+# personal-message signature on its own. Use the TS / MCP path below to sign;
+# this shows the WIRE SHAPE the signed POST must carry. A plain unsigned POST
+# (no nonce/signature) is rejected with 401 — there is no anonymous deploy.
+
+# 1. tar your built static output (the dist/ contents, not its parent)
 tar -cf site.tar -C ./dist .
 
-# POST it — gasless, keyless, no API key. \`name\` labels the deploy;
-# \`owner\` is OPTIONAL best-effort attribution (a Sui address).
+# 2. fetch a fresh single-use nonce
+curl -sS ${API}/auth/nonce            # -> { "nonce": "…" }
+
+# 3. sign "Suize Deploy\\ndeploy\\n::<nonce>" as a base64 personal-message
+#    signature. The signature can only come from an Enoki / zkLogin (Google
+#    login) signer — the dashboard, or the Suize MCP (OAuth, coming). curl
+#    alone can't produce it; see the TS / MCP path to sign in code.
+
+# 4. POST the tar with { nonce, signature } — gasless; the backend recovers the
+#    signer AS the on-chain owner (\`name\` just labels the deploy).
 curl -sS -X POST ${API}/deploy \\
   -F "name=my-site" \\
   -F "site.tar=@site.tar;type=application/x-tar" \\
-  -F "owner=0xYOUR_SUI_ADDRESS_OPTIONAL"
+  -F "nonce=THE_NONCE_FROM_STEP_2" \\
+  -F "signature=BASE64_SIG_FROM_STEP_3"
 
-# -> { "url": "https://<sub>.deploy.suize.io", "siteId": "0x…",
+# -> { "url": "https://<sub>.suize.site", "siteId": "0x…",
 #      "subdomain": "<sub>", "version": 1, "digest": "0x…" }`
 
-const TS = `// Node 18+ / Bun. No SDK — one fetch against the open endpoint.
-// \`site.tar\` is a tarball of your BUILT static output (pre-built; no build step).
+const TS = `// Node 18+ / Bun. A deploy is gasless but SIGNED: fetch a nonce, sign the
+// canonical deploy message, POST { nonce, signature }. The backend recovers the
+// signer AS the on-chain owner. \`site.tar\` is your BUILT static output (no build step).
 import { readFileSync } from 'node:fs'
 
 const API = '${API}'
 
+// \`signer\` is an Enoki / zkLogin (Google login) signer — the sole signer.
+// The Suize MCP (OAuth, coming) provisions this Enoki signer per-user: it runs
+// the Google login + per-deploy signing for the agent, so the agent never holds
+// any secret. The zkLogin address it signs from becomes the on-chain owner.
+declare const signer: { signPersonalMessage(m: Uint8Array): Promise<{ signature: string }> }
+
+// 1. fetch a fresh single-use nonce
+const { nonce } = await fetch(\`\${API}/auth/nonce\`).then(r => r.json())
+
+// 2. sign the canonical deploy message: \`Suize Deploy\\ndeploy\\n::<nonce>\`
+//    (this is buildDeployAuthMessage(nonce) from @suize/shared — keep it EXACT)
+const message = new TextEncoder().encode(\`Suize Deploy\\ndeploy\\n::\${nonce}\`)
+const { signature } = await signer.signPersonalMessage(message)
+
+// 3. POST the tar with { nonce, signature }
 const tar = readFileSync('site.tar') // e.g. \`tar -cf site.tar -C dist .\`
 const form = new FormData()
 form.append('name', 'my-site')
 form.append('site.tar', new Blob([tar], { type: 'application/x-tar' }), 'site.tar')
-// form.append('owner', '0xYOUR_SUI_ADDRESS') // optional attribution
+form.append('nonce', nonce)
+form.append('signature', signature) // base64 personal-message signature
 
 const res = await fetch(\`\${API}/deploy\`, { method: 'POST', body: form })
 if (!res.ok) throw new Error(\`deploy failed: \${res.status} \${await res.text()}\`)
 
 const { url, siteId, version, digest } = await res.json()
-console.log('live at', url) // https://<sub>.deploy.suize.io`
+console.log('live at', url) // https://<sub>.suize.site`
 
 const MCP = `{
   "name": "deploy_site",
-  "description": "Deploy a built static site to Suize Deploy (Walrus-backed, gasless + keyless). Returns the live URL. Each deploy is immutable: a re-deploy mints a fresh site at a new URL.",
+  "description": "Deploy a built static site to Suize Deploy (Walrus-backed, gasless). Returns the live URL. Each deploy is immutable: a re-deploy mints a fresh site at a new URL. The deploy is signed — the Suize MCP (OAuth) handles the Google login + signing for you.",
   "inputSchema": {
     "type": "object",
     "required": ["name", "siteTarBase64"],
     "properties": {
       "name": { "type": "string", "description": "Human label for the deploy" },
-      "siteTarBase64": { "type": "string", "description": "base64 of a .tar of the built static output (dist/ contents)" },
-      "owner": { "type": "string", "description": "Optional Sui address for attribution" }
+      "siteTarBase64": { "type": "string", "description": "base64 of a .tar of the built static output (dist/ contents)" }
     }
   }
 }
 
-// Reference handler (Node/Bun) — wire into your MCP server's tool dispatch:
-async function deploy_site({ name, siteTarBase64, owner }) {
+// Reference handler (Node/Bun) — wire into your MCP server's tool dispatch. The
+// deploy is gasless but SIGNED: fetch a nonce, sign the canonical message, POST
+// { nonce, signature }. \`signer\` is the Enoki / zkLogin (Google login) signer the
+// Suize MCP (OAuth, coming) provisions per-user — the sole signer, so the agent
+// holds no secret. The zkLogin address it signs from becomes the on-chain owner.
+// So the agent just calls the tool and the Google login + per-deploy signing happen
+// for it.
+async function deploy_site({ name, siteTarBase64 }, signer) {
+  const { nonce } = await fetch('${API}/auth/nonce').then(r => r.json())
+  const message = new TextEncoder().encode(\`Suize Deploy\\ndeploy\\n::\${nonce}\`)
+  const { signature } = await signer.signPersonalMessage(message)
+
   const form = new FormData()
   form.append('name', name)
   form.append(
@@ -75,9 +121,10 @@ async function deploy_site({ name, siteTarBase64, owner }) {
     new Blob([Buffer.from(siteTarBase64, 'base64')], { type: 'application/x-tar' }),
     'site.tar',
   )
-  if (owner) form.append('owner', owner)
+  form.append('nonce', nonce)
+  form.append('signature', signature)
   const res = await fetch('${API}/deploy', { method: 'POST', body: form })
-  if (!res.ok) throw new Error(await res.text())
+  if (!res.ok) throw new Error(await res.text()) // unsigned/invalid -> 401
   return await res.json() // { url, siteId, subdomain, version, digest }
 }`
 
@@ -153,16 +200,21 @@ export const AgentsView = ({ onBack }: { onBack: () => void }) => (
     </div>
 
     <p className="dx-lede" style={{ marginTop: '-8px', marginBottom: 28 }}>
-      Any agentic system — Claude, Claude Code, Codex, a custom loop — presses a
-      static site to the permanent web with a single HTTP call. No SDK, no key,
-      no signature. The galleys below are live against this backend.
+      Any agentic system — Claude, Claude Code, Codex, a custom loop — deploys a
+      static site to the permanent web over HTTP. It's gasless (the backend pays
+      SUI + WAL) but signed: every deploy carries a fresh signature, so there's no
+      anonymous deploy. The clean path is the Suize MCP (OAuth, coming), which
+      handles the login + signing for the agent. The examples below are live.
     </p>
 
     <div className="dx-panel">
       <h2 className="dx-panel__title">The contract</h2>
       <p className="dx-hint" style={{ marginTop: 0 }}>
-        One open HTTP endpoint. Send a built static site as a tarball, get back a
-        live URL. There is no SDK to install and no key to provision.
+        Send a built static site as a tarball with a fresh signature, get back a
+        live URL. Auth is one round-trip: <code>GET /auth/nonce</code> → sign{' '}
+        <code>buildDeployAuthMessage(nonce)</code> → POST with{' '}
+        <code>nonce</code> + <code>signature</code>. The backend recovers the
+        signer and uses it AS the on-chain owner; an unsigned/invalid POST 401s.
       </p>
       <div className="dx-rows" style={{ marginTop: 16 }}>
         <div className="dx-row">
@@ -175,7 +227,13 @@ export const AgentsView = ({ onBack }: { onBack: () => void }) => (
         <div className="dx-row">
           <span className="dx-row__k">Body</span>
           <span className="dx-row__v">
-            <code>multipart: name + site.tar (+ owner?)</code>
+            <code>multipart: name + site.tar + nonce + signature</code>
+          </span>
+        </div>
+        <div className="dx-row">
+          <span className="dx-row__k">Auth</span>
+          <span className="dx-row__v">
+            <code>base64 personal-message sig over deploy::nonce</code>
           </span>
         </div>
         <div className="dx-row">
@@ -187,21 +245,22 @@ export const AgentsView = ({ onBack }: { onBack: () => void }) => (
       </div>
       <div className="dx-tags">
         <span className="dx-tag is-bull">Gasless</span>
-        <span className="dx-tag is-bull">Keyless</span>
+        <span className="dx-tag is-bull">Signed</span>
         <span className="dx-tag">Open · no API key today</span>
       </div>
       <p className="dx-hint">
-        The backend's service wallet pays SUI (gas) + WAL (storage); your agent
-        signs nothing and holds nothing. <code>owner</code> is optional
-        attribution only. Payments will gate this route later — for now it's
-        open.
+        The backend's service wallet pays SUI (gas) + WAL (storage), so the agent
+        holds no funds — but it does sign: a deploy proves ownership with a
+        nonce-fresh signature (Google login → a Suize wallet → sign the nonce).
+        The hosted <b>Suize MCP (OAuth)</b> does this for the agent end-to-end —
+        it's the clean path. Payments will gate this route later; for now it's open.
       </p>
     </div>
 
     <Block
       title="curl"
       lang="shell"
-      hint="Tar a built folder and POST it. Drop the snippet straight into a shell."
+      hint="Illustrative — a deploy needs a signature curl can't produce. Shows the wire shape; sign in the TS / MCP path."
       copyLabel="Copy curl"
       code={CURL}
     />
@@ -222,7 +281,10 @@ export const AgentsView = ({ onBack }: { onBack: () => void }) => (
           Hand any agentic system a <code>deploy_site</code> tool pointed at this
           API. Add it to your MCP server's tool list, then tell{' '}
           <b>Claude Code / Codex</b>:{' '}
-          <i>"deploy this built site with the deploy_site tool."</i>
+          <i>"deploy this built site with the deploy_site tool."</i> The hosted{' '}
+          <b>Suize MCP (OAuth, coming)</b> provisions the signer per-user, so the
+          login + per-deploy signing happen for the agent — this handler shows what
+          it does under the hood.
         </>
       }
       copyLabel="Copy MCP tool spec"

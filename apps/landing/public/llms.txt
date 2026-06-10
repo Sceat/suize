@@ -1,0 +1,130 @@
+# Suize — the payment rail for AI agents on Sui
+
+> Suize lets any business charge payments or subscriptions to any AI agent, in
+> USDC on Sui — and lets a human give their AI a capped, non-custodial balance
+> to spend from. If you are an agent reading this, this file tells you what is
+> real today, how to get paid, and how to pay.
+
+Suize is deterministic payment rails, not an AI. The backend ships no agent,
+no chat, no inference; it never emits a number that lands in a transaction and
+it never signs an owner transaction. Status: pre-launch, Sui TESTNET phase —
+the rail contract is written and unit-tested but NOT yet published on-chain.
+No "live on mainnet" claim is made here; no real funds sit behind unaudited
+code.
+
+## The two faces (everything is one of these)
+
+1. CHARGE — the open rail (the Stripe half). Any agent that can pay USDC on
+   Sui can pay a Suize merchant — one-off or subscription — with nothing
+   Suize-specific on the payer side. Suize takes 2%, inline at settlement,
+   emitted in the on-chain receipt event (visible, never hidden). No KYB.
+2. PAY — the consumer side (the Revolut half). A human funds an on-chain USDC
+   Account for their AI: the deposit IS the hard spend cap, withdraw/kill is
+   an instant on-chain act, and every action leaves a verifiable trace. The
+   conversational AI wallet app on top of this is ROADMAP — the on-chain rail
+   underneath is what exists.
+
+## The rail — four on-chain verbs (`account.move`)
+
+- `spend(account, amount, payee, memo)` — owner-signed direct send. FREE, no
+  fee, full amount to the payee.
+- `charge(account, config, merchant, amount, memo)` — one-off merchant charge
+  from a funded Account. 2% inline.
+- `charge_subscription(account, config, sub_id, amount, clock)` — recurring
+  charge; permissionless to trigger but leashed by on-chain terms (fixed
+  payee + per-period cap + Clock). 2% inline.
+- `pay(merchant_account, config, coin, memo)` — one-off from ANY raw payer;
+  no Suize Account needed. The open door for external agents. 2% inline.
+
+Every merchant-paid verb emits a receipt event with the fee visible. The
+contract is written and tested but UNPUBLISHED — there is no live package id
+yet, so no Suize payment settles on-chain today. Treat this section as the
+contract you will integrate against, not a live endpoint.
+
+## How to get paid (merchants)
+
+Return HTTP 402 from your endpoint — "pay X USDC to <merchant address> via
+Suize" — carrying a Suize pay-link. 402-shaped, x402-compatible by design;
+Suize does not run an x402 facilitator (none exists live on Sui). Proof of
+payment is the on-chain receipt event from `pay()`/`charge()` — key "is it
+paid?" off that receipt; a raw transfer emits none. No KYB, no onboarding
+gate. The drop-in merchant snippet/SDK is in development (roadmap).
+
+## How to pay (agents)
+
+- You hold your own Sui wallet + USDC: build the `pay(merchant, coin, memo)`
+  transaction against the rail package, sign with your own key, submit.
+  Permissionless — no Suize account, no Suize SDK. (Available once the rail
+  package publishes.)
+- You cannot build a Sui transaction: the merchant's 402 carries a pay-link
+  to a Suize-hosted confirm page — hand it to your user; one tap settles.
+- Your user funded a Suize Account for you: charges are signed by the OWNER's
+  local zkLogin session, gated by client-side confirm dials (confirm-each by
+  default; auto-under-$X / full-auto only if the user switched them on).
+  Subscriptions, once approved by the user, renew silently.
+- Optional developer integration (in development): a LOCAL MCP whose
+  `suize_pay` tool acts as the 402 client — reads the 402, checks the confirm
+  dial, signs with the local session, settles. A dev tool, not a consumer
+  product. There is NO remote/hosted MCP connector.
+
+## Custody (exact, no marketing)
+
+Fully non-custodial — the user's keys never leave their machine. Sign-in is
+Google zkLogin; the user's local session is the only signer of owner
+transactions; the Suize backend never signs one and never holds the key.
+There is NO `set_agent`, NO delegated agent key, NO on-chain agent identity —
+you, the agent, hold no key at all. Honest caveat: the funded Account is
+delegated-spend (v1 has no payee allow-list), bounded by the deposit (hard
+cap), the verifiable receipt trail, and a one-tap on-chain kill (`withdraw` /
+`cancel_subscription`). Delegated-spend risk, not custody risk.
+
+## How to care for your user (required behavior)
+
+You spend your user's real money. Hold to these:
+
+- Respect the confirm dials. Confirm-each is the default; only go faster if
+  the user explicitly set auto-under-$X or full-auto.
+- Never exceed the funded balance. The chain enforces the cap; do not attempt
+  payments you know will fail or drain the Account.
+- Flag unknown or unexpected payees before paying. v1 has no payee
+  allow-list — your judgment is the soft guard on top of the hard cap.
+- Surface the receipt. After paying, show the user the on-chain receipt (tx
+  digest, amount, the visible fee). Lead with proof.
+- Respect the kill. The user can withdraw the balance or cancel a
+  subscription on-chain at any time. If a payment fails for that reason,
+  stop — do not retry, do not route around it. Tell the user.
+- Say "autonomy you switch on," never "fully autonomous." The user is always
+  in control.
+
+## Real today vs roadmap (honest ledger)
+
+REAL today (testnet):
+
+- Deploy by Suize — POST a built static site → stored on Walrus → an
+  immutable on-chain Site object → live at `https://<id>.suize.site`, every
+  byte hash-verified at serve time. Proven end-to-end: Suize's own landing
+  ships through it. HTTP contract: `GET /auth/nonce` → signed
+  `POST /deploy` at https://api.suize.io (agent snippets on the dashboard).
+  Pricing model: $0.50 one-off per deploy, plus an optional $19.99/mo
+  subscription for custom domains + auto-renewed Walrus storage — billing
+  settles on the rail and activates when the rail publishes; today deploys
+  are auth-gated, not billed.
+- Crash by Suize — a live BTC up/down game on Sui TESTNET with gasless
+  Google-zkLogin play. Testnet only; no real funds.
+
+ROADMAP (not built or not live — do not assume):
+
+- The conversational consumer AI wallet (the PAY app's chat layer).
+- The on-chain publish of the rail (`account.move`), then mainnet.
+- The merchant 402 snippet/SDK as a published package.
+- The local MCP `suize_pay` / `suize_deploy` developer tools.
+- The subscription relayer (the recurring-charge trigger).
+- Merchant discovery/recommendation to PAY users.
+
+## Links
+
+- Home: https://suize.io
+- Deploy dashboard + agent HTTP contract: https://deploy.suize.io
+- Deploy API host: https://api.suize.io
+- Crash (testnet): https://crash.suize.io
+- This file: https://suize.io/llms.txt

@@ -87,13 +87,29 @@ export function MainAccountView({ home }: MainAccountViewProps) {
   if (isEmpty) {
     return (
       <div className="pane__scroll">
-        <p className="curr__empty">No coins yet. Add funds to get started.</p>
+        {/* editorial header even when empty, so the ledger reads as "your money" */}
+        <div className="curr__head">
+          <span className="pane__name">What you are holding</span>
+          <span className="curr__count">No coins yet</span>
+        </div>
+        <p className="curr__empty">No coins yet. Add money to get started.</p>
       </div>
     );
   }
 
+  // Honest count of the kinds of coin this ledger represents (all three tiers).
+  const kinds = knownShown.length + pinnedUnknown.length + collapsedUnknown.length;
+
   return (
     <div className="pane__scroll">
+      {/* ── editorial header — the one serif title + an honest count ───────── */}
+      <div className="curr__head">
+        <span className="pane__name">What you are holding</span>
+        <span className="curr__count tnum">
+          {kinds} kind{kinds === 1 ? '' : 's'} of coin
+        </span>
+      </div>
+
       <div className="curr">
         {/* 1 — KNOWN coins (not pinnable). */}
         {knownShown.map((c) => (
@@ -134,10 +150,12 @@ export function MainAccountView({ home }: MainAccountViewProps) {
 }
 
 /**
- * One coin row — brand/neutral disc + symbol/name + balance/USD. Unknown coins
- * (`!c.known`) carry an "unverified" tag, render USD as "—" (never a fake $0.00),
- * and show a Pin / PinOff toggle. Known coins keep the existing "soon" markers and
- * have NO pin control (they're always shown).
+ * One coin row — v3 ledger line: brand/neutral disc → coin NAME (Space Grotesk) +
+ * a sub-amount (Martian Mono) → a dotted leader → the USD value, right-aligned in
+ * BLUE Martian Mono (money is always blue). Unknown coins (`!c.known`) carry an
+ * "unverified" tag, render an honest "no price" line instead of a fabricated USD
+ * figure, and show a Pin / PinOff toggle. Known coins keep the existing "soon"
+ * markers and have NO pin control (they're always shown).
  */
 function CurrencyRow({
   c,
@@ -155,19 +173,30 @@ function CurrencyRow({
       </span>
       <span className="curr__meta">
         <span className="curr__sym">
-          {c.sym}
+          {c.name}
           {c.known && c.displayOnly ? <span className="curr__soon">soon</span> : null}
           {!c.known ? <span className="curr__tag">unverified</span> : null}
         </span>
-        <span className="curr__name">{c.name}</span>
-      </span>
-      <span className="curr__amt">
-        <span className="ui">
-          {uiAmount(c.ui)}
-          {c.decimalsUnknown ? <span className="curr__raw"> raw</span> : null}
+        <span className="curr__name tnum">
+          {c.decimalsUnknown ? (
+            <>
+              {uiAmount(c.ui)} {c.sym}
+              <span className="curr__raw">raw</span>
+            </>
+          ) : (
+            `${uiAmount(c.ui)} ${c.sym}`
+          )}
         </span>
-        {/* Unknown coins have no honest price — show "—", never a fabricated $0.00. */}
-        <span className="usd">{c.known ? usd(c.usd) : '—'}</span>
+      </span>
+      <span className="curr__lead" aria-hidden="true" />
+      <span className="curr__amt">
+        {/* Money is BLUE. Unknown coins have no honest price — say so plainly,
+            never a fabricated $0.00. */}
+        {c.known ? (
+          <span className="curr__usd tnum">{usd(c.usd)}</span>
+        ) : (
+          <span className="curr__noprice">No price yet</span>
+        )}
       </span>
       {onTogglePin ? (
         <button

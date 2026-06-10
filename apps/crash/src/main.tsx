@@ -10,13 +10,14 @@ import '@mysten/dapp-kit/dist/index.css'
 import { Analytics } from '@vercel/analytics/react'
 import { App } from './App'
 import './styles.css'
-import { RPC_URL } from './config'
+import { CRASH_NETWORK, RPC_URL } from './config'
 import { setup_enoki } from './enoki'
 
 // dapp-kit builds the network client itself from { network, url }. No sui client
 // class or URL helper imported here (avoids the @mysten/sui 2.x client reshuffle).
+// CRASH_NETWORK is the documented testnet pin (LOCKED #11) — never env-driven.
 const { networkConfig } = createNetworkConfig({
-  testnet: { network: 'testnet', url: RPC_URL },
+  testnet: { network: CRASH_NETWORK, url: RPC_URL },
 })
 
 const queryClient = new QueryClient()
@@ -43,7 +44,7 @@ if (
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
+      <SuiClientProvider networks={networkConfig} defaultNetwork={CRASH_NETWORK}>
         {/* autoConnect restores the previous session (incl. zkLogin) silently. */}
         <WalletProvider autoConnect>
           <App />

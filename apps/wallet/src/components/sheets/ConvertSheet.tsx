@@ -252,7 +252,8 @@ export function ConvertSheet({ currencies, onClose }: ConvertSheetProps) {
                 minWidth: 0,
                 fontFamily: 'var(--mono)',
                 fontSize: 18,
-                color: toAmtUi > 0 ? 'var(--ink)' : 'var(--ink-3)',
+                // money figure → blue when there's a real quoted amount; muted at $0.
+                color: toAmtUi > 0 ? 'var(--blue-deep)' : 'var(--ink-3)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
               }}

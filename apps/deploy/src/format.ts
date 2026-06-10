@@ -27,6 +27,10 @@ export const fmt_bytes = (bytes: number | null | undefined): string => {
   return `${trimmed} ${units[u]}`
 }
 
+// Native USDC base units (6 decimals) -> "$0.50" / "$19.99". Display ONLY —
+// every on-chain amount comes from the backend quote / @suize/shared consts.
+export const fmt_usdc = (units: number): string => `$${(units / 1e6).toFixed(2)}`
+
 // A file count -> a plain integer string, or "—" when genuinely absent
 // (null / undefined / non-finite / negative). A present, real 0 stays "0".
 export const fmt_count = (n: number | null | undefined): string => {

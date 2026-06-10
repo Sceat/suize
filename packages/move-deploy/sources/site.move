@@ -40,6 +40,14 @@ public struct Site has key {
     /// sha256 of the manifest blob bytes — the worker re-hashes for serve-time
     /// integrity.
     manifest_hash: vector<u8>,
+    /// Sui object id of the Walrus `Blob` OBJECT holding the quilt. Distinct
+    /// from `quilt_id` (the blob CONTENT id, which cannot be extended): this is
+    /// what storage-extension calls target for auto-renewal.
+    quilt_blob_object: ID,
+    /// Sui object id of the Walrus `Blob` OBJECT holding the manifest. Distinct
+    /// from `manifest_blob_id` (the blob CONTENT id); the storage-extension
+    /// target for the manifest blob.
+    manifest_blob_object: ID,
     /// Always 1 in the MVP (immutable deploys); reserved for a future updatable
     /// "project" model.
     version: u64,
@@ -84,6 +92,8 @@ public fun create_site(
     quilt_id: String,
     manifest_blob_id: String,
     manifest_hash: vector<u8>,
+    quilt_blob_object: ID,
+    manifest_blob_object: ID,
     size_bytes: u64,
     file_count: u64,
     ctx: &mut TxContext,
@@ -97,6 +107,8 @@ public fun create_site(
         quilt_id,
         manifest_blob_id,
         manifest_hash,
+        quilt_blob_object,
+        manifest_blob_object,
         version: 1,
         size_bytes,
         file_count,
@@ -138,6 +150,14 @@ public fun manifest_hash(self: &Site): vector<u8> {
     self.manifest_hash
 }
 
+public fun quilt_blob_object(self: &Site): ID {
+    self.quilt_blob_object
+}
+
+public fun manifest_blob_object(self: &Site): ID {
+    self.manifest_blob_object
+}
+
 public fun version(self: &Site): u64 {
     self.version
 }
@@ -177,6 +197,8 @@ fun test_create_site_happy_path_shares_site_and_emits_event() {
             string::utf8(b"quilt-abc"),
             string::utf8(b"blob-xyz"),
             b"\x01\x02\x03",
+            object::id_from_address(@0xB1),
+            object::id_from_address(@0xB2),
             1024,
             7,
             scenario.ctx(),
@@ -204,6 +226,8 @@ fun test_create_site_happy_path_shares_site_and_emits_event() {
         assert!(cap.cap_site_id() == object::id(&site), 6);
         assert!(site.size_bytes() == 1024, 8);
         assert!(site.file_count() == 7, 9);
+        assert!(site.quilt_blob_object() == object::id_from_address(@0xB1), 10);
+        assert!(site.manifest_blob_object() == object::id_from_address(@0xB2), 11);
 
         scenario.return_to_sender(cap);
         test_scenario::return_shared(site);
@@ -232,6 +256,8 @@ fun test_create_site_aborts_when_frozen() {
             string::utf8(b"quilt-abc"),
             string::utf8(b"blob-xyz"),
             b"\x01",
+            object::id_from_address(@0xB1),
+            object::id_from_address(@0xB2),
             1024,
             7,
             scenario.ctx(),

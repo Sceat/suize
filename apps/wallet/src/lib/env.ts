@@ -1,17 +1,24 @@
 /**
  * Environment + network config. Single source of truth for the wallet's wiring.
  *
- * NETWORK is TESTNET (locked) — sourced from @suize/shared, the single source of
- * truth across every app + service. Real DeepBook spot liquidity on testnet,
- * matches the Move deploy target and the backend sponsor. Auth is REAL Enoki
- * zkLogin only — there is NO fallback session: when the Enoki/Google creds are
- * absent, sign-in throws and App.tsx redirects to suize.io (see useAuth.ts).
+ * NETWORK is ENV-ONLY (owner directive 2026-06-10): VITE_SUI_NETWORK selects it
+ * ('mainnet' opts in; anything else/unset = testnet — today's default), resolved
+ * via @suize/shared's `resolveNetwork` (shared stays pure/isomorphic and never
+ * reads env itself). RPC comes from VITE_SUI_RPC_URL, falling back to the public
+ * fullnode for the selected network. Auth is REAL Enoki zkLogin only — there is
+ * NO fallback session: when the Enoki/Google creds are absent, sign-in throws
+ * and App.tsx redirects to suize.io (see useAuth.ts).
  */
 
-import { NETWORK, type SuiNetwork } from '@suize/shared';
+import { fullnodeUrl, resolveNetwork, type SuiNetwork } from '@suize/shared';
 
-export { NETWORK };
+/** The network this build targets — from env ONLY (default testnet). */
+export const NETWORK: SuiNetwork = resolveNetwork(import.meta.env.VITE_SUI_NETWORK);
 export type { SuiNetwork };
+
+/** Fullnode RPC — env override (VITE_SUI_RPC_URL), else the public fullnode for NETWORK. */
+export const RPC_URL: string =
+  (import.meta.env.VITE_SUI_RPC_URL ?? '').trim() || fullnodeUrl(NETWORK);
 
 /** Enoki API key (publishable). Empty -> Enoki registration is skipped, so sign-in throws and App.tsx redirects to suize.io (no fallback session). */
 export const ENOKI_API_KEY: string = import.meta.env.VITE_ENOKI_API_KEY ?? '';

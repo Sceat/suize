@@ -54,10 +54,16 @@ const NAME_MIN = 3;
 const NAME_MAX = 20;
 
 // Reserved / abusive labels we never hand out, independent of on-chain state.
+// The treasury/product block is load-bearing: `treasury@suize` etc. are the
+// SuiNS pointers our fee recipients resolve through — a squat here would let an
+// attacker receive rotated fees. Reserve BEFORE the parent NFT goes live.
 const BLOCKLIST = new Set([
   "admin", "root", "support", "help", "suize", "suins", "system", "official",
   "team", "mod", "moderator", "owner", "billing", "abuse", "security", "api",
   "www", "mail", "info", "contact", "null", "undefined", "anonymous",
+  // fee/treasury pointers + product names (rotation targets, never user handles)
+  "treasury", "deploy", "crash", "wallet", "pay", "charge", "merchant",
+  "fees", "fee", "rail", "relayer", "sponsor", "staging", "dev", "test",
 ]);
 
 type NameValidation =
@@ -95,12 +101,12 @@ let _enokiClient: EnokiClient | null = null;
 let _issuer: Ed25519Keypair | null = null;
 
 const suiClient = (): SuiJsonRpcClient => {
-  if (!_suiClient) _suiClient = new SuiJsonRpcClient({ url: config.suiRpcUrl, network: "testnet" });
+  if (!_suiClient) _suiClient = new SuiJsonRpcClient({ url: config.suiRpcUrl, network: config.suiNetwork });
   return _suiClient;
 };
 
 const suinsClient = (): SuinsClient => {
-  if (!_suinsClient) _suinsClient = new SuinsClient({ client: suiClient(), network: "testnet" });
+  if (!_suinsClient) _suinsClient = new SuinsClient({ client: suiClient(), network: config.suiNetwork });
   return _suinsClient;
 };
 
@@ -380,7 +386,7 @@ const issueLeafSubname = async (label: string, address: string): Promise<string>
   const allowedMoveCallTargets = [`${subNamesPkg}::subdomains::new_leaf`];
 
   const sponsored = await enokiClient().createSponsoredTransaction({
-    network: "testnet",
+    network: config.suiNetwork,
     transactionKindBytes,
     sender,
     allowedMoveCallTargets,
@@ -436,7 +442,7 @@ const buildSponsoredSetDefault = async (
   const allowedMoveCallTargets = [`${corePkg}::controller::set_reverse_lookup`];
 
   const sponsored = await enokiClient().createSponsoredTransaction({
-    network: "testnet",
+    network: config.suiNetwork,
     transactionKindBytes,
     // The VERIFIED USER is the sender (ctx.sender() binds the reverse record to
     // them); allowedAddresses pins it so this sponsored tx can only ever be

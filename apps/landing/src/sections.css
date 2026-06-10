@@ -1,0 +1,1866 @@
+/* ==========================================================================
+   SUIZE · the landing — SECTION styles. Each section has its OWN rhythm; never
+   the same block repeated. Built on theme.css tokens/primitives.
+   ========================================================================== */
+
+/* ==========================================================================
+   NAV (sticky, over-canvas) — transparent over the hero; a dark frost + lit
+   hairline fades in only after the hero scrolls past.
+   ========================================================================== */
+.sx-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px var(--pad);
+  background: transparent;
+  border-bottom: 1px solid transparent;
+  transition:
+    background 0.35s ease,
+    border-color 0.35s ease,
+    backdrop-filter 0.35s ease;
+}
+.sx-nav.is-scrolled {
+  background: var(--nav-frost);
+  backdrop-filter: saturate(140%) blur(14px);
+  -webkit-backdrop-filter: saturate(140%) blur(14px);
+  border-image: var(--rule-fade) 1;
+}
+
+/* ==========================================================================
+   RETRACTING NAV (ara.so-style) — on scroll-down the full bar CONDENSES into a
+   compact, centred floating glass ISLAND; on scroll-UP it re-expands. SCROLL IS
+   THE ONLY CONTROL: there is NO :hover / :focus-within re-expand — once the
+   island folds it stays still until you scroll up (owner: hover must not move
+   it). Rounded glass (a 10–12px radius — mirrors the re-tuned .sx-cta), a real
+   frost. The morph is the headline act and stays LUXURIOUSLY SLOW (~0.9s) on a
+   gentle ara.so-like ease so the condense ⇄ expand glides instead of snapping.
+
+   WHAT STAYS REACHABLE: because hover no longer re-expands, EVERYTHING the user
+   needs must live in the compact island — nothing is hidden. The island keeps
+   the logo + Products trigger + Pricing + the CTA + the THEME TOGGLE, all
+   present and clickable; it only tightens (snugs gaps/padding, tucks the
+   Products caret). No control is ever folded to zero.
+
+   HOW it stays SNUG (owner: no trailing whitespace after the CTA): the box lives
+   edge-to-edge expanded (centred by `margin-inline:auto`, a huge `max-width`),
+   and on retract it shrinks to `width:max-content` so the frosted pane hugs its
+   contents exactly — no empty tail. `max-width` clamps it on narrow screens. The
+   visible slide+shrink toward centre is carried by the morphing top/padding/gap/
+   radius + the auto-margins re-centring the shrunk box. Every folding lever moves
+   via width/padding/opacity/transform — NEVER `display:none`, so the whole morph
+   stays legibly animated. ONE shared ease (--nav-ease) + duration (--nav-dur).
+   Driven by .is-retracted off the SHARED Lenis clock in Nav.jsx (scroll only).
+   ========================================================================== */
+.sx-nav {
+  /* ONE shared morph clock for the whole nav. Slow + ara.so-smooth: a long
+     duration on a gentle, near-overshoot decelerating spring so the condense ⇄
+     expand is clearly, gradually visible — never a snap. */
+  --nav-dur: 0.9s;
+  --nav-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  /* edge-to-edge but centred: expanded it spans full-bleed (huge max-width); on
+     retract it shrinks to its content (width:max-content) and the auto margins
+     pull the snug pane to the middle. */
+  margin-inline: auto;
+  width: auto;
+  max-width: 2400px;
+  border-radius: 0;
+  /* the frost keeps its own short ease (it cross-fades on `is-scrolled`); every
+     morph lever rides the shared --nav-dur/--nav-ease. */
+  transition:
+    background 0.35s ease,
+    border-color 0.35s ease,
+    backdrop-filter 0.35s ease,
+    width var(--nav-dur) var(--nav-ease),
+    max-width var(--nav-dur) var(--nav-ease),
+    top var(--nav-dur) var(--nav-ease),
+    gap var(--nav-dur) var(--nav-ease),
+    padding var(--nav-dur) var(--nav-ease),
+    border-radius var(--nav-dur) var(--nav-ease),
+    box-shadow var(--nav-dur) var(--nav-ease);
+}
+.sx-nav.is-retracted {
+  /* SNUG: the pane hugs its contents (logo · Products · Pricing · CTA · toggle)
+     with NO trailing whitespace; max-width only clamps it on narrow screens.
+     The auto margins centre the shrunk box. */
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  top: 10px;
+  gap: 6px;
+  padding: 6px 8px 6px 12px;
+  /* ROUNDED glass — a 10–12px radius mirroring the re-tuned .sx-cta (slightly
+     less round than the cards; no sharp rectangle). */
+  border-radius: var(--r-12);
+  background: var(--nav-frost);
+  border: 1px solid var(--hair);
+  border-image: none;
+  backdrop-filter: saturate(150%) blur(16px);
+  -webkit-backdrop-filter: saturate(150%) blur(16px);
+  box-shadow:
+    0 18px 50px -28px var(--blue-glow),
+    0 2px 10px -6px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 0 var(--hair-2);
+}
+/* the flexible spacer pushes logo ↔ links apart in the full bar; in the island
+   it collapses to zero so the items sit together (the pane then hugs them via
+   width:max-content — no empty tail). Animating `flex-grow` is fluid because the
+   container is shrinking to content in lock-step. */
+.sx-nav__spacer {
+  flex: 1 1 auto;
+  transition: flex-grow var(--nav-dur) var(--nav-ease);
+}
+.sx-nav.is-retracted .sx-nav__spacer {
+  flex: 0 0 0;
+}
+/* the caret on the Products trigger snugs in the compact bar — it eases (max-
+   width → 0, fade) but is NEVER display:none, so the collapse is part of the
+   morph the owner sees. Products itself STAYS (only its caret tucks). */
+.sx-nav.is-retracted .dx-navlink__caret {
+  opacity: 0;
+  max-width: 0;
+  margin-left: 0;
+  transform: translateY(-1px) scale(0.6);
+}
+.sx-nav.is-retracted .dx-navlink {
+  padding: 7px 9px 8px;
+  letter-spacing: 0.06em;
+}
+.sx-nav.is-retracted .dx-navlink::after {
+  left: 9px;
+  right: 9px;
+}
+/* the island stays FULLY USABLE: because hover no longer re-expands, EVERY
+   control must stay reachable when retracted — Products + Pricing + the THEME
+   TOGGLE all remain present, sized, and clickable. They just snug their padding/
+   gap so the bar reads as one tight unit. Nothing is shed to zero anymore. */
+.sx-nav.is-retracted .sx-products-wrap,
+.sx-nav.is-retracted .sx-nav__pricing,
+.sx-nav.is-retracted .sx-themetoggle {
+  max-width: 260px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+/* the theme toggle tightens its footprint in the island but keeps its glyph +
+   tap target — it is a key control the user must still reach (scroll-only nav). */
+.sx-nav.is-retracted .sx-themetoggle {
+  width: 30px;
+  height: 30px;
+  margin-left: 2px;
+  padding: 6px;
+}
+.sx-nav.is-retracted .sx-nav__cta {
+  margin-left: 4px;
+  padding: 9px 14px;
+}
+.sx-nav.is-retracted .sx-logo {
+  margin-right: 2px;
+}
+/* every folding lever carries its OWN matching transition so expand⇄retract is
+   symmetric and fluid both ways. NOTE: the Products wrap is the positioned
+   ancestor of the .sx-mega dropdown, so it must NEVER be `overflow:hidden` —
+   that clips the open panel (the bug that "lost" the Products menu). Every item
+   stays reachable in BOTH states now (scroll-only nav), so all stay
+   overflow-visible — nothing is folded away. */
+.sx-products-wrap,
+.sx-nav__pricing,
+.sx-themetoggle {
+  max-width: 260px;
+  display: inline-flex;
+  align-items: center;
+  transition:
+    width var(--nav-dur) var(--nav-ease),
+    height var(--nav-dur) var(--nav-ease),
+    max-width var(--nav-dur) var(--nav-ease),
+    margin var(--nav-dur) var(--nav-ease),
+    padding var(--nav-dur) var(--nav-ease),
+    opacity var(--nav-dur) var(--nav-ease),
+    transform var(--nav-dur) var(--nav-ease);
+}
+.dx-navlink__caret {
+  max-width: 40px;
+  overflow: hidden;
+  transition:
+    max-width var(--nav-dur) var(--nav-ease),
+    margin var(--nav-dur) var(--nav-ease),
+    opacity var(--nav-dur) var(--nav-ease),
+    transform var(--nav-dur) var(--nav-ease);
+}
+/* the nav links container rides the morph ease so its gap shift reads as part
+   of ONE coordinated condense. (.dx-navlink + .sx-nav__cta carry their morph
+   levers on their own canonical rules below, where their hover transitions
+   already live — merged there so nothing overrides them.) */
+.sx-nav__links {
+  transition: gap var(--nav-dur) var(--nav-ease);
+}
+.sx-logo {
+  transition: margin var(--nav-dur) var(--nav-ease);
+}
+/* reduced motion — NO retract at all; the bar stays full + static. The JS never
+   sets .is-retracted under reduced motion, but we also hard-reset every lever
+   here so a stray class can never strand a control. */
+@media (prefers-reduced-motion: reduce) {
+  .sx-nav,
+  .sx-nav.is-retracted,
+  .sx-nav__spacer,
+  .sx-nav__links,
+  .sx-nav__cta,
+  .sx-logo,
+  .dx-navlink,
+  .sx-products-wrap,
+  .sx-nav__pricing,
+  .sx-themetoggle,
+  .dx-navlink__caret {
+    transition: none;
+  }
+  .sx-nav.is-retracted {
+    top: 0;
+    margin-inline: auto;
+    max-width: 2400px;
+    gap: 16px;
+    padding: 14px var(--pad);
+    border-radius: 0;
+  }
+  .sx-nav.is-retracted .sx-nav__spacer {
+    flex-grow: 1;
+  }
+  .sx-nav.is-retracted .dx-navlink__caret,
+  .sx-nav.is-retracted .sx-products-wrap,
+  .sx-nav.is-retracted .sx-nav__pricing,
+  .sx-nav.is-retracted .sx-themetoggle {
+    opacity: 1;
+    max-width: 260px;
+    margin-left: revert-layer;
+    pointer-events: auto;
+    transform: none;
+  }
+}
+
+.sx-nav__links {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.dx-navlink {
+  position: relative;
+  padding: 8px 13px 9px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  white-space: nowrap;
+  /* color hover + the morph levers (padding/letter-spacing) ride together so a
+     retract reads as ONE coordinated condense. */
+  transition:
+    color 0.18s ease,
+    padding var(--nav-dur) var(--nav-ease),
+    letter-spacing var(--nav-dur) var(--nav-ease);
+}
+.dx-navlink::after {
+  content: '';
+  position: absolute;
+  left: 13px;
+  right: 13px;
+  bottom: 3px;
+  height: 2px;
+  background: var(--grad-accent);
+  border-radius: var(--r-1);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dx-navlink:hover {
+  color: var(--fg);
+}
+.dx-navlink:hover::after {
+  transform: scaleX(1);
+}
+.dx-navlink.is-open {
+  color: var(--accent-bright);
+}
+.dx-navlink.is-open::after {
+  transform: scaleX(1);
+}
+/* (the numbered-nav index 01/02/03 is GONE — owner cut the superscripts; the
+   .dx-navlink__no class is no longer rendered, so its style is removed.) */
+.dx-navlink__caret {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 8px;
+  transform: translateY(-1px);
+  transition: transform 0.22s ease;
+}
+.dx-navlink.is-open .dx-navlink__caret {
+  transform: translateY(-1px) rotate(180deg);
+}
+/* the route-aware CTA — MIRRORS the re-tuned home .sx-cta TRUE-GLASS recipe
+   EXACTLY, just SLIGHTLY less round (10px vs the home button's 12px) so the nav
+   chip reads as the same translucent frosted material, scaled to the bar: the
+   identical translucent fill (the bar shows THROUGH the blur — NO solid blue
+   gradient), the soft light glass edge (a whisper of blue, not a painted border),
+   the crisp inset top-light + bottom sheen, the neutral highlight-pool ::before,
+   and the SVG fractal-noise GRAIN ::after. On the home it reads "Access your
+   wallet"; on the CHARGE surface "Start earning now" (labels from config). The
+   slow ara.so morph levers (margin/padding, ~0.9s) are KEPT so it tightens with
+   the island and never snaps independently. The glass tokens get local fallbacks
+   here (same values as home.css) so the glass holds on EVERY route, not just
+   where home.css is loaded. */
+:root {
+  /* local fallbacks — kept IDENTICAL to home.css's refined --cta-* recipe so the
+     nav chip is the same confident, readable frosted glass on every route. */
+  --cta-fill: rgba(244, 249, 255, 0.42);
+  --cta-fill-hov: rgba(247, 251, 255, 0.58);
+  --cta-edge: linear-gradient(
+    150deg,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(150, 190, 240, 0.5) 48%,
+    rgba(255, 255, 255, 0.78) 100%
+  );
+  --cta-hi: rgba(255, 255, 255, 0.85);
+  --cta-sheen: rgba(255, 255, 255, 0.42);
+  --cta-shadow: rgba(20, 50, 96, 0.24);
+}
+:root[data-theme='dark'] {
+  --cta-fill: rgba(40, 64, 100, 0.4);
+  --cta-fill-hov: rgba(50, 80, 122, 0.54);
+  --cta-edge: linear-gradient(
+    150deg,
+    rgba(200, 222, 252, 0.5) 0%,
+    rgba(122, 196, 255, 0.42) 48%,
+    rgba(190, 214, 246, 0.28) 100%
+  );
+  --cta-hi: rgba(220, 235, 255, 0.3);
+  --cta-sheen: rgba(170, 200, 240, 0.14);
+  --cta-shadow: rgba(0, 0, 0, 0.52);
+}
+.sx-nav__cta {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 10px;
+  padding: 11px 18px;
+  /* slightly less round than the home .sx-cta (12px) — same family, nav-scale. */
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: var(--fg);
+  /* NO overflow:hidden — that clipped the outward glow to the chip's box. The
+     grain ::after clips itself to the rounded shape (border-radius + overflow on
+     the pseudo only), so the button stays unclipped and its glow blooms free. */
+  /* translucent frosted fill (padding-box) + soft light glass edge (border-box)
+     in ONE paint — the exact .sx-cta recipe so the two buttons read as the same
+     see-through lit-glass slab. NO solid blue gradient. */
+  background:
+    linear-gradient(var(--cta-fill), var(--cta-fill)) padding-box,
+    var(--cta-edge) border-box;
+  /* the SAME strong frost as the re-tuned home .sx-cta — clearly frosted glass. */
+  -webkit-backdrop-filter: blur(26px) saturate(1.7) brightness(1.05);
+  backdrop-filter: blur(26px) saturate(1.7) brightness(1.05);
+  box-shadow:
+    0 12px 32px -16px var(--blue-glow),
+    0 6px 18px -14px var(--cta-shadow),
+    inset 0 1px 0 0 var(--cta-hi),
+    inset 0 -8px 18px -14px var(--cta-sheen);
+  transition:
+    box-shadow 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    background 0.32s ease,
+    /* a smooth premium lift on the same premium curve as the glow/fill; the
+       crisp press is restored by the faster active transition below. */
+    transform 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    /* morph levers — the cta tightens (margin/padding) in lock-step with the
+       island so it never snaps independently of the bar (slow ara.so morph). */
+    margin var(--nav-dur) var(--nav-ease),
+    padding var(--nav-dur) var(--nav-ease);
+}
+/* the soft neutral highlight pool — the same lit-glass catch the home .sx-cta
+   wears, so the nav button sits in the same glass family. */
+.sx-nav__cta::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    120% 80% at 24% -12%,
+    rgba(255, 255, 255, 0.5),
+    rgba(255, 255, 255, 0) 58%
+  );
+  opacity: 0.9;
+  pointer-events: none;
+}
+/* the GRAIN texture — the same fine fractal-noise overlay the home .sx-cta uses
+   (soft-light, very low opacity) so the nav button reads as real textured glass. */
+.sx-nav__cta::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  /* LOCAL clip on the grain layer only — keeps the button overflow-visible so its
+     glow box-shadow blooms past the chip (this replaces the button-wide
+     overflow:hidden that cut the halo). */
+  overflow: hidden;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 120px 120px;
+  mix-blend-mode: soft-light;
+  opacity: 0.16;
+  pointer-events: none;
+}
+/* a smooth premium lift + glass-brighten + soft accent glow — the brighter fill
+   makes the glass read lit, the deeper halo + accent-hair ring is the soft glow,
+   the -1px rise is the lift (all on the same 0.32s cubic-bezier). Stays glassy. */
+.sx-nav__cta:hover {
+  transform: translateY(-1px);
+  background:
+    linear-gradient(var(--cta-fill-hov), var(--cta-fill-hov)) padding-box,
+    var(--cta-edge) border-box;
+  box-shadow:
+    /* the wide soft bloom escapes the chip on all sides (low negative spread). */
+    0 18px 52px -14px var(--blue-glow),
+    0 0 28px -6px var(--accent-glow),
+    0 10px 26px -14px var(--cta-shadow),
+    0 0 0 1px var(--accent-hair),
+    inset 0 1px 0 0 var(--cta-hi),
+    inset 0 -8px 18px -14px var(--cta-sheen);
+}
+/* crisp press — a faster transition wins over the slow hover lift so the click
+   feels immediate, then eases back out. */
+.sx-nav__cta:active {
+  transform: translateY(1px);
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.1s ease,
+    background 0.1s ease;
+}
+.sx-nav__cta:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--glow-accent),
+    0 0 0 3px var(--accent-wash),
+    inset 0 1px 0 0 var(--cta-hi);
+}
+@media (max-width: 720px) {
+  .sx-nav__links .dx-navlink:not(.sx-nav__products) {
+    display: none;
+  }
+  .sx-nav__cta {
+    display: none;
+  }
+}
+
+/* ---- THEME TOGGLE — BORDERLESS. The glyph itself is the control: no ring,
+   no pill, no box-shadow (owner: "NO borders"). On hover it rotates toward the
+   accent with a soft glow. Its OWN class — never .dx-btn (which carries the
+   1px border CTAs need). */
+.sx-themetoggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-left: 6px;
+  padding: 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--fg-2);
+  cursor: pointer;
+  flex: 0 0 auto;
+  -webkit-tap-highlight-color: transparent;
+  /* color hover + the island snug levers (width/height/padding/margin) ride
+     together so the toggle tightens as ONE part of the retract — it is never
+     hidden, just smaller (scroll-only nav keeps it reachable). */
+  transition:
+    color 0.18s ease,
+    width var(--nav-dur) var(--nav-ease),
+    height var(--nav-dur) var(--nav-ease),
+    margin var(--nav-dur) var(--nav-ease),
+    padding var(--nav-dur) var(--nav-ease);
+}
+.sx-themetoggle:hover {
+  color: var(--accent);
+}
+.sx-themetoggle:active {
+  transform: scale(0.94);
+}
+.sx-themetoggle:focus-visible {
+  outline: none;
+}
+.sx-themetoggle:focus-visible .sx-themetoggle__glyph {
+  filter: drop-shadow(0 0 6px var(--accent-glow));
+}
+.sx-themetoggle__glyph {
+  display: inline-flex;
+  /* a soft cross-fade swap as the glyph changes */
+  animation: sx-glyph-in 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    transform 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+    filter 0.35s ease;
+}
+.sx-themetoggle:hover .sx-themetoggle__glyph {
+  transform: rotate(28deg);
+  filter: drop-shadow(0 0 6px var(--accent-glow));
+}
+@keyframes sx-glyph-in {
+  from {
+    opacity: 0;
+    transform: rotate(-35deg) scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sx-themetoggle__glyph {
+    animation: none;
+  }
+}
+
+/* ---- PRODUCTS DROPDOWN — right-aligned to its trigger (the fix). ---------- */
+.sx-products-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.sx-mega {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  left: auto;
+  width: 380px;
+  max-width: calc(100vw - 16px);
+  z-index: 55;
+  background: var(--ink-raised);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-4);
+  box-shadow: var(--mega-shadow);
+  padding: 16px 16px 12px;
+  transform-origin: top right;
+  animation: sx-mega-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.sx-mega::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: var(--edge-lit);
+  pointer-events: none;
+}
+@keyframes sx-mega-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+    clip-path: inset(0 0 30% 0);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    clip-path: inset(0 0 -2% 0);
+  }
+}
+@media (max-width: 600px) {
+  .sx-mega {
+    right: 8px;
+    left: auto;
+    max-width: calc(100vw - 16px);
+  }
+}
+.sx-mega__group + .sx-mega__group {
+  margin-top: 14px;
+}
+.sx-mega__sep {
+  margin-bottom: 4px;
+}
+.sx-mega__row {
+  display: flex;
+  /* pin the dotted leader + side tag to the NAME row (the top line) so the now
+     SHORTER punchy desc reads as a clean second line beneath, never pushing the
+     tag off-baseline. */
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 10px;
+  border-radius: var(--r-3);
+  text-align: left;
+  transition: background 0.16s ease;
+}
+.sx-mega__row:hover {
+  background: var(--accent-wash);
+}
+.sx-mega__rowmain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sx-mega__name {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.sx-mega__row:hover .sx-mega__name {
+  color: var(--accent-bright);
+}
+.sx-mega__desc {
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg-2);
+}
+.sx-mega__lead {
+  flex: 1 1 auto;
+  height: 0;
+  border-bottom: 1px dotted var(--hair-strong);
+  /* sit the dotted leader on the NAME line's centre (rowmain top line is 13px) */
+  margin-top: 9px;
+  min-width: 16px;
+}
+.sx-mega__tag {
+  flex: 0 0 auto;
+  /* align the side tag with the NAME line, not the row top */
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.sx-mega__foot {
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--hair-2);
+  display: flex;
+}
+
+/* ==========================================================================
+   01 · HERO — "The Current." Type over the live flow-field canvas.
+   ========================================================================== */
+.sx-hero {
+  position: relative;
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  padding: 120px 0 80px;
+  overflow: hidden;
+}
+.sx-hero__canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+/* the reduced-motion / low-power poster: a baked focal wash (themed) */
+.sx-hero__poster {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--hero-poster);
+}
+.sx-hero__veil {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--hero-veil-side);
+}
+.sx-hero__veil--btm {
+  background: var(--hero-veil-btm);
+}
+.sx-hero__inner {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+}
+/* two-column hero: the claim (left) + the proof receipt (right). Collapses to
+   a single column below the lane breakpoint. */
+.sx-hero__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: center;
+}
+@media (max-width: 960px) {
+  .sx-hero__grid {
+    grid-template-columns: 1fr;
+    gap: clamp(36px, 7vw, 56px);
+  }
+}
+.sx-hero__claim {
+  min-width: 0;
+}
+.sx-hero__eyebrow {
+  margin-bottom: 26px;
+}
+.sx-hero__h1 {
+  font-family: var(--serif);
+  font-size: clamp(2.6rem, 5.4vw, 4.4rem);
+  font-weight: 500;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  margin: 0;
+  /* wide enough that "It can't run off with it." holds one line at desktop;
+     the explicit <br> owns the line break, not a wrap */
+  max-width: 19ch;
+}
+/* the ONE accent beat — the hot word takes a clipped --grad-hot fill with a
+   layered lift + a slow drift. The richness is the gradient; the hue stays one
+   blue (DIRECTION I.6 law 2). Replaces the old flat `color: var(--blue)`. */
+.sx-hero__accent {
+  background: var(--grad-hot);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  background-size: 170% 170%;
+  /* no filter — see home.css note: a drop-shadow on background-clip:text
+     re-rasterizes the gradient into a visible box (Chrome). */
+  animation: sx-hot-drift 9s ease-in-out infinite alternate;
+}
+@keyframes sx-hot-drift {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: 100% 50%;
+  }
+}
+.sx-hero__sub {
+  font-family: var(--sans);
+  font-size: clamp(15px, 1.9vw, 19px);
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 30px 0 0;
+  max-width: 52ch;
+  opacity: 0;
+  transform: translateY(10px);
+}
+.sx-hero__actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 34px;
+  opacity: 0;
+  transform: translateY(10px);
+}
+.sx-hero.is-revealed .sx-hero__sub,
+.sx-hero.is-revealed .sx-hero__actions {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sx-hero.is-revealed .sx-hero__sub {
+  transition-delay: 0.42s;
+}
+.sx-hero.is-revealed .sx-hero__actions {
+  transition-delay: 0.5s;
+}
+/* ambient scroll cue, bottom-center */
+.sx-scrollcue {
+  position: absolute;
+  left: 50%;
+  bottom: 26px;
+  z-index: 3;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  opacity: 0;
+  animation: sx-cue-fade 1s ease 1.4s forwards;
+}
+.sx-scrollcue__line {
+  width: 1px;
+  height: 34px;
+  background: linear-gradient(180deg, var(--hair-strong), transparent);
+  position: relative;
+  overflow: hidden;
+}
+.sx-scrollcue__line::after {
+  content: '';
+  position: absolute;
+  top: -34px;
+  left: 0;
+  width: 1px;
+  height: 34px;
+  background: linear-gradient(180deg, transparent, var(--blue));
+  animation: sx-cue-run 2.2s ease-in-out infinite;
+}
+@keyframes sx-cue-fade {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes sx-cue-run {
+  0% {
+    transform: translateY(0);
+  }
+  60%,
+  100% {
+    transform: translateY(68px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sx-hero__sub,
+  .sx-hero__actions {
+    opacity: 1;
+    transform: none;
+  }
+  .sx-hero__accent {
+    animation: none;
+  }
+  .sx-scrollcue__line::after {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   02 · MANIFESTO — a calm breath. Large Newsreader statement, line reveal.
+   ========================================================================== */
+.sx-manifesto {
+  max-width: 22ch;
+}
+.sx-manifesto__p {
+  font-family: var(--serif);
+  font-size: clamp(28px, 5vw, 56px);
+  font-weight: 400;
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+  color: var(--fg);
+  margin: 0;
+  max-width: 18ch;
+}
+.sx-manifesto__p .dim {
+  color: var(--fg-3);
+}
+.sx-manifesto__foot {
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--fg-2);
+  margin: clamp(28px, 4vw, 44px) 0 0;
+  max-width: 46ch;
+}
+
+/* ==========================================================================
+   03 · THE FLOW — the signature scrubbed money-flow beat.
+   ========================================================================== */
+.sx-flow {
+  position: relative;
+  background: var(--ink-0);
+  overflow: hidden;
+}
+.sx-flow__pin {
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  padding: 90px 0;
+}
+.sx-flow__inner {
+  width: 100%;
+  position: relative;
+}
+.sx-flow__lead {
+  margin-bottom: clamp(36px, 5vw, 56px);
+  max-width: 30ch;
+}
+.sx-flow__title {
+  font-family: var(--serif);
+  font-size: clamp(24px, 3.4vw, 38px);
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  margin: 12px 0 0;
+}
+.sx-flow__stage {
+  position: relative;
+  width: 100%;
+}
+.sx-flow__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.sx-flow__node-label {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  fill: var(--fg-2);
+}
+.sx-flow__node-sub {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  fill: var(--fg-3);
+}
+.sx-flow__amt {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  fill: var(--blue);
+  letter-spacing: -0.01em;
+}
+.sx-flow__split {
+  font-family: var(--mono);
+  font-size: 10px;
+  fill: var(--fg-3);
+}
+.sx-flow__hint {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  margin-top: clamp(28px, 4vw, 44px);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+/* ==========================================================================
+   04 · LANES — the two-sided split (give a wallet · charge agents). Each lane:
+   a claim + three plain facts (left) and its own onboarding strip (right).
+   Differentiated by which fact-keys + which strip — never by chrome/colour.
+   ========================================================================== */
+.sx-lane {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(28px, 4.5vw, 64px);
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .sx-lane {
+    grid-template-columns: 1fr;
+    gap: clamp(28px, 6vw, 40px);
+  }
+}
+/* the second lane (businesses) flips the strip to the LEFT on desktop, so the
+   page alternates and the eye doesn't fall down one rail. */
+@media (min-width: 901px) {
+  .sx-lane--charge {
+    direction: rtl;
+  }
+  .sx-lane--charge > * {
+    direction: ltr;
+  }
+}
+.sx-lane-div {
+  height: 1px;
+  background: var(--rule-fade);
+  margin: clamp(44px, 6vw, 80px) 0;
+}
+.sx-lane__intro {
+  min-width: 0;
+}
+.sx-lane__head {
+  margin-bottom: clamp(22px, 3vw, 32px);
+}
+.sx-lane__title {
+  font-family: var(--serif);
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  line-height: 1.04;
+  color: var(--fg);
+  margin: 16px 0 0;
+}
+.sx-lane__lede {
+  font-family: var(--sans);
+  font-size: 14.5px;
+  line-height: 1.62;
+  color: var(--fg-2);
+  margin: 16px 0 0;
+  max-width: 42ch;
+}
+.sx-lane__facts {
+  display: flex;
+  flex-direction: column;
+}
+.sx-fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 2px;
+  border-top: 1px solid var(--hair-2);
+}
+.sx-fact:first-child {
+  border-top: 0;
+}
+.sx-fact__k {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  flex: 0 0 auto;
+}
+.sx-fact__v {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  text-align: right;
+}
+
+/* the onboarding strip column — holds the install card OR the snippet card. */
+.sx-strip {
+  min-width: 0;
+}
+.sx-strip__honest {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  letter-spacing: -0.01em;
+  color: var(--fg-3);
+  margin: 14px 0 0;
+}
+/* the businesses lane's off-page exit — the one obvious next click. Quiet ink,
+   blue only on hover (keeps blue a scalpel). */
+.sx-strip__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-2);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+.sx-strip__link:hover {
+  color: var(--accent);
+}
+
+/* the businesses snippet card — a code line + a dashboard receipt preview. */
+.sx-snippet {
+  padding: 16px 18px 16px;
+}
+.sx-snippet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.sx-snippet__tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.sx-snippet__tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-3);
+  padding: 3px 8px;
+}
+/* `preview` — the honesty cue that the suize.charge() SDK is not yet shipped
+   (the DX is illustrative, like the receipt's `testnet sample`). */
+.sx-snippet__tag.is-preview {
+  color: var(--fg-4);
+  border-style: dashed;
+}
+.sx-snippet__code {
+  margin: 0;
+  padding: 14px 15px;
+  background: var(--ink-0);
+  border: 1px solid var(--hair-2);
+  border-radius: var(--r-3);
+  overflow-x: auto;
+}
+.sx-snippet__code code {
+  font-family: var(--mono);
+  font-size: clamp(11px, 1.3vw, 12.5px);
+  line-height: 1.7;
+  letter-spacing: -0.01em;
+  color: var(--fg-2);
+  white-space: pre;
+}
+.sx-snippet__code .c-key {
+  color: var(--blue);
+}
+.sx-snippet__code .c-fn {
+  color: var(--fg);
+  font-weight: 600;
+}
+.sx-snippet__code .c-str {
+  color: var(--fg-3);
+}
+.sx-snippet__code .c-num {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.sx-snippet__divider {
+  height: 1px;
+  background: var(--rule-fade);
+  margin: 16px 0;
+}
+.sx-snippet__rrow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.sx-snippet__ract {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  flex: 0 0 auto;
+}
+.sx-snippet__lead {
+  flex: 1 1 auto;
+  height: 0;
+  border-bottom: 1px dotted var(--hair-strong);
+  transform: translateY(-3px);
+  min-width: 14px;
+}
+/* Routine settlement = ink, not casino green. The leading `+` carries the sign;
+   green/red is reserved for true status (killed/aborted). DIRECTION.md I.6 law 6. */
+.sx-snippet__ramt {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.sx-snippet__rfoot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: -0.01em;
+  color: var(--fg-3);
+}
+
+/* ==========================================================================
+   THE INSTALL STRIP CARD — the local-MCP one-command ladder.
+   ========================================================================== */
+.sx-paste {
+  padding: 20px 22px 22px;
+}
+.sx-paste__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.sx-paste__url {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 15px;
+  background: var(--ink-0);
+  border: 1px solid var(--hair-2);
+  border-radius: var(--r-3);
+}
+.sx-paste__urltext {
+  font-family: var(--mono);
+  font-size: clamp(11px, 1.4vw, 13px);
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  word-break: break-all;
+  line-height: 1.45;
+  flex: 1 1 auto;
+}
+.sx-paste__scheme {
+  color: var(--fg-3);
+}
+.sx-paste__host {
+  color: var(--blue);
+  border-radius: var(--r-2);
+  padding: 0 1px;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.sx-paste__url:hover .sx-paste__host {
+  background: var(--blue);
+  color: #06080b;
+}
+.sx-ladder {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sx-beat {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 2px;
+}
+.sx-beat + .sx-beat {
+  border-top: 1px solid var(--hair-2);
+}
+.sx-beat__no {
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--accent);
+  flex: 0 0 auto;
+  width: 18px;
+}
+.sx-beat__verb {
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--fg);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.sx-beat__lead {
+  flex: 1 1 auto;
+  height: 0;
+  border-bottom: 1px dotted var(--hair-strong);
+  transform: translateY(-3px);
+  min-width: 12px;
+}
+.sx-beat__detail {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: -0.01em;
+  color: var(--fg-3);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.sx-paste__close {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid transparent;
+  border-image: var(--rule-fade) 1;
+}
+.sx-paste__closeline {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--fg-2);
+  margin: 0;
+}
+
+/* ==========================================================================
+   06 · TRACE — the verifiable receipt (quiet superpower).
+   ========================================================================== */
+.sx-trace {
+  max-width: 640px;
+  padding: 18px 20px 18px;
+}
+.sx-trace__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.sx-trace__rows {
+  display: flex;
+  flex-direction: column;
+}
+.sx-trace__row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 0;
+}
+.sx-trace__row + .sx-trace__row {
+  border-top: 1px solid var(--hair-2);
+}
+.sx-trace__act {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  flex: 0 0 auto;
+}
+.sx-trace__act .host {
+  color: var(--fg-3);
+  font-weight: 400;
+}
+.sx-trace__lead {
+  flex: 1 1 auto;
+  height: 0;
+  border-bottom: 1px dotted var(--hair-strong);
+  transform: translateY(-3px);
+  min-width: 14px;
+}
+.sx-trace__amt {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* Refund/incoming = ink with a leading `+`, not green (see I.6 law 6). */
+.sx-trace__amt.is-in {
+  color: var(--fg);
+}
+.sx-trace__foot {
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid var(--hair-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+}
+.sx-trace__id {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: -0.01em;
+  color: var(--fg-3);
+}
+.sx-trace__verify {
+  color: var(--accent-bright);
+  cursor: pointer;
+}
+.sx-trace__verify:hover {
+  text-decoration: underline;
+}
+.sx-trace__sub {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--fg-2);
+  margin: 16px 0 0;
+}
+.sx-kill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--r-3);
+  padding: 5px 11px;
+  transition: color 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+.sx-kill:hover {
+  color: var(--bear);
+  border-color: var(--bear-edge);
+  background: var(--bear-fill);
+}
+
+/* ==========================================================================
+   07 · PRODUCTS — horizontal-pinned flagship rail.
+   ========================================================================== */
+.sx-rail {
+  position: relative;
+  background: var(--ink-surface);
+}
+.sx-rail__head {
+  padding: clamp(56px, 8vw, 96px) var(--pad) 0;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+.sx-rail__viewport {
+  position: relative;
+  height: 100svh;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+.sx-rail__track {
+  display: flex;
+  gap: clamp(20px, 3vw, 40px);
+  padding: 0 var(--pad);
+  will-change: transform;
+}
+.sx-panel {
+  position: relative;
+  flex: 0 0 auto;
+  width: min(78vw, 560px);
+  height: min(64svh, 480px);
+  border-radius: var(--r-6);
+  border: 1px solid var(--hair);
+  background: var(--ink-raised);
+  overflow: hidden;
+  padding: clamp(24px, 3vw, 38px);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: border-color 0.25s ease, transform 0.25s ease;
+}
+.sx-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: var(--edge-lit);
+}
+/* NO per-panel radial bloom — "every card glows" is the banned SaaS tell
+   (DIRECTION.md I.6 law 2 / law 4: elevation by hairline, not by glow). The
+   panel keeps only its top hairline (::before) + the accent mock-bar tint. */
+.sx-panel:hover {
+  border-color: var(--tint-edge, var(--hair-blue));
+  transform: translateY(-3px);
+}
+.sx-panel__top {
+  position: relative;
+  z-index: 1;
+}
+.sx-panel__no {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  letter-spacing: 0.08em;
+}
+.sx-panel__name {
+  font-family: var(--serif);
+  font-size: clamp(26px, 3vw, 38px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  margin: 16px 0 0;
+}
+.sx-panel__verb {
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--tint-fg, var(--blue));
+  margin: 14px 0 0;
+}
+.sx-panel__desc {
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 14px 0 0;
+  max-width: 36ch;
+}
+.sx-panel__foot {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sx-panel__open {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.16s ease;
+}
+.sx-panel:hover .sx-panel__open {
+  color: var(--tint-fg, var(--blue-bright));
+}
+/* a cropped dark UI mockup strip — pure CSS, no asset */
+.sx-panel__mock {
+  display: flex;
+  gap: 4px;
+  align-items: flex-end;
+  height: 38px;
+}
+.sx-panel__mock i {
+  display: block;
+  width: 6px;
+  border-radius: var(--r-1);
+  background: var(--tint-fg, var(--blue));
+  opacity: 0.55;
+}
+/* the no-pin fallback (mobile / reduced motion): a simple horizontal scroll */
+.sx-rail__viewport.is-static {
+  height: auto;
+  overflow-x: auto;
+  padding: 40px 0 56px;
+  scroll-snap-type: x mandatory;
+}
+.sx-rail__viewport.is-static .sx-rail__track {
+  transform: none !important;
+}
+.sx-rail__viewport.is-static .sx-panel {
+  scroll-snap-align: center;
+  height: 420px;
+}
+
+/* ==========================================================================
+   08 · CLOSER — "Nothing to read." Maximum negative-dark space.
+   ========================================================================== */
+.sx-closer {
+  position: relative;
+  text-align: center;
+  padding: clamp(120px, 20vw, 240px) 0;
+  background: var(--ink-0);
+  overflow: hidden;
+}
+.sx-closer__canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.4;
+}
+.sx-closer__inner {
+  position: relative;
+  z-index: 1;
+}
+.sx-closer__rule {
+  height: 1px;
+  background: var(--rule-fade);
+  max-width: 320px;
+  margin: 0 auto 44px;
+}
+.sx-closer__line {
+  font-family: var(--serif);
+  font-size: clamp(2.6rem, 7vw, 5.2rem);
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  color: var(--fg);
+  margin: 0 0 40px;
+  line-height: 1;
+}
+.sx-closer__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* ==========================================================================
+   FOOTER — oversized wordmark bleeding off the bottom over grain.
+   ========================================================================== */
+.sx-foot {
+  position: relative;
+  border-top: 1px solid transparent;
+  border-image: var(--rule-fade) 1;
+  padding: clamp(48px, 7vw, 80px) 0 0;
+  overflow: hidden;
+  background: var(--ink-base);
+}
+.sx-foot__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px 48px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.sx-foot__brand {
+  max-width: 30ch;
+}
+.sx-foot__tag {
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--fg-3);
+  margin: 14px 0 0;
+}
+.sx-foot__cols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 44px;
+}
+.sx-foot__col {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.sx-foot__colhead {
+  font-family: var(--sans);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  margin-bottom: 3px;
+}
+.sx-foot__link {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--fg-2);
+  transition: color 0.16s ease;
+}
+.sx-foot__link:hover {
+  color: var(--accent-bright);
+}
+.sx-foot__agent {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: -0.01em;
+  color: var(--accent-bright);
+}
+.sx-foot__agent:hover {
+  text-decoration: underline;
+}
+.sx-foot__legal {
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--fg-4);
+  margin: 40px 0 0;
+  max-width: 72ch;
+}
+.sx-foot__wordmark {
+  font-family: 'Hashgraph Title', var(--sans);
+  font-weight: 700;
+  font-size: clamp(5rem, 22vw, 18rem);
+  line-height: 0.8;
+  letter-spacing: 0.01em;
+  color: transparent;
+  background: var(--wordmark-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  margin: clamp(32px, 5vw, 56px) 0 -0.16em;
+  user-select: none;
+  pointer-events: none;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* ==========================================================================
+   PRICING PAGE (the only place fees live) — a ledger.
+   ========================================================================== */
+.sx-page {
+  padding-top: 120px;
+}
+.sx-pricing {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: clamp(40px, 8vw, 96px) 0;
+}
+.sx-pricing__hero {
+  font-family: var(--mono);
+  font-size: clamp(2.6rem, 7vw, 4.6rem);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--blue);
+  line-height: 1;
+  margin: 0 0 8px;
+}
+.sx-pricing__herolabel {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(16px, 2.2vw, 22px);
+  color: var(--fg-2);
+  margin: 0 0 40px;
+}
+.sx-prows {
+  display: flex;
+  flex-direction: column;
+}
+.sx-prow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 16px 2px;
+}
+.sx-prow + .sx-prow {
+  border-top: 1px solid var(--hair-2);
+}
+.sx-prow__k {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--fg);
+  flex: 0 0 auto;
+}
+.sx-prow__lead {
+  flex: 1 1 auto;
+  height: 0;
+  border-bottom: 1px dotted var(--hair-strong);
+  transform: translateY(-4px);
+  min-width: 18px;
+}
+.sx-prow__v {
+  font-family: var(--mono);
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.sx-prow__v.is-free {
+  color: var(--bull);
+}
+.sx-pricing__close {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(18px, 2.4vw, 26px);
+  color: var(--fg);
+  margin: 32px 0 0;
+}
+
+/* ==========================================================================
+   HOME "Built on" hint strip — a quiet, single-row credit under the hero. NO
+   blue (the scalpel is spent on the receipt net + the accent word); plain rule.
+   ========================================================================== */
+.sx-built {
+  border-top: 1px solid var(--hair-2);
+  padding: clamp(22px, 4vw, 36px) 0;
+}
+.sx-built__inner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.sx-built__label {
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  flex: 0 0 auto;
+}
+.sx-built__rule {
+  flex: 1 1 auto;
+  height: 0;
+  border-bottom: 1px solid var(--hair-2);
+}
+.sx-built__names {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--fg-2);
+  flex: 0 0 auto;
+}
+
+/* ==========================================================================
+   FLAT PAGE HERO — the shared top fold for the single-audience pages (/agents,
+   /businesses). Lighter than the room hero (no shader, no per-room accent);
+   serif title + grotesk lede + up to two CTAs. Eyebrow dot is STATIC (the
+   heartbeat is reserved for the ONE live beat).
+   ========================================================================== */
+.sx-pagehero {
+  padding: clamp(24px, 5vw, 56px) 0 clamp(40px, 7vw, 80px);
+}
+.sx-pagehero__eyebrow {
+  margin: 26px 0 22px;
+  color: var(--accent);
+}
+.sx-pagehero__title {
+  font-family: var(--serif);
+  font-size: clamp(2.4rem, 6vw, 4.8rem);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  margin: 0;
+  max-width: 17ch;
+}
+.sx-pagehero__sub {
+  font-family: var(--sans);
+  font-size: clamp(15px, 1.9vw, 19px);
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 26px 0 0;
+  max-width: 52ch;
+}
+.sx-pagehero__actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 34px;
+}
+
+/* a generic back-link on subpages */
+.sx-back {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: color 0.16s ease;
+}
+.sx-back:hover {
+  color: var(--accent-bright);
+}
+
+/* ==========================================================================
+   PIXEL-MELT PAGE TRANSITION — on a route change the screen dissolves into
+   dithered pixel blocks that scatter + melt, tinted to the room accent, then
+   clear to reveal the incoming page. The <canvas> (.sx-wipe) is painted in
+   App.jsx (useRouteWipe); the canvas self-terminates its rAF (~640ms), so it
+   never adds a persistent loop alongside Lenis. Under reduced motion the canvas
+   stays hidden and we fall back to the clean CSS cross-fade below.
+   ========================================================================== */
+.sx-wipe {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  opacity: 0;
+  /* the canvas is invisible until App.jsx flips .is-running on a route change */
+}
+.sx-wipe.is-running {
+  opacity: 1;
+}
+
+/* reduced-motion: no pixel canvas — a short, clean accent-tinted fade instead.
+   App.jsx skips the canvas paint and just toggles .is-running; this veil rides
+   it. Geometry stays rectangular, no scatter, no glitch. */
+@media (prefers-reduced-motion: reduce) {
+  .sx-wipe {
+    background: var(--wipe-accent, var(--blue));
+    transition: opacity 0.28s ease;
+  }
+  .sx-wipe.is-running {
+    animation: sx-wipe-fade 0.4s ease forwards;
+  }
+  @keyframes sx-wipe-fade {
+    0% {
+      opacity: 0;
+    }
+    40% {
+      opacity: 0.5;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+}

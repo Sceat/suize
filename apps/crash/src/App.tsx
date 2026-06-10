@@ -57,6 +57,7 @@ import {
   fmt_usd,
   fmt_usd_cents,
 } from './format'
+import { resolveSuizeHandle } from './suins'
 import { useNow } from './useNow'
 import { useAuth } from './auth'
 import { execute_sponsored, request_sponsorship } from './sponsor'
@@ -631,6 +632,27 @@ export function App() {
   const now = useNow(1000)
   const addr = address
 
+  // ── SUINS HANDLE (display only) ────────────────────────────────────────────
+  // The connected address's `<name>@suize` SuiNS handle, resolved client-side
+  // from its on-chain reverse record (suins.ts mirrors the backend's meCore).
+  // null until/unless it resolves — the account cluster shows `handle ??
+  // addressShort`, so the hex shows immediately and is replaced in place once
+  // (and only if) the handle arrives. Purely presentational; never feeds a tx.
+  const [handle, set_handle] = useState<string | null>(null)
+  useEffect(() => {
+    // Reset on address change so a stale handle never bleeds across accounts.
+    set_handle(null)
+    if (!addr) return
+    let alive = true
+    resolveSuizeHandle(addr, client).then(h => {
+      // Guard against an out-of-order resolve after the address changed/unmounted.
+      if (alive) set_handle(h)
+    })
+    return () => {
+      alive = false
+    }
+  }, [addr, client])
+
   // ── GASLESS SPONSOR TRANSPORT LIFECYCLE ────────────────────────────────────
   // The sponsor now rides the Enoki-verified WebSocket (ws.ts) instead of HTTP.
   // We open + authenticate the socket on sign-in (when a SPONSORED zkLogin address
@@ -1023,10 +1045,15 @@ export function App() {
   useEffect(() => {
     if (oracle && strike != null && oracle.status === 'active') {
       load_odds(oracle, strike)
-      // ~2s cadence (was 5s) so the bet-card odds track the book nearly as fast as
-      // the per-side position value (1.5s) and go lopsided promptly. Cheap,
-      // read-only devInspects.
-      const id = setInterval(() => load_odds(oracle, strike), 2_000)
+      // ~6s cadence — slowed from 2s to cut fullnode spam: each tick is 2
+      // cross-origin devInspects and the public fullnode CORS-preflights every POST,
+      // so 2s meant ~4 fullnode requests every 2s just for odds. The bet-card odds
+      // stay fresh enough (the real bet re-quotes fresh at submit); lopsidedness
+      // just updates a few seconds slower. Cheap, read-only devInspects.
+      // Pause when the tab is hidden — no point quoting odds nobody's looking at.
+      const id = setInterval(() => {
+        if (!document.hidden) load_odds(oracle, strike)
+      }, 6_000)
       return () => clearInterval(id)
     }
   }, [oracle, strike, load_odds])
@@ -1080,7 +1107,14 @@ export function App() {
   // this just guarantees an external balance change is never missed.
   useEffect(() => {
     refresh_balances()
-    const id = setInterval(refresh_balances, 4_000)
+    // ~12s steady backstop (was 4s). The user's OWN actions already trigger an
+    // immediate refresh, and the focus/visibility listener below catches external
+    // top-ups on tab-return — so this slow poll only guards the rare missed case.
+    // Slowed to cut fullnode getCoins+devInspect (+CORS preflight) spam.
+    // Pause when hidden; the focus/visibility listener below snaps it fresh on return.
+    const id = setInterval(() => {
+      if (!document.hidden) refresh_balances()
+    }, 12_000)
     return () => clearInterval(id)
   }, [refresh_balances])
 
@@ -1147,7 +1181,13 @@ export function App() {
     // nudging. (We keep the last bids; the held card freezes on them.)
     if (settling_now) return
     load_cashout()
-    const id = setInterval(load_cashout, 1_500)
+    // ~4s cadence (was 1.5s) — the cosmetic rising-tick interpolation keeps the
+    // live cash-out value visually smooth between polls, so 4s is imperceptible
+    // while cutting per-held-bucket devInspect (+CORS preflight) spam on the fullnode.
+    // Pause when the tab is hidden — resume on the next tick when it's visible.
+    const id = setInterval(() => {
+      if (!document.hidden) load_cashout()
+    }, 4_000)
     return () => clearInterval(id)
   }, [position, settling_now, load_cashout])
 
@@ -2997,10 +3037,12 @@ export function App() {
     signedIn: signed_in,
     balanceStr: disp_balance_str,
     roundStr: '· live round',
-    // Identity: no SuiNS/handle resolver is wired (would add a network call), so
-    // the cluster shows the truncated, click-to-copy hex address as the fallback.
+    // Identity: the cluster shows the `<name>@suize` SuiNS handle when resolved,
+    // else the truncated, click-to-copy hex address. The copy payload is ALWAYS
+    // the full address (addressFull), never the handle.
     addressFull: addr ?? null,
     addressShort: fmt_addr(addr),
+    handle: signed_in ? handle : null,
 
     googleWallet: Boolean(google_wallet),
     connecting,

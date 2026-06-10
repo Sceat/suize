@@ -6,8 +6,13 @@
 // re-hashed against the manifest entry on cache-fill. Integrity is the
 // differentiator: we verify the manifest hash AND re-hash every blob.
 //
+// Latency: a cold Walrus read is a multi-second sliver reconstruct, so blobs are
+// layered edge-cache → R2 → aggregator (content-addressed by sha256, verified on
+// every fill — see loadVerifiedBlob) and a cold manifest fill background-warms
+// the whole site before the browser asks for its assets.
+//
 // Resolution:
-//   <base36(siteId)>.deploy.suize.io  → base36-decode the subdomain → siteId
+//   <base36(siteId)>.suize.site       → base36-decode the subdomain → siteId
 //   <custom-domain>                   → DomainRegistry dynamic-field lookup → siteId
 //
 // Serving model (simpler than versui's N on-chain resource reads):
@@ -19,31 +24,57 @@
 // ---------------------------------------------------------------------------
 
 interface Env {
-  /** Sui testnet fullnode JSON-RPC URL. */
+  /** Sui fullnode JSON-RPC URL for the network this worker serves (wrangler [vars] / [env.mainnet.vars]). */
   SUI_RPC_URL: string;
-  /** Walrus aggregator base (testnet). */
+  /** Walrus aggregator base for the same network. */
   WALRUS_AGGREGATOR: string;
   /** `deploy_sui` package id — recorded for the operator; not read at runtime. */
   DEPLOY_PACKAGE_ID: string;
   /** Shared `DomainRegistry` object id — required for custom-domain resolution. */
   DOMAIN_REGISTRY_ID: string;
+  /** The base zone we serve subdomains under. Optional — falls back to 'suize.site'. */
+  BASE_DOMAIN?: string;
+  /** R2 durable global blob cache, content-addressed by sha256 (can never be
+   * stale; no invalidation path exists). Optional — without the binding the
+   * worker serves from the edge cache + aggregator only. */
+  BLOB_CACHE?: R2Bucket;
 }
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/** The base zone we serve subdomains under. */
-const BASE_DOMAIN = 'deploy.suize.io';
+/** Fallback base zone when the BASE_DOMAIN var is unset (its own zone → free first-level wildcard SSL). */
+const DEFAULT_BASE_DOMAIN = 'suize.site';
+
+/** The base zone we serve subdomains under — from wrangler [vars], with the historical default. */
+const baseDomain = (env: Env): string =>
+  (env.BASE_DOMAIN || DEFAULT_BASE_DOMAIN).toLowerCase();
 
 /** Subdomains that never map to a site (dashboard / infra surfaces). */
 const RESERVED_SUBDOMAINS = new Set(['www', 'api', 'app', 'dashboard', 'admin']);
 
-/** How long the resolved Site fields stay in the edge cache. */
-const SITE_CACHE_SECONDS = 60;
+/** Site-fields + manifest cache TTL. Both are IMMUTABLE by construction — every
+ * deploy mints a FRESH `Site` (no `&mut Site` entry point exists in `deploy_sui`)
+ * and Walrus blob ids are content-derived — so cache them for a year. Only the
+ * custom-domain mapping below is mutable and keeps a short TTL. */
+const IMMUTABLE_CACHE_SECONDS = 31536000;
 
-/** How long a custom-domain → siteId mapping stays cached (positive + negative). */
+/** How many manifest entries a cold hit warms in the background (subrequest budget). */
+const WARM_MAX_ENTRIES = 30;
+
+/** Parallel blob fills during a background warm. */
+const WARM_CONCURRENCY = 6;
+
+/** Max `Link: rel=preload` entries emitted on an HTML response. */
+const PRELOAD_MAX = 6;
+
+/** How long a custom-domain → siteId mapping stays cached once resolved. */
 const DOMAIN_CACHE_SECONDS = 300;
+
+/** Negative (unlinked) lookups cache briefly only — a just-linked domain must go
+ * live without waiting out the positive TTL. */
+const DOMAIN_NEGATIVE_CACHE_SECONDS = 30;
 
 /** Extensions treated as content-fingerprinted → immutable far-future cache. */
 const IMMUTABLE_EXTENSIONS = new Set([
@@ -238,7 +269,7 @@ async function getCachedSiteFields(env: Env, siteId: string): Promise<SiteFields
   await cache.put(
     cacheKey,
     new Response(JSON.stringify(fields), {
-      headers: { 'Cache-Control': `max-age=${SITE_CACHE_SECONDS}` },
+      headers: { 'Cache-Control': `max-age=${IMMUTABLE_CACHE_SECONDS}` },
     }),
   );
   return fields;
@@ -252,10 +283,11 @@ async function getCachedCustomDomain(env: Env, host: string): Promise<string | n
   if (cached) return ((await cached.json()) as { siteId: string | null }).siteId;
 
   const siteId = await resolveCustomDomain(host, env);
+  const ttl = siteId === null ? DOMAIN_NEGATIVE_CACHE_SECONDS : DOMAIN_CACHE_SECONDS;
   await cache.put(
     cacheKey,
     new Response(JSON.stringify({ siteId }), {
-      headers: { 'Cache-Control': `max-age=${DOMAIN_CACHE_SECONDS}` },
+      headers: { 'Cache-Control': `max-age=${ttl}` },
     }),
   );
   return siteId;
@@ -297,7 +329,11 @@ async function fetchWalrusBytes(url: string): Promise<Uint8Array | null> {
 // Manifest fetch + verify (cached as the Site fields are cached upstream of it).
 // ---------------------------------------------------------------------------
 
-async function getVerifiedManifest(env: Env, site: SiteFields): Promise<Manifest> {
+async function getVerifiedManifest(
+  env: Env,
+  ctx: ExecutionContext,
+  site: SiteFields,
+): Promise<Manifest> {
   const cache = caches.default;
   const cacheKey = new Request(`https://suize-deploy-cache/manifest/${site.manifest_blob_id}`);
 
@@ -328,9 +364,13 @@ async function getVerifiedManifest(env: Env, site: SiteFields): Promise<Manifest
   await cache.put(
     cacheKey,
     new Response(JSON.stringify(manifest), {
-      headers: { 'Cache-Control': `max-age=${SITE_CACHE_SECONDS}` },
+      headers: { 'Cache-Control': `max-age=${IMMUTABLE_CACHE_SECONDS}` },
     }),
   );
+
+  // First sight of this site in this colo — pre-fill every asset in the
+  // background so the browser's follow-up JS/CSS requests land on warm caches.
+  warmSite(env, ctx, manifest);
   return manifest;
 }
 
@@ -366,12 +406,127 @@ function hasExtension(path: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Serve one manifest entry: fetch the patch, re-hash on cache-fill, stream.
+// Verified blob loading: edge cache → R2 → Walrus aggregator.
+//
+// Content-addressed by sha256 — a hit can never be stale, so both caches take
+// far-future fills and there is NO invalidation path. The edge cache is
+// per-colo and evictable; R2 is the durable global layer that spares every cold
+// colo (and every aggregator cache eviction) the multi-second Walrus sliver
+// reconstruct. Bytes are re-hashed on EVERY cache fill, so the integrity claim
+// ("mismatch → 502, never the bytes") holds across all three sources.
+// ---------------------------------------------------------------------------
+
+async function loadVerifiedBlob(
+  env: Env,
+  ctx: ExecutionContext,
+  path: string,
+  entry: ManifestEntry,
+  opts?: { backfillR2?: boolean },
+): Promise<Uint8Array | Response> {
+  const sha = entry.sha256.toLowerCase();
+  const cache = caches.default;
+  const cacheKey = new Request(`https://suize-deploy-cache/blob/${sha}`);
+  const fillEdge = (bytes: Uint8Array) =>
+    cache.put(
+      cacheKey,
+      new Response(bytes, { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } }),
+    );
+
+  // 1. Edge cache (per-colo) — filled only post-verification, served as-is.
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    const bytes = new Uint8Array(await cached.arrayBuffer());
+    // A warm pass must guarantee R2 durability even when the edge short-circuits
+    // (blob edge-cached pre-R2, or R2 evicted the object independently). Kept off
+    // the normal serve path so an edge hit stays zero-R2-ops.
+    const bucket = env.BLOB_CACHE;
+    if (opts?.backfillR2 && bucket) {
+      ctx.waitUntil(bucket.head(sha).then((found) => (found ? null : bucket.put(sha, bytes))));
+    }
+    return bytes;
+  }
+
+  // 2. R2 (global, durable) — verify on read; a corrupt object is dropped.
+  const r2Object = await env.BLOB_CACHE?.get(sha);
+  if (r2Object) {
+    const bytes = new Uint8Array(await r2Object.arrayBuffer());
+    if ((await sha256Hex(bytes)) === sha) {
+      ctx.waitUntil(fillEdge(bytes));
+      return bytes;
+    }
+    ctx.waitUntil(env.BLOB_CACHE!.delete(sha));
+  }
+
+  // 3. Walrus aggregator — the source of truth.
+  const bytes = await fetchWalrusBytes(
+    `${env.WALRUS_AGGREGATOR}/v1/blobs/by-quilt-patch-id/${encodeURIComponent(entry.patch)}`,
+  );
+  if (!bytes) return new Response('Upstream blob unavailable', { status: 502 });
+
+  // INTEGRITY 2/2 — re-hash the bytes against the manifest entry.
+  const actual = await sha256Hex(bytes);
+  if (actual !== sha) {
+    return new Response(
+      `Integrity check failed for ${path} (expected ${entry.sha256}, got ${actual})`,
+      { status: 502 },
+    );
+  }
+
+  ctx.waitUntil(fillEdge(bytes));
+  if (env.BLOB_CACHE) ctx.waitUntil(env.BLOB_CACHE.put(sha, bytes));
+  return bytes;
+}
+
+/**
+ * Background-warm every manifest entry into the edge + R2 caches. Triggered on
+ * a cold manifest fill (the first request a colo sees for a site) — by the time
+ * the browser has parsed the HTML and asks for its JS/CSS, those fills are
+ * already in flight, collapsing the cold waterfall to one round-trip. Entries
+ * beyond WARM_MAX_ENTRIES stay lazy (they fill on first demand as before).
+ */
+function warmSite(env: Env, ctx: ExecutionContext, manifest: Manifest): void {
+  ctx.waitUntil(
+    (async () => {
+      const entries = Object.entries(manifest.files).slice(0, WARM_MAX_ENTRIES);
+      let next = 0;
+      const drain = async (): Promise<void> => {
+        while (next < entries.length) {
+          const [path, entry] = entries[next++];
+          await loadVerifiedBlob(env, ctx, path, entry, { backfillR2: true }).catch(() => {});
+        }
+      };
+      await Promise.all(Array.from({ length: WARM_CONCURRENCY }, drain));
+    })(),
+  );
+}
+
+/**
+ * `Link: rel=preload` header for an HTML response, built from the manifest —
+ * the worker knows what the page needs before the browser has parsed a byte.
+ * `crossorigin` matches Vite's `<script type="module" crossorigin>` /
+ * `<link rel="stylesheet" crossorigin>` request modes (a mode mismatch would
+ * double-fetch instead of reusing the preload).
+ */
+function preloadHeaderFor(manifest: Manifest): string | null {
+  const links: string[] = [];
+  for (const path of Object.keys(manifest.files)) {
+    if (links.length >= PRELOAD_MAX) break;
+    if (/\.m?js$/.test(path)) links.push(`<${path}>; rel=preload; as=script; crossorigin`);
+    else if (path.endsWith('.css')) links.push(`<${path}>; rel=preload; as=style; crossorigin`);
+    else if (path.endsWith('.woff2')) links.push(`<${path}>; rel=preload; as=font; crossorigin`);
+  }
+  return links.length ? links.join(', ') : null;
+}
+
+// ---------------------------------------------------------------------------
+// Serve one manifest entry: load verified bytes, stream with caching headers.
 // ---------------------------------------------------------------------------
 
 async function serveEntry(
   env: Env,
+  ctx: ExecutionContext,
   request: Request,
+  manifest: Manifest,
   path: string,
   entry: ManifestEntry,
   status: number,
@@ -387,46 +542,26 @@ async function serveEntry(
     });
   }
 
-  // Edge cache, keyed by the content hash (immutable) — survives across sites.
-  const cache = caches.default;
-  const blobCacheKey = new Request(`https://suize-deploy-cache/blob/${entry.sha256}`);
-  let bytes: Uint8Array | null = null;
+  const loaded = await loadVerifiedBlob(env, ctx, path, entry);
+  if (loaded instanceof Response) return loaded;
 
-  const cachedBlob = await cache.match(blobCacheKey);
-  if (cachedBlob) {
-    bytes = new Uint8Array(await cachedBlob.arrayBuffer());
-  } else {
-    bytes = await fetchWalrusBytes(
-      `${env.WALRUS_AGGREGATOR}/v1/blobs/by-quilt-patch-id/${encodeURIComponent(entry.patch)}`,
-    );
-    if (!bytes) return new Response('Upstream blob unavailable', { status: 502 });
+  const headers: Record<string, string> = {
+    'Content-Type': ensureCharset(entry.ct || 'application/octet-stream'),
+    'Cache-Control': cacheControlFor(path),
+    ETag: etag,
+    'Access-Control-Allow-Origin': '*',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Suize-Integrity': 'verified',
+    Vary: 'Accept-Encoding',
+  };
 
-    // INTEGRITY 2/2 — re-hash the bytes against the manifest entry on cache-fill.
-    const actual = await sha256Hex(bytes);
-    if (actual !== entry.sha256.toLowerCase()) {
-      return new Response(
-        `Integrity check failed for ${path} (expected ${entry.sha256}, got ${actual})`,
-        { status: 502 },
-      );
-    }
-
-    await cache.put(
-      blobCacheKey,
-      new Response(bytes, { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } }),
-    );
+  // HTML carries preload hints for its assets (entry JS/CSS/fonts).
+  if ((entry.ct || '').toLowerCase().startsWith('text/html')) {
+    const link = preloadHeaderFor(manifest);
+    if (link) headers['Link'] = link;
   }
 
-  return new Response(bytes, {
-    status,
-    headers: {
-      'Content-Type': ensureCharset(entry.ct || 'application/octet-stream'),
-      'Cache-Control': cacheControlFor(path),
-      ETag: etag,
-      'Access-Control-Allow-Origin': '*',
-      'X-Suize-Integrity': 'verified',
-      Vary: 'Accept-Encoding',
-    },
-  });
+  return new Response(loaded, { status, headers });
 }
 
 // ---------------------------------------------------------------------------
@@ -436,12 +571,13 @@ async function serveEntry(
 async function resolveSiteId(host: string, env: Env): Promise<string | Response> {
   const lower = host.toLowerCase();
 
-  if (lower === BASE_DOMAIN || lower.endsWith(`.${BASE_DOMAIN}`)) {
-    if (lower === BASE_DOMAIN) {
+  const base = baseDomain(env);
+  if (lower === base || lower.endsWith(`.${base}`)) {
+    if (lower === base) {
       // Apex is the dashboard, not a site.
       return notFound('No site at the apex domain', host);
     }
-    const subdomain = lower.slice(0, lower.length - `.${BASE_DOMAIN}`.length);
+    const subdomain = lower.slice(0, lower.length - `.${base}`.length);
     // Only single-label subdomains map to sites (no nested labels).
     if (subdomain.includes('.')) return notFound(`Unknown subdomain: ${subdomain}`, host);
     if (RESERVED_SUBDOMAINS.has(subdomain)) return notFound(`Reserved subdomain: ${subdomain}`, host);
@@ -462,14 +598,14 @@ async function resolveSiteId(host: string, env: Env): Promise<string | Response>
 function notFound(message: string, host: string): Response {
   return new Response(errorPage('404', message, host), {
     status: 404,
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Content-Type-Options': 'nosniff' },
   });
 }
 
 function serverError(message: string, host: string): Response {
   return new Response(errorPage('502', message, host), {
     status: 502,
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Content-Type-Options': 'nosniff' },
   });
 }
 
@@ -500,7 +636,7 @@ function errorPage(code: string, message: string, host: string): string {
 // ---------------------------------------------------------------------------
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const host = url.hostname;
 
@@ -515,27 +651,27 @@ export default {
 
     try {
       const site = await getCachedSiteFields(env, siteId);
-      const manifest = await getVerifiedManifest(env, site);
+      const manifest = await getVerifiedManifest(env, ctx, site);
 
       const path = normalisePath(url.pathname);
       const entry = manifest.files[path];
 
       if (entry) {
-        return await serveEntry(env, request, path, entry, 200);
+        return await serveEntry(env, ctx, request, manifest, path, entry, 200);
       }
 
       // Unmatched. A request WITH an extension is a genuine missing asset → 404.
       // An extensionless route falls through to the SPA fallback (index.html).
       if (hasExtension(path)) {
         const custom404 = manifest.files['/404.html'];
-        if (custom404) return await serveEntry(env, request, '/404.html', custom404, 404);
+        if (custom404) return await serveEntry(env, ctx, request, manifest, '/404.html', custom404, 404);
         return notFound(`Not found: ${path}`, host);
       }
 
       const fallbackPath = normalisePath(manifest.spaFallback || '/index.html');
       const fallback = manifest.files[fallbackPath];
       if (!fallback) return notFound(`No SPA fallback (${fallbackPath})`, host);
-      return await serveEntry(env, request, fallbackPath, fallback, 200);
+      return await serveEntry(env, ctx, request, manifest, fallbackPath, fallback, 200);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return serverError(message, host);

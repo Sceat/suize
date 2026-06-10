@@ -142,11 +142,17 @@ export type CrashData = {
   signedIn: boolean
   balanceStr: string // "$250" (whole dollars), or "—" while unknown
   roundStr: string // "· round 1" (we map the app's market into a round index)
-  // Identity shown next to Sign out. We have NO SuiNS/handle wired (no resolver
-  // call), so this is the truncated, click-to-copy hex address ("0x1234…abcd").
-  // `addressFull` is the full 0x… (clipboard payload); null when signed-out.
+  // Identity shown next to Sign out. The display label is the SuiNS `<name>@suize`
+  // handle when the connected address has one (resolved async, client-side), else
+  // the truncated, click-to-copy hex address ("0x1234…abcd") as the fallback.
+  // `addressFull` is the full 0x… (the clipboard payload — copy ALWAYS copies the
+  // address, never the handle); null when signed-out.
   addressFull: string | null
-  addressShort: string // "0x1234…abcd" (or '' when signed-out)
+  addressShort: string // "0x1234…abcd" (or '' when signed-out) — the hex fallback
+  // The resolved `<label>@suize` SuiNS handle for the connected address, or null
+  // when none / not-yet-resolved (the cluster shows `handle ?? addressShort`).
+  // Arrives AFTER the first render, so it must re-key the account-cluster rebuild.
+  handle: string | null
 
   // ---- connect state (e05 prototype lacks this; styled in e05 language) ----
   googleWallet: boolean

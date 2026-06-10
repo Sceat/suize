@@ -1,0 +1,3237 @@
+/* ==========================================================================
+   SUIZE WALLET · REDESIGN LAB — "The Companion"
+   --------------------------------------------------------------------------
+   DEV-only design proposal (`?preview=redesign`). Scoped ENTIRELY under `.rd`
+   so nothing leaks into the live journal screens. The token values are the
+   LANDING's locked family spec, ported verbatim (apps/landing/src/theme.css):
+   light broadsheet default · dark cinema alternate · the corporate business
+   room via [data-rd-room='business'].
+
+   LAWS enforced here: no left accent rails · elevation by hairline/light ·
+   ONE blue, ~3 spends per screen · money is mono+tabular ink · green/red true
+   status only · glass only as a floating surface · house ease (0.16,1,0.3,1)
+   · radii tokened (the rounded-glass era: cards 12-22px, controls 8-12px,
+   pills ONLY where the thing IS a pill — the iOS switch, chat bubbles, chips).
+   ========================================================================== */
+
+.rd {
+  /* ---- PAPER RAMP (light floor — never pure white) ---- */
+  --rd-ink-0: #eef3f9;
+  --rd-base: #fbfcfe;
+  --rd-surface: #f4f7fb;
+  --rd-raised: #ffffff;
+  --rd-raised-2: #eef3f9;
+
+  /* ---- DEEP-BLUE INK SCALE ---- */
+  --rd-fg: #0a1b2e;
+  --rd-fg-2: #324a5e;
+  --rd-fg-3: #5d7388;
+  --rd-fg-4: #8499ad;
+
+  /* ---- HAIRLINES ---- */
+  --rd-hair: rgba(10, 27, 46, 0.12);
+  --rd-hair-2: rgba(10, 27, 46, 0.06);
+  --rd-hair-strong: rgba(10, 27, 46, 0.2);
+  --rd-rule-fade: linear-gradient(90deg, transparent, var(--rd-hair-strong) 12%, var(--rd-hair) 55%, transparent);
+  --rd-edge-lit: linear-gradient(90deg, transparent, rgba(10, 27, 46, 0.14) 30%, rgba(10, 27, 46, 0.14) 70%, transparent);
+  --rd-card-shadow: 0 1px 2px rgba(10, 27, 46, 0.04);
+
+  /* ---- THE ONE BLUE ---- */
+  --rd-blue: #1e7fd6;
+  --rd-blue-deep: #1668c9;
+  --rd-blue-bright: #4da2ff;
+  --rd-blue-ice: #9fd2ff;
+  --rd-wash: rgba(30, 127, 214, 0.07);
+  --rd-glow: rgba(30, 127, 214, 0.22);
+  --rd-hair-blue: rgba(30, 127, 214, 0.3);
+  --rd-grad-hot: linear-gradient(118deg, var(--rd-blue-deep) 0%, var(--rd-blue) 34%, var(--rd-blue-bright) 70%, var(--rd-blue-ice) 100%);
+  --rd-grad-accent: linear-gradient(135deg, var(--rd-blue-deep) 0%, var(--rd-blue) 60%, var(--rd-blue-bright) 100%);
+
+  /* ---- STATUS (true semantics ONLY) ---- */
+  --rd-bull: #0e7048;
+  --rd-bear: #b5342b;
+
+  /* ---- GLASS (the hero-convo material, ported) ---- */
+  --rd-glass-fill: rgba(255, 255, 255, 0.6);
+  --rd-glass-edge: rgba(255, 255, 255, 0.9);
+  --rd-glass-shadow: rgba(20, 50, 96, 0.3);
+  --rd-quiet: rgba(10, 27, 46, 0.06);
+  --rd-flash: rgba(30, 127, 214, 0.16);
+
+  /* ---- TYPE ---- */
+  --rd-sans: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  --rd-mono: 'Martian Mono', 'JetBrains Mono', ui-monospace, monospace;
+  --rd-serif: 'Newsreader', Georgia, serif;
+  --rd-wordmark: 'Hashgraph Title', 'Space Grotesk', sans-serif;
+
+  /* ---- GEOMETRY ---- */
+  --rd-r-4: 4px;
+  --rd-r-8: 8px;
+  --rd-r-12: 12px;
+  --rd-r-16: 16px;
+  --rd-r-22: 22px;
+  --rd-r-pill: 999px;
+  --rd-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* the chassis */
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--rd-sans);
+  color: var(--rd-fg);
+  background:
+    radial-gradient(150% 100% at 50% -10%, var(--rd-wash), transparent 55%),
+    var(--rd-base);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* the paper grain — the 24px press dot-grid (stronger now: it gives the glass
+   its tooth) */
+.rd::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(10, 27, 46, 0.55) 0.6px, transparent 0.7px);
+  background-size: 24px 24px;
+  opacity: 0.026;
+}
+
+/* ==========================================================================
+   THE AMBIENT FIELD — the liquid-glass backdrop. Big, soft, slow color washes
+   (the family blue + the violet + a breath of ice) drifting under everything,
+   so frosted surfaces have something to refract. Pure CSS, two composited
+   layers, 26–34s drifts — never a focus-stealer, never "blue snow".
+   Reads the room's --rd-blue, so the business room re-tints it automatically.
+   ========================================================================== */
+.rd-amb {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.rd-amb::before,
+.rd-amb::after {
+  content: '';
+  position: absolute;
+  inset: -22%;
+  will-change: transform;
+}
+.rd-amb::before {
+  background:
+    radial-gradient(42% 38% at 76% 14%, color-mix(in srgb, var(--rd-blue) 16%, transparent), transparent 70%),
+    radial-gradient(36% 34% at 12% 78%, rgba(139, 148, 255, 0.12), transparent 70%);
+  animation: rd-amb-a 28s ease-in-out infinite alternate;
+}
+.rd-amb::after {
+  background:
+    radial-gradient(30% 26% at 30% 22%, color-mix(in srgb, var(--rd-blue-ice) 22%, transparent), transparent 72%),
+    radial-gradient(34% 30% at 86% 84%, color-mix(in srgb, var(--rd-blue) 10%, transparent), transparent 70%);
+  animation: rd-amb-b 36s ease-in-out infinite alternate;
+}
+:root[data-theme='dark'] .rd-amb::before {
+  background:
+    radial-gradient(42% 38% at 76% 14%, color-mix(in srgb, var(--rd-blue) 20%, transparent), transparent 70%),
+    radial-gradient(36% 34% at 12% 78%, rgba(139, 148, 255, 0.14), transparent 70%);
+}
+:root[data-theme='dark'] .rd-amb::after {
+  background:
+    radial-gradient(30% 26% at 30% 22%, color-mix(in srgb, var(--rd-blue-bright) 12%, transparent), transparent 72%),
+    radial-gradient(34% 30% at 86% 84%, color-mix(in srgb, var(--rd-blue) 13%, transparent), transparent 70%);
+}
+@keyframes rd-amb-a {
+  from { transform: translate3d(-2.5%, -1.5%, 0) scale(1); }
+  to { transform: translate3d(2.5%, 2%, 0) scale(1.06); }
+}
+@keyframes rd-amb-b {
+  from { transform: translate3d(2%, 1%, 0) scale(1.04); }
+  to { transform: translate3d(-2%, -2%, 0) scale(1); }
+}
+/* a faint editorial vignette so depth reads at the edges */
+.rd-amb i {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 90% at 50% 40%, transparent 62%, rgba(10, 27, 46, 0.05) 100%);
+}
+:root[data-theme='dark'] .rd-amb i {
+  background: radial-gradient(120% 90% at 50% 40%, transparent 58%, rgba(0, 0, 0, 0.28) 100%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rd-amb::before,
+  .rd-amb::after {
+    animation: none;
+  }
+}
+
+/* ---- DARK — the cinema alternate, LIFTED (owner: "less dark") ---- */
+:root[data-theme='dark'] .rd {
+  --rd-ink-0: #0e1118;
+  --rd-base: #13161e;
+  --rd-surface: #181c26;
+  --rd-raised: #1f2430;
+  --rd-raised-2: #262c3a;
+  --rd-fg: #eceff3;
+  --rd-fg-2: #aeb6c2;
+  --rd-fg-3: #7d8795;
+  --rd-fg-4: #565f6d;
+  --rd-hair: rgba(236, 239, 243, 0.1);
+  --rd-hair-2: rgba(236, 239, 243, 0.06);
+  --rd-hair-strong: rgba(236, 239, 243, 0.17);
+  --rd-rule-fade: linear-gradient(90deg, transparent, var(--rd-hair-strong) 12%, var(--rd-hair) 55%, transparent);
+  --rd-edge-lit: linear-gradient(90deg, transparent, rgba(236, 239, 243, 0.16) 30%, rgba(236, 239, 243, 0.16) 70%, transparent);
+  --rd-card-shadow: inset 0 1px 0 0 rgba(236, 239, 243, 0.04);
+  --rd-blue: #4da2ff;
+  --rd-blue-deep: #2e7bd6;
+  --rd-blue-bright: #7ac4ff;
+  --rd-blue-ice: #b9defa;
+  --rd-wash: rgba(77, 162, 255, 0.09);
+  --rd-glow: rgba(77, 162, 255, 0.45);
+  --rd-hair-blue: rgba(77, 162, 255, 0.34);
+  --rd-bull: #34d399;
+  --rd-bear: #f87171;
+  --rd-glass-fill: rgba(34, 42, 58, 0.52);
+  --rd-glass-edge: rgba(170, 190, 220, 0.2);
+  --rd-glass-shadow: rgba(0, 0, 0, 0.55);
+  --rd-quiet: rgba(236, 239, 243, 0.08);
+  --rd-flash: rgba(77, 162, 255, 0.2);
+}
+:root[data-theme='dark'] .rd::after {
+  background-image: radial-gradient(rgba(236, 239, 243, 0.5) 0.6px, transparent 0.7px);
+  opacity: 0.034;
+}
+
+/* ---- BUSINESS ROOM — light-corporate (cool paper, more serious) ---- */
+.rd[data-rd-room='business'] {
+  --rd-ink-0: #e3ebf7;
+  --rd-base: #eef3fb;
+  --rd-surface: #e3ebf7;
+  --rd-raised: #ffffff;
+  --rd-raised-2: #eaf1fb;
+  --rd-fg: #0a1b33;
+  --rd-fg-2: #324a68;
+  --rd-fg-3: #5d7290;
+  --rd-fg-4: #93a4be;
+  --rd-hair: rgba(20, 50, 95, 0.14);
+  --rd-hair-2: rgba(20, 50, 95, 0.06);
+  --rd-hair-strong: rgba(20, 50, 95, 0.22);
+  --rd-blue: #1c5cb8;
+  --rd-blue-deep: #15468f;
+  --rd-blue-bright: #2f7fe0;
+  --rd-blue-ice: #7fb4ef;
+  --rd-wash: rgba(28, 92, 184, 0.08);
+  --rd-glow: rgba(28, 92, 184, 0.26);
+  --rd-hair-blue: rgba(28, 92, 184, 0.3);
+  --rd-grad-hot: linear-gradient(120deg, #15468f 0%, #1c5cb8 45%, #2f7fe0 100%);
+  --rd-grad-accent: linear-gradient(120deg, #15468f 0%, #1c5cb8 45%, #2f7fe0 100%);
+}
+/* ---- BUSINESS ROOM, dark — deep-water corporate, lifted to match ---- */
+:root[data-theme='dark'] .rd[data-rd-room='business'] {
+  --rd-ink-0: #0c1726;
+  --rd-base: #101e33;
+  --rd-surface: #142640;
+  --rd-raised: #1a3052;
+  --rd-raised-2: #21406b;
+  --rd-fg: #e7edf5;
+  --rd-fg-2: #a7b6cb;
+  --rd-fg-3: #6f819b;
+  --rd-fg-4: #495a74;
+  --rd-hair: rgba(180, 205, 240, 0.12);
+  --rd-hair-2: rgba(180, 205, 240, 0.06);
+  --rd-hair-strong: rgba(180, 205, 240, 0.2);
+  --rd-blue: #2f7fe0;
+  --rd-blue-deep: #1c5cb8;
+  --rd-blue-bright: #5ea6f5;
+  --rd-blue-ice: #9cc8f8;
+  --rd-wash: rgba(47, 127, 224, 0.12);
+  --rd-glow: rgba(47, 127, 224, 0.4);
+  --rd-hair-blue: rgba(47, 127, 224, 0.34);
+  --rd-grad-hot: linear-gradient(120deg, #1c5cb8 0%, #2f7fe0 45%, #5ea6f5 100%);
+  --rd-grad-accent: linear-gradient(120deg, #1c5cb8 0%, #2f7fe0 45%, #5ea6f5 100%);
+  --rd-glass-fill: rgba(13, 28, 50, 0.56);
+  --rd-glass-edge: rgba(160, 190, 230, 0.16);
+}
+
+/* custom cursor over the whole lab (the .j-cursor-* layers are global) */
+@media (hover: hover) and (pointer: fine) {
+  .rd,
+  .rd a,
+  .rd button,
+  .rd input,
+  .rd textarea {
+    cursor: none;
+  }
+}
+
+/* ==========================================================================
+   THE HARNESS HEADER — the review switcher. Deliberately quiet meta-chrome:
+   a hairline strip above the views, never part of the design itself.
+   ========================================================================== */
+.rd-lab {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 46px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--rd-hair);
+  background: color-mix(in srgb, var(--rd-base) 78%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+  flex: 0 0 auto;
+}
+.rd-lab__tag {
+  font-family: var(--rd-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+  white-space: nowrap;
+}
+.rd-lab__tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 auto;
+}
+.rd-lab__tab {
+  padding: 7px 14px;
+  border-radius: var(--rd-r-8);
+  font-family: var(--rd-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--rd-fg-3);
+  transition: color 0.18s ease, background 0.18s ease;
+}
+.rd-lab__tab:hover {
+  color: var(--rd-fg);
+}
+.rd-lab__tab.is-active {
+  color: var(--rd-fg);
+  background: var(--rd-quiet);
+}
+.rd-lab__key {
+  margin-left: 7px;
+  font-family: var(--rd-mono);
+  font-size: 9px;
+  color: var(--rd-fg-4);
+}
+/* the theme glyph — BORDERLESS, always (owner law 2026-06-10) */
+.rd-lab__theme {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--rd-r-8);
+  border: none;
+  color: var(--rd-fg-3);
+  background: transparent;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+.rd-lab__theme:hover {
+  color: var(--rd-fg);
+  background: var(--rd-quiet);
+}
+
+/* the per-page VARIANT pills — small segmented choices, right of the tabs */
+.rd-lab__variants {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--rd-r-8);
+  background: var(--rd-quiet);
+}
+.rd-lab__pill {
+  padding: 5px 11px;
+  border-radius: var(--rd-r-8);
+  font-family: var(--rd-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--rd-fg-3);
+  transition: color 0.16s ease, background 0.16s ease;
+}
+.rd-lab__pill:hover {
+  color: var(--rd-fg);
+}
+.rd-lab__pill.is-active {
+  color: var(--rd-fg);
+  background: var(--rd-raised);
+  box-shadow: var(--rd-card-shadow);
+}
+
+/* the view container below the harness strip */
+.rd-stage {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+/* ==========================================================================
+   SHARED PRIMITIVES
+   ========================================================================== */
+
+/* the SUIZE wordmark (Hashgraph, ink→blue clip) */
+.rd-wordmark {
+  font-family: var(--rd-wordmark);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  background: linear-gradient(180deg, var(--rd-fg) 8%, var(--rd-blue) 150%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* the spark glyph (the landing badge mark) */
+.rd-spark {
+  display: inline-flex;
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 0 5px var(--rd-glow));
+}
+.rd-spark svg {
+  display: block;
+  transform-origin: 50% 50%;
+  animation: rd-twinkle 4.5s ease-in-out infinite;
+}
+@keyframes rd-twinkle {
+  0%, 100% { opacity: 0.85; transform: scale(0.94) rotate(0deg); }
+  50% { opacity: 1; transform: scale(1.06) rotate(45deg); }
+}
+
+/* the glass surface (the hero-convo material) */
+.rd-glass {
+  background: var(--rd-glass-fill);
+  border: 1px solid var(--rd-glass-edge);
+  -webkit-backdrop-filter: blur(40px) saturate(1.9) brightness(1.05);
+  backdrop-filter: blur(40px) saturate(1.9) brightness(1.05);
+  box-shadow:
+    0 26px 60px -26px var(--rd-glass-shadow),
+    0 2px 8px -2px var(--rd-glass-shadow),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.5);
+}
+:root[data-theme='dark'] .rd-glass {
+  box-shadow:
+    0 26px 60px -26px var(--rd-glass-shadow),
+    inset 0 1px 0 0 rgba(236, 239, 243, 0.08);
+}
+
+/* the primary CTA — frosted glass, rounded (the reversed-law era) */
+.rd-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 13px 24px;
+  border-radius: var(--rd-r-12);
+  border: 1px solid var(--rd-hair-blue);
+  background: var(--rd-wash);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+  font-family: var(--rd-sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--rd-blue-deep);
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.2s ease, transform 0.12s ease;
+}
+:root[data-theme='dark'] .rd-cta {
+  color: var(--rd-blue-bright);
+}
+.rd-cta:hover {
+  border-color: var(--rd-blue);
+  background: color-mix(in srgb, var(--rd-blue) 14%, transparent);
+  box-shadow: 0 0 30px -6px var(--rd-glow);
+}
+.rd-cta:active {
+  transform: translateY(1px);
+}
+.rd-cta:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+/* the quiet sibling */
+.rd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 16px;
+  border-radius: var(--rd-r-12);
+  border: 1px solid var(--rd-hair-strong);
+  background: transparent;
+  font-family: var(--rd-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rd-fg-2);
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+.rd-btn:hover {
+  color: var(--rd-fg);
+  border-color: var(--rd-fg-3);
+}
+
+/* money — mono, tabular, ink */
+.rd-money {
+  font-family: var(--rd-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--rd-fg);
+}
+
+/* a fading rule */
+.rd-rule {
+  height: 1px;
+  background: var(--rd-rule-fade);
+}
+
+/* caps microlabel */
+.rd-label {
+  font-family: var(--rd-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+}
+
+/* the iOS switch (the ONE sanctioned pill control — it IS a switch) */
+.rd-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 24px;
+  border-radius: var(--rd-r-pill);
+  background: var(--rd-quiet);
+  border: none;
+  transition: background 0.24s var(--rd-ease);
+  flex: 0 0 auto;
+}
+.rd-switch.is-on {
+  background: var(--rd-grad-accent);
+  box-shadow: 0 2px 10px -3px var(--rd-glow);
+}
+.rd-switch i {
+  position: absolute;
+  top: 2.5px;
+  left: 2.5px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(6, 16, 30, 0.4);
+  transition: transform 0.24s var(--rd-ease);
+}
+.rd-switch.is-on i {
+  transform: translateX(15px);
+}
+
+/* ==========================================================================
+   THE CHAT LANGUAGE — bubbles, typing, dividers, chips (the hero artifact,
+   grown into an app surface).
+   ========================================================================== */
+.rd-row {
+  display: flex;
+  width: 100%;
+  opacity: 0;
+  transform: translateY(8px) scale(0.985);
+  transition: opacity 0.5s var(--rd-ease), transform 0.5s var(--rd-ease);
+}
+.rd-row.is-in {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.rd-row--you {
+  justify-content: flex-end;
+}
+.rd-row--ai {
+  justify-content: flex-start;
+}
+.rd-bubble {
+  max-width: 72%;
+  padding: 11px 14px;
+  border-radius: var(--rd-r-16);
+  font-size: 14px;
+  line-height: 1.45;
+  letter-spacing: -0.005em;
+}
+.rd-row--you .rd-bubble {
+  background: var(--rd-grad-accent);
+  color: #fff;
+  border-bottom-right-radius: 5px;
+  box-shadow: 0 6px 18px -8px var(--rd-glow);
+}
+.rd-row--ai .rd-bubble {
+  background: var(--rd-quiet);
+  color: var(--rd-fg);
+  border: 1px solid var(--rd-hair);
+  border-bottom-left-radius: 5px;
+}
+
+/* the typing dots */
+.rd-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 2px;
+}
+.rd-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rd-fg-3);
+  animation: rd-typing 1.2s ease-in-out infinite;
+}
+.rd-dots span:nth-child(2) { animation-delay: 0.18s; }
+.rd-dots span:nth-child(3) { animation-delay: 0.36s; }
+@keyframes rd-typing {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* day divider — a caps label on a fading hairline */
+.rd-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 6px 0 2px;
+}
+.rd-divider::before,
+.rd-divider::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+}
+.rd-divider::before {
+  background: linear-gradient(90deg, transparent, var(--rd-hair));
+}
+.rd-divider::after {
+  background: linear-gradient(90deg, var(--rd-hair), transparent);
+}
+.rd-divider span {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--rd-fg-4);
+  white-space: nowrap;
+}
+
+/* the "Paid · logged" record chip (inside a bubble, its own line) */
+.rd-paid {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  margin-top: 9px;
+  padding: 4px 10px 4px 7px;
+  border-radius: var(--rd-r-pill);
+  background: var(--rd-glass-fill);
+  border: 1px solid var(--rd-hair);
+  font-family: var(--rd-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--rd-fg-2);
+  text-decoration: none;
+  transition: border-color 0.18s ease, color 0.18s ease;
+}
+.rd-paid:hover {
+  border-color: var(--rd-hair-blue);
+  color: var(--rd-blue);
+}
+.rd-paid i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 5px;
+  background: var(--rd-grad-accent);
+  color: #fff;
+  flex: 0 0 auto;
+}
+
+/* suggestion chips (empty thread / under the composer) */
+.rd-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+.rd-chip {
+  padding: 8px 14px;
+  border-radius: var(--rd-r-pill);
+  border: 1px solid var(--rd-hair);
+  background: var(--rd-glass-fill);
+  -webkit-backdrop-filter: blur(12px) saturate(1.3);
+  backdrop-filter: blur(12px) saturate(1.3);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--rd-fg-2);
+  transition: color 0.18s ease, border-color 0.18s ease, transform 0.12s ease;
+}
+.rd-chip:hover {
+  color: var(--rd-fg);
+  border-color: var(--rd-fg-4);
+  transform: translateY(-1px);
+}
+
+/* THE CONFIRM CARD — the signature moment. A glass card IN the thread. */
+.rd-confirm {
+  width: min(340px, 88%);
+  border-radius: var(--rd-r-16);
+  overflow: hidden;
+}
+.rd-confirm__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rd-hair);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+}
+.rd-confirm__body {
+  padding: 13px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rd-confirm__merchant {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--rd-fg);
+}
+.rd-confirm__detail {
+  font-size: 12px;
+  color: var(--rd-fg-3);
+}
+.rd-confirm__amount {
+  margin-top: 9px;
+  font-family: var(--rd-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--rd-fg);
+  line-height: 1;
+}
+.rd-confirm__source {
+  font-size: 11.5px;
+  color: var(--rd-fg-3);
+  margin-top: 4px;
+}
+.rd-confirm__acts {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+.rd-confirm__acts .rd-cta {
+  flex: 1 1 auto;
+  padding: 10px 16px;
+  font-size: 12.5px;
+}
+.rd-confirm__acts .rd-btn {
+  flex: 0 0 auto;
+}
+/* collapsed (paid) state */
+.rd-confirm.is-done .rd-confirm__acts {
+  display: none;
+}
+.rd-confirm__done {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rd-bull);
+}
+.rd-confirm.is-done .rd-confirm__done {
+  display: flex;
+}
+
+/* ==========================================================================
+   THE WALLET VIEW — history rail · thread · books slide-over.
+   ========================================================================== */
+.rd-wallet {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 252px minmax(0, 1fr);
+}
+
+/* ---- the history rail ---- */
+.rd-rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--rd-hair);
+  background: color-mix(in srgb, var(--rd-surface) 60%, transparent);
+}
+.rd-rail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 16px 16px 10px;
+}
+.rd-rail__new {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: var(--rd-r-8);
+  border: 1px solid var(--rd-hair);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--rd-fg-2);
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+.rd-rail__new:hover {
+  color: var(--rd-blue);
+  border-color: var(--rd-hair-blue);
+}
+.rd-rail__list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px 8px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rd-rail__group {
+  padding: 12px 8px 5px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--rd-fg-4);
+}
+.rd-rail__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: var(--rd-r-8);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--rd-fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.16s ease, background 0.16s ease;
+}
+.rd-rail__item:hover {
+  color: var(--rd-fg);
+  background: var(--rd-quiet);
+}
+.rd-rail__item.is-active {
+  color: var(--rd-fg);
+  background: var(--rd-quiet);
+  font-weight: 600;
+}
+
+/* ---- the wallet main column ---- */
+.rd-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+/* the masthead — wordmark+handle left · balance + switch + books right */
+.rd-mast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px clamp(16px, 3vw, 28px);
+  border-bottom: 1px solid var(--rd-hair);
+  flex: 0 0 auto;
+}
+.rd-mast__left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.rd-mast__sep {
+  width: 1px;
+  height: 16px;
+  background: var(--rd-hair-strong);
+}
+.rd-mast__handle {
+  font-family: var(--rd-mono);
+  font-size: 11.5px;
+  color: var(--rd-fg-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rd-mast__right {
+  display: flex;
+  align-items: center;
+  gap: clamp(12px, 2vw, 22px);
+}
+.rd-mast__bal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  border-radius: var(--rd-r-8);
+  transition: background 0.16s ease;
+}
+.rd-mast__bal:hover {
+  background: var(--rd-quiet);
+}
+.rd-mast__ballabel {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+}
+.rd-mast__balnum {
+  font-family: var(--rd-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--rd-fg);
+  line-height: 1.15;
+  border-radius: var(--rd-r-8);
+  margin: 0 -6px;
+  padding: 0 6px;
+}
+.rd-mast__balnum.is-paid {
+  animation: rd-debit 1.5s var(--rd-ease) both;
+}
+/* the standalone debit-flash utility — any money number can take the moment */
+.rd-debit-flash {
+  animation: rd-debit 1.5s var(--rd-ease) both;
+}
+@keyframes rd-debit {
+  0% { background-color: var(--rd-flash); color: var(--rd-blue); }
+  70% { background-color: var(--rd-flash); }
+  100% { background-color: transparent; color: var(--rd-fg); }
+}
+.rd-mast__agent {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rd-fg-2);
+  white-space: nowrap;
+}
+
+/* the thread surface */
+.rd-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.rd-thread__inner {
+  width: min(720px, 100%);
+  margin: 0 auto;
+  padding: clamp(20px, 3.5vh, 36px) clamp(16px, 3vw, 24px) 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 12px;
+  flex: 1 1 auto;
+}
+
+/* empty-state (a new chat) — a serif welcome + chips */
+.rd-empty {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  text-align: center;
+  padding: 24px 16px;
+}
+.rd-empty__title {
+  font-family: var(--rd-serif);
+  font-size: clamp(24px, 3.4vw, 34px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.12;
+  color: var(--rd-fg);
+  margin: 0;
+}
+.rd-empty__sub {
+  font-size: 13.5px;
+  color: var(--rd-fg-3);
+  margin: -10px 0 0;
+}
+
+/* the composer — a floating glass input docked at the foot */
+.rd-composer {
+  flex: 0 0 auto;
+  padding: 10px clamp(16px, 3vw, 24px) 16px;
+}
+.rd-composer__box {
+  width: min(720px, 100%);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 6px 6px 18px;
+  border-radius: var(--rd-r-16);
+}
+.rd-composer__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--rd-sans);
+  font-size: 14px;
+  color: var(--rd-fg);
+  padding: 10px 0;
+}
+.rd-composer__input::placeholder {
+  color: var(--rd-fg-4);
+}
+.rd-composer__send {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--rd-r-12);
+  background: var(--rd-grad-accent);
+  color: #fff;
+  box-shadow: 0 6px 16px -7px var(--rd-glow);
+  transition: transform 0.12s ease, box-shadow 0.2s ease;
+  flex: 0 0 auto;
+}
+.rd-composer__send:hover {
+  box-shadow: 0 8px 22px -7px var(--rd-glow);
+}
+.rd-composer__send:active {
+  transform: translateY(1px);
+}
+.rd-composer__send:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.rd-composer__note {
+  width: min(720px, 100%);
+  margin: 8px auto 0;
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--rd-fg-4);
+}
+
+/* ---- THE BOOKS — the slide-over panel ---- */
+.rd-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: rgba(10, 27, 46, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+:root[data-theme='dark'] .rd-scrim {
+  background: rgba(7, 9, 12, 0.55);
+}
+.rd-scrim.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.rd-books {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9;
+  width: min(400px, 94vw);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--rd-hair);
+  background: var(--rd-base);
+  transform: translateX(102%);
+  transition: transform 0.34s var(--rd-ease);
+  overflow: hidden;
+}
+.rd-books.is-open {
+  transform: translateX(0);
+}
+.rd-books__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--rd-hair);
+  flex: 0 0 auto;
+}
+.rd-books__title {
+  font-family: var(--rd-serif);
+  font-size: 21px;
+  font-weight: 500;
+  color: var(--rd-fg);
+  margin: 0;
+}
+.rd-books__close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--rd-r-8);
+  color: var(--rd-fg-3);
+  transition: color 0.16s ease, background 0.16s ease;
+}
+.rd-books__close:hover {
+  color: var(--rd-fg);
+  background: var(--rd-quiet);
+}
+.rd-books__scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 18px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* the two pots */
+.rd-pot {
+  position: relative;
+  border: 1px solid var(--rd-hair);
+  border-radius: var(--rd-r-12);
+  background: var(--rd-raised);
+  box-shadow: var(--rd-card-shadow);
+  padding: 15px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rd-pot::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: var(--rd-edge-lit);
+  pointer-events: none;
+}
+.rd-pot__num {
+  font-family: var(--rd-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--rd-fg);
+  line-height: 1.1;
+  margin-top: 3px;
+}
+.rd-pot__note {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--rd-fg-3);
+}
+.rd-pot__acts {
+  margin-top: 9px;
+  display: flex;
+  gap: 8px;
+}
+.rd-pot__acts .rd-btn {
+  padding: 7px 13px;
+  font-size: 11.5px;
+}
+
+/* section heads inside the books */
+.rd-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rd-sec__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.rd-sec__title {
+  font-family: var(--rd-serif);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--rd-fg);
+  margin: 0;
+}
+.rd-sec__meta {
+  font-size: 10.5px;
+  color: var(--rd-fg-4);
+  text-align: right;
+}
+
+/* single-line ledger rows with dotted leaders */
+.rd-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  font-size: 12.5px;
+  color: var(--rd-fg-2);
+  min-width: 0;
+}
+.rd-line + .rd-line {
+  border-top: 1px solid var(--rd-hair-2);
+}
+.rd-line__body {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--rd-fg);
+}
+.rd-line__when {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--rd-fg-4);
+}
+.rd-line__dots {
+  flex: 1 1 auto;
+  min-width: 14px;
+  height: 1px;
+  background-image: radial-gradient(circle, var(--rd-fg-4) 0.8px, transparent 0.9px);
+  background-size: 7px 1.6px;
+  background-repeat: repeat-x;
+  background-position: center;
+  opacity: 0.55;
+}
+.rd-line__amt {
+  flex: 0 0 auto;
+  font-family: var(--rd-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rd-fg);
+}
+/* green/red are reserved for TRUE status only — a plain in-flow stays ink;
+   the sign carries direction (the landing's evolved money law). */
+.rd-line__verify {
+  flex: 0 0 auto;
+  font-family: var(--rd-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rd-fg-4);
+  text-decoration: none;
+  transition: color 0.16s ease;
+}
+.rd-line__verify:hover {
+  color: var(--rd-blue);
+}
+.rd-line__cancel {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--rd-fg-4);
+  transition: color 0.16s ease;
+}
+.rd-line__cancel:hover {
+  color: var(--rd-bear);
+}
+
+/* the custody footnote */
+.rd-custody {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--rd-fg-4);
+  margin: 0;
+}
+.rd-custody b {
+  color: var(--rd-fg-3);
+  font-weight: 600;
+}
+
+/* mobile drawer trigger buttons live in the masthead */
+.rd-mast__menu {
+  display: none;
+}
+
+/* ==========================================================================
+   THE ONBOARDING — one centered glass pane, three beats.
+   ========================================================================== */
+.rd-onb {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  padding: clamp(20px, 5vh, 56px) clamp(16px, 4vw, 32px);
+  overflow-y: auto;
+}
+.rd-onb__pane {
+  width: min(480px, 100%);
+  border-radius: var(--rd-r-22);
+  padding: clamp(26px, 4vw, 38px) clamp(22px, 3.6vw, 34px) clamp(22px, 3vw, 30px);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: rd-rise 0.7s var(--rd-ease) both;
+}
+@keyframes rd-rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.rd-onb__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.rd-onb__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+}
+.rd-onb__h1 {
+  font-family: var(--rd-serif);
+  font-size: clamp(30px, 5vw, 40px);
+  font-weight: 500;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  color: var(--rd-fg);
+  margin: 0;
+}
+.rd-onb__hot {
+  background: var(--rd-grad-hot);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.rd-onb__sub {
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--rd-fg-2);
+  margin: -6px 0 0;
+}
+.rd-onb__cta {
+  width: 100%;
+}
+.rd-onb__custody {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--rd-fg-4);
+  margin: 0;
+  text-align: center;
+}
+
+/* the name beat — chat-styled inside the same pane */
+.rd-onb__threadlet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rd-namebox {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 14px;
+  border-radius: var(--rd-r-12);
+  border: 1px solid var(--rd-hair-strong);
+  background: var(--rd-raised);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.rd-namebox:focus-within {
+  border-color: var(--rd-blue);
+  box-shadow: 0 0 0 3px var(--rd-wash);
+}
+.rd-namebox input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--rd-mono);
+  font-size: 15px;
+  color: var(--rd-fg);
+  padding: 10px 0;
+}
+.rd-namebox input::placeholder {
+  color: var(--rd-fg-4);
+}
+.rd-namebox__suffix {
+  font-family: var(--rd-mono);
+  font-size: 15px;
+  color: var(--rd-fg-4);
+  flex: 0 0 auto;
+}
+.rd-onb__free {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--rd-mono);
+  font-size: 11px;
+  color: var(--rd-bull);
+  min-height: 16px;
+}
+.rd-onb__free.is-idle {
+  color: var(--rd-fg-4);
+}
+
+/* google G mark (inline svg sized here) */
+.rd-gmark {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+/* ==========================================================================
+   THE BUSINESS VIEW — revenue masthead · ledger + receipt · analytics chat.
+   ========================================================================== */
+.rd-biz {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.rd-biz__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.rd-biz__wrap {
+  width: min(1200px, 100%);
+  margin: 0 auto;
+  padding: clamp(20px, 3.5vh, 36px) clamp(16px, 3vw, 28px) 40px;
+}
+
+/* the revenue band — THE big number + split + stats */
+.rd-biz__band {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: clamp(20px, 4vw, 48px);
+  flex-wrap: wrap;
+  padding-bottom: clamp(18px, 3vh, 28px);
+}
+.rd-biz__monthlabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rd-biz__big {
+  font-family: var(--rd-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(40px, 6vw, 64px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
+  margin: 10px 0 0;
+  background: var(--rd-grad-hot);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.rd-biz__delta {
+  font-family: var(--rd-mono);
+  font-size: 11.5px;
+  color: var(--rd-fg-3);
+  margin-top: 8px;
+}
+.rd-biz__split {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: min(320px, 100%);
+}
+.rd-biz__split .rd-line__body {
+  font-weight: 500;
+}
+.rd-biz__split .rd-line--hot .rd-line__body,
+.rd-biz__split .rd-line--hot .rd-line__amt {
+  color: var(--rd-blue);
+}
+.rd-biz__stats {
+  display: flex;
+  gap: clamp(16px, 2.5vw, 32px);
+  flex-wrap: wrap;
+  padding: 14px 0;
+}
+.rd-biz__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rd-biz__stat b {
+  font-family: var(--rd-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--rd-fg);
+}
+.rd-biz__stat span {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rd-fg-4);
+}
+
+/* the working grid: ledger | chat */
+.rd-biz__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 420px);
+  gap: clamp(18px, 2.5vw, 28px);
+  align-items: start;
+  padding-top: clamp(16px, 2.5vh, 24px);
+}
+
+/* the receipt artifact (opened under its ledger row) */
+.rd-receipt {
+  margin: 8px 0 10px;
+  border: 1px solid var(--rd-hair);
+  border-radius: var(--rd-r-12);
+  background: var(--rd-raised);
+  box-shadow: var(--rd-card-shadow);
+  overflow: hidden;
+}
+.rd-receipt__head {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--rd-hair);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+}
+.rd-receipt__rows {
+  padding: 6px 14px;
+}
+.rd-receipt__foot {
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--rd-hair-2);
+  font-size: 10px;
+  color: var(--rd-fg-4);
+}
+
+/* the analytics chat pane — a fixed glass column */
+.rd-bizchat {
+  border-radius: var(--rd-r-22);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 480px;
+  max-height: min(640px, 72vh);
+  position: sticky;
+  top: 18px;
+}
+/* inside the floating dock the chat fills the panel — no sticky, no caps */
+.rd-bizchat--dock {
+  position: static;
+  max-height: none;
+  min-height: 0;
+  height: 100%;
+}
+.rd-bizchat__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--rd-hair);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+  flex: 0 0 auto;
+}
+.rd-bizchat__thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.rd-bizchat__thread .rd-bubble {
+  font-size: 13px;
+  max-width: 86%;
+}
+.rd-bizchat__chips {
+  padding: 4px 14px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.rd-bizchat__chips .rd-chip {
+  font-size: 11px;
+  padding: 6px 11px;
+}
+.rd-bizchat__composer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 12px;
+  padding: 4px 4px 4px 14px;
+  border-radius: var(--rd-r-12);
+  border: 1px solid var(--rd-hair);
+  background: var(--rd-raised);
+  flex: 0 0 auto;
+}
+.rd-bizchat__composer input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--rd-sans);
+  font-size: 13px;
+  color: var(--rd-fg);
+  padding: 8px 0;
+}
+.rd-bizchat__composer input::placeholder {
+  color: var(--rd-fg-4);
+}
+.rd-bizchat__composer .rd-composer__send {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--rd-r-8);
+}
+
+/* the week bars artifact (inside an ai bubble) */
+.rd-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 7px;
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rd-hair);
+}
+.rd-bars__col {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  justify-content: flex-end;
+}
+.rd-bars__bar {
+  width: 100%;
+  border-radius: 3px 3px 1px 1px;
+  background: linear-gradient(180deg, var(--rd-blue-bright), var(--rd-blue));
+  opacity: 0.85;
+  min-height: 4px;
+  transform-origin: bottom;
+  animation: rd-bar-in 0.7s var(--rd-ease) both;
+}
+@keyframes rd-bar-in {
+  from { transform: scaleY(0.2); opacity: 0; }
+  to { transform: scaleY(1); opacity: 0.85; }
+}
+.rd-bars__day {
+  font-family: var(--rd-mono);
+  font-size: 8.5px;
+  color: var(--rd-fg-4);
+}
+.rd-bars__label {
+  margin-top: 7px;
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rd-fg-4);
+}
+
+/* a key-value list inside an ai bubble (top agents) */
+.rd-kv {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rd-hair);
+  display: flex;
+  flex-direction: column;
+}
+.rd-kv .rd-line {
+  padding: 5px 0;
+  font-size: 12px;
+}
+
+/* ==========================================================================
+   THE ASSISTANT PANEL — the SECONDARY chat every wallet variant docks.
+   Glass column by default; `--flat` is the journal rail (no glass).
+   ========================================================================== */
+.rd-asst {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  border-radius: var(--rd-r-22);
+  overflow: hidden;
+}
+.rd-asst--flat {
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+.rd-asst__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 13px 16px 11px;
+  border-bottom: 1px solid var(--rd-hair);
+  flex: 0 0 auto;
+}
+.rd-asst__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+  white-space: nowrap;
+}
+.rd-asst__arm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--rd-fg-2);
+  white-space: nowrap;
+}
+/* recent conversations — a TOP-DOWN list (owner law: never a single line) */
+.rd-asst__recent {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid var(--rd-hair-2);
+  flex: 0 0 auto;
+}
+.rd-asst__recenthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px 6px;
+}
+.rd-asst__new {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: var(--rd-r-8);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--rd-fg-3);
+  transition: color 0.16s ease, background 0.16s ease;
+}
+.rd-asst__new:hover {
+  color: var(--rd-blue);
+  background: var(--rd-wash);
+}
+.rd-asst__item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 8px;
+  border-radius: var(--rd-r-8);
+  transition: background 0.16s ease;
+}
+.rd-asst__item:hover {
+  background: var(--rd-quiet);
+}
+.rd-asst__item.is-active {
+  background: var(--rd-quiet);
+}
+.rd-asst__itemtitle {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--rd-fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rd-asst__item.is-active .rd-asst__itemtitle {
+  color: var(--rd-fg);
+  font-weight: 600;
+}
+.rd-asst__itemwhen {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--rd-fg-4);
+}
+.rd-asst__thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.rd-asst__thread .rd-bubble {
+  font-size: 13px;
+  max-width: 88%;
+}
+.rd-asst__empty {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+  padding: 12px 6px;
+}
+.rd-asst__emptytitle {
+  font-family: var(--rd-serif);
+  font-size: 19px;
+  font-weight: 500;
+  color: var(--rd-fg);
+  margin: 0;
+}
+.rd-asst__empty .rd-chip {
+  font-size: 11px;
+  padding: 6px 11px;
+}
+.rd-asst__composer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 12px 12px;
+  padding: 4px 4px 4px 14px;
+  border-radius: var(--rd-r-12);
+  border: 1px solid var(--rd-hair);
+  background: var(--rd-raised);
+  flex: 0 0 auto;
+}
+.rd-asst--flat .rd-asst__composer {
+  margin: 4px 0 0;
+}
+.rd-asst__composer input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--rd-sans);
+  font-size: 13px;
+  color: var(--rd-fg);
+  padding: 8px 0;
+}
+.rd-asst__composer input::placeholder {
+  color: var(--rd-fg-4);
+}
+.rd-asst__composer .rd-composer__send {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--rd-r-8);
+}
+/* the confirm card without glass (the flat rail) still needs a surface */
+.rd-asst--flat .rd-confirm {
+  border: 1px solid var(--rd-hair);
+  background: var(--rd-raised);
+  box-shadow: var(--rd-card-shadow);
+}
+
+/* ---- THE FLOATING DOCK — chat at its most secondary (Minimal variants) ---- */
+.rd-dock {
+  position: absolute;
+  right: 22px;
+  bottom: 22px;
+  z-index: 12;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 18px;
+  border-radius: var(--rd-r-pill);
+  background: var(--rd-glass-fill);
+  border: 1px solid var(--rd-glass-edge);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
+  box-shadow: 0 14px 36px -14px var(--rd-glass-shadow);
+  font-family: var(--rd-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rd-fg);
+  transition: transform 0.2s var(--rd-ease), box-shadow 0.2s ease;
+}
+.rd-dock:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 42px -14px var(--rd-glass-shadow);
+}
+.rd-dock.is-open {
+  opacity: 0;
+  pointer-events: none;
+}
+.rd-dockpanel {
+  position: absolute;
+  right: 22px;
+  bottom: 22px;
+  z-index: 13;
+  width: min(390px, calc(100vw - 32px));
+  height: min(580px, 78%);
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transform: translateY(14px) scale(0.99);
+  pointer-events: none;
+  transition: opacity 0.3s var(--rd-ease), transform 0.3s var(--rd-ease);
+}
+.rd-dockpanel.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.rd-dockpanel > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.rd-dockpanel__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--rd-r-8);
+  color: var(--rd-fg-3);
+  transition: color 0.16s ease, background 0.16s ease;
+}
+.rd-dockpanel__close:hover {
+  color: var(--rd-fg);
+  background: var(--rd-quiet);
+}
+
+/* ==========================================================================
+   ONBOARDING · JOURNEY — the refined real flow, full-bleed editorial beats.
+   ========================================================================== */
+.rd-jny {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  padding: clamp(32px, 7vh, 80px) clamp(20px, 6vw, 96px);
+  overflow-y: auto;
+}
+.rd-jny__beat {
+  width: 100%;
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(18px, 3.5vh, 30px);
+}
+.rd-jny__beat > * {
+  opacity: 0;
+  transform: translateY(16px);
+  animation: rd-jny-in 0.9s var(--rd-ease) forwards;
+}
+@keyframes rd-jny-in {
+  to { opacity: 1; transform: translateY(0); }
+}
+.rd-jny__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+}
+.rd-jny__eyebrow::before {
+  content: '';
+  width: 18px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--rd-grad-accent);
+}
+.rd-jny__h1 {
+  font-family: var(--rd-serif);
+  font-weight: 400;
+  font-size: clamp(2.4rem, 6.5vw, 4.2rem);
+  line-height: 1.02;
+  letter-spacing: -0.022em;
+  color: var(--rd-fg);
+  margin: 0;
+}
+.rd-jny__thin {
+  color: var(--rd-fg-2);
+  font-weight: 300;
+}
+/* the gradient line + the underline draw (the approved hello signature) */
+.rd-jny__hot {
+  position: relative;
+  white-space: nowrap;
+  background: var(--rd-grad-hot);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.rd-jny__hot::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 100%;
+  bottom: -0.06em;
+  height: 2px;
+  background: var(--rd-grad-accent);
+  animation: rd-jny-ul 1.6s var(--rd-ease) 0.9s forwards;
+}
+@keyframes rd-jny-ul {
+  to { right: 0; }
+}
+.rd-jny__lede {
+  font-family: var(--rd-serif);
+  font-weight: 300;
+  font-size: clamp(1.15rem, 3.5vw, 1.45rem);
+  line-height: 1.45;
+  color: var(--rd-fg-2);
+  max-width: 32ch;
+  margin: 0;
+}
+.rd-jny__cta {
+  align-self: flex-start;
+}
+.rd-jny__custody {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--rd-fg-4);
+  margin: 0;
+}
+.rd-jny__note {
+  font-family: var(--rd-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+  color: var(--rd-fg-3);
+  margin: 0;
+}
+
+/* the NAME field — the approved signature: the handle typed BIG + inline */
+.rd-jny__field {
+  display: flex;
+  align-items: baseline;
+  border-bottom: 1px solid var(--rd-hair-strong);
+  padding-bottom: 14px;
+  max-width: 620px;
+  transition: border-color 0.2s ease;
+}
+.rd-jny__field:focus-within {
+  border-color: var(--rd-blue);
+}
+.rd-jny__field.is-free {
+  border-color: var(--rd-bull);
+}
+.rd-jny__field input {
+  font-family: var(--rd-mono);
+  font-size: clamp(1.6rem, 4.6vw, 2.6rem);
+  letter-spacing: -0.02em;
+  background: transparent;
+  border: none;
+  outline: none;
+  min-width: 2ch;
+  background-image: var(--rd-grad-accent);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--rd-blue);
+}
+.rd-jny__field input::placeholder {
+  -webkit-text-fill-color: var(--rd-fg-4);
+  opacity: 0.55;
+}
+.rd-jny__suffix {
+  font-family: var(--rd-mono);
+  font-size: clamp(1.6rem, 4.6vw, 2.6rem);
+  letter-spacing: -0.02em;
+  color: var(--rd-fg-4);
+  flex: 0 0 auto;
+}
+.rd-jny__status {
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--rd-mono);
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  color: var(--rd-fg-3);
+}
+.rd-jny__status.is-free {
+  color: var(--rd-bull);
+}
+
+/* the SETUP manifest — the refined loader: rows land with checks under a
+   filling hairline. Calm, honest, visual. */
+.rd-manifest {
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+}
+.rd-manifest__bar {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--rd-hair-2);
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+.rd-manifest__bar i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--rd-grad-accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.7s var(--rd-ease);
+}
+.rd-manifest__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.5s var(--rd-ease), transform 0.5s var(--rd-ease);
+}
+.rd-manifest__row + .rd-manifest__row {
+  border-top: 1px solid var(--rd-hair-2);
+}
+.rd-manifest__row.is-in {
+  opacity: 1;
+  transform: translateY(0);
+}
+.rd-manifest__mark {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--rd-r-6);
+  flex: 0 0 auto;
+  color: #fff;
+  background: var(--rd-quiet);
+  transition: background 0.3s ease;
+}
+.rd-manifest__row.is-done .rd-manifest__mark {
+  background: var(--rd-grad-accent);
+}
+/* the in-flight spinner — discreet, hairline-weight */
+.rd-manifest__spin {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid var(--rd-hair-strong);
+  border-top-color: var(--rd-blue);
+  animation: rd-spin 0.9s linear infinite;
+}
+@keyframes rd-spin {
+  to { transform: rotate(360deg); }
+}
+.rd-manifest__label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--rd-fg);
+  white-space: nowrap;
+}
+.rd-manifest__note {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--rd-fg-4);
+}
+.rd-manifest__row .rd-line__dots {
+  flex: 1 1 auto;
+}
+.rd-jny__done {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.6s var(--rd-ease), transform 0.6s var(--rd-ease);
+  /* exempt from the beat-child entrance animation — the manifest finishing is
+     the ONLY thing allowed to reveal this block */
+  animation: none !important;
+}
+.rd-jny__done.is-in {
+  opacity: 1;
+  transform: translateY(0);
+}
+.rd-jny__donetitle {
+  font-family: var(--rd-serif);
+  font-weight: 400;
+  font-size: clamp(1.7rem, 4.5vw, 2.4rem);
+  letter-spacing: -0.02em;
+  color: var(--rd-fg);
+  margin: 0;
+}
+
+/* ==========================================================================
+   WALLET · DECK — money first: pots + subscriptions + activity own the page;
+   the assistant is a persistent, RESIZABLE right column. R2: more air.
+   ========================================================================== */
+.rd-deck {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.rd-deck__grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  /* columns set inline (main · resizer · aside) — the aside width is draggable */
+  gap: clamp(10px, 1.2vw, 16px);
+  padding: clamp(20px, 3vh, 34px) clamp(18px, 3vw, 36px);
+  max-width: 1360px;
+  width: 100%;
+  margin: 0 auto;
+}
+.rd-deck__main {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(24px, 4vh, 36px);
+  padding-right: 6px;
+}
+.rd-deck__pots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(16px, 2vw, 24px);
+}
+.rd-deck__aside {
+  min-height: 0;
+}
+/* the drag divider — a hairline that thickens on hover; col-resize cursor */
+.rd-deck__resizer {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+}
+.rd-deck__resizer::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 50%;
+  width: 1px;
+  background: var(--rd-hair);
+  transition: background 0.16s ease, width 0.16s ease, transform 0.16s ease;
+}
+.rd-deck__resizer:hover::before,
+.rd-deck__resizer:active::before {
+  width: 3px;
+  transform: translateX(-1px);
+  background: var(--rd-hair-blue);
+  border-radius: 2px;
+}
+
+/* ---- the SECTION CARDS — Subscriptions vs Activity, clearly distinct ---- */
+.rd-secard {
+  --sec: var(--rd-blue);
+  --sec-deep: var(--rd-blue-deep);
+  --sec-wash: var(--rd-wash);
+  position: relative;
+  border: 1px solid var(--rd-hair);
+  border-radius: var(--rd-r-16);
+  background: var(--rd-raised);
+  box-shadow: var(--rd-card-shadow);
+  padding: 18px 22px 14px;
+}
+.rd-secard::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--sec) 30%, var(--sec) 70%, transparent);
+  opacity: 0.35;
+  pointer-events: none;
+}
+/* subscriptions = the violet room accent; activity = the house blue */
+.rd-secard--subs {
+  --sec: #8b94ff;
+  --sec-deep: #5c63d6;
+  --sec-wash: rgba(139, 148, 255, 0.1);
+  background: linear-gradient(180deg, rgba(139, 148, 255, 0.045), transparent 38%), var(--rd-raised);
+}
+.rd-secard--act {
+  background: linear-gradient(180deg, rgba(30, 127, 214, 0.04), transparent 38%), var(--rd-raised);
+}
+.rd-secard--rev {
+  --sec: #3fd2c0;
+  --sec-deep: #1f9e91;
+  --sec-wash: rgba(63, 210, 192, 0.1);
+  background: linear-gradient(180deg, rgba(63, 210, 192, 0.05), transparent 38%), var(--rd-raised);
+}
+:root[data-theme='dark'] .rd-secard--subs {
+  background: linear-gradient(180deg, rgba(139, 148, 255, 0.07), transparent 40%), var(--rd-raised);
+}
+:root[data-theme='dark'] .rd-secard--act {
+  background: linear-gradient(180deg, rgba(77, 162, 255, 0.06), transparent 40%), var(--rd-raised);
+}
+:root[data-theme='dark'] .rd-secard--rev {
+  background: linear-gradient(180deg, rgba(63, 210, 192, 0.07), transparent 40%), var(--rd-raised);
+}
+.rd-secard__head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding-bottom: 12px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--rd-hair-2);
+}
+.rd-secard__icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--rd-r-8);
+  background: var(--sec-wash);
+  color: var(--sec-deep);
+  flex: 0 0 auto;
+}
+:root[data-theme='dark'] .rd-secard__icon {
+  color: var(--sec);
+}
+.rd-secard__title {
+  font-family: var(--rd-serif);
+  font-size: 19px;
+  font-weight: 500;
+  color: var(--rd-fg);
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+/* roomier rows inside the cards */
+.rd-line--roomy {
+  padding: 11px 0;
+  font-size: 13px;
+}
+/* the subscription monogram chip (violet) */
+.rd-mono-chip {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--rd-r-8);
+  background: var(--sec-wash, var(--rd-wash));
+  color: var(--sec-deep, var(--rd-blue-deep));
+  font-family: var(--rd-mono);
+  font-size: 11px;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+:root[data-theme='dark'] .rd-mono-chip {
+  color: var(--sec, var(--rd-blue));
+}
+/* the activity direction glyphs — out = blue, in = green (a true incoming) */
+.rd-dir {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--rd-r-8);
+  flex: 0 0 auto;
+}
+.rd-dir--out {
+  background: var(--rd-wash);
+  color: var(--rd-blue-deep);
+}
+.rd-dir--in {
+  background: rgba(14, 112, 72, 0.1);
+  color: var(--rd-bull);
+}
+.rd-dir--none {
+  background: var(--rd-quiet);
+}
+:root[data-theme='dark'] .rd-dir--out {
+  color: var(--rd-blue);
+}
+:root[data-theme='dark'] .rd-dir--in {
+  background: rgba(52, 211, 153, 0.1);
+}
+/* MONEY GETS COLOR (owner R2): amounts are blue mono; sub prices violet */
+.rd-line__amt--money {
+  color: var(--rd-blue-deep);
+}
+.rd-line__amt--sub {
+  color: #5c63d6;
+}
+:root[data-theme='dark'] .rd-line__amt--money {
+  color: var(--rd-blue-bright);
+}
+:root[data-theme='dark'] .rd-line__amt--sub {
+  color: #aab0ff;
+}
+
+/* detected @names — accent-marked everywhere */
+.rd-handle {
+  color: var(--rd-blue-deep);
+  font-weight: 600;
+}
+:root[data-theme='dark'] .rd-handle {
+  color: var(--rd-blue-bright);
+}
+.rd-row--you .rd-bubble .rd-handle {
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* the hot pot — the sub-account number takes the gradient */
+.rd-pot {
+  padding: 18px 20px;
+  gap: 5px;
+}
+.rd-pot--hot {
+  background: linear-gradient(180deg, var(--rd-wash), transparent 46%), var(--rd-raised);
+}
+.rd-pot__num--grad {
+  background: var(--rd-grad-hot);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.rd-pot__num--grad.rd-debit-flash {
+  -webkit-text-fill-color: initial;
+}
+/* an accent-leaning quiet button (the primary verb on a card) */
+.rd-btn--accent {
+  color: var(--rd-blue-deep);
+  border-color: var(--rd-hair-blue);
+  background: var(--rd-wash);
+}
+.rd-btn--accent:hover {
+  color: var(--rd-blue-deep);
+  border-color: var(--rd-blue);
+}
+:root[data-theme='dark'] .rd-btn--accent {
+  color: var(--rd-blue-bright);
+}
+
+/* the compact coming-soon rail (one row of chips — the sheet never scrolls) */
+.rd-sheet__soonrow {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.rd-sheet__soonchips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rd-chip--soon {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: default;
+}
+.rd-chip--soon:hover {
+  transform: none;
+  color: var(--rd-fg-2);
+  border-color: var(--rd-hair);
+}
+
+/* "Soon" pill on the coming-soon rails */
+.rd-soon {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border-radius: var(--rd-r-pill);
+  background: var(--rd-quiet);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+}
+
+/* ==========================================================================
+   THE MONEY SHEETS — centered glass modals over a scrim.
+   ========================================================================== */
+.rd-sheetwrap {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.rd-sheetwrap .rd-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.rd-sheet {
+  position: relative;
+  z-index: 1;
+  width: min(440px, 100%);
+  max-height: min(640px, 92%);
+  overflow-y: auto;
+  border-radius: var(--rd-r-22);
+  padding: 20px 22px 22px;
+  animation: rd-rise 0.4s var(--rd-ease) both;
+  /* the decorative Qr reads --paper-2 for its quiet background — map to our ramp */
+  --paper-2: var(--rd-raised-2);
+}
+.rd-sheet__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.rd-sheet__title {
+  font-family: var(--rd-serif);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--rd-fg);
+  margin: 0;
+}
+.rd-sheet__sub {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--rd-fg-3);
+  margin: 5px 0 0;
+  max-width: 36ch;
+}
+.rd-sheet__body {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+.rd-sheet__qrzone {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+}
+.rd-sheet__qr {
+  flex: 0 0 auto;
+  color: var(--rd-fg);
+  border: 1px solid var(--rd-hair);
+  border-radius: var(--rd-r-12);
+  padding: 8px;
+  background: var(--rd-raised);
+}
+.rd-sheet__qr svg {
+  display: block;
+  border-radius: var(--rd-r-8);
+}
+.rd-sheet__qrside {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.rd-sheet__copyrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: var(--rd-r-8);
+  border: 1px solid var(--rd-hair);
+  background: var(--rd-raised-2);
+  color: var(--rd-fg-2);
+  transition: border-color 0.16s ease, color 0.16s ease;
+  min-width: 0;
+}
+.rd-sheet__copyrow:hover {
+  border-color: var(--rd-hair-blue);
+  color: var(--rd-blue-deep);
+}
+.rd-sheet__copyrow .rd-money {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rd-sheet__copied {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--rd-bull);
+  flex: 0 0 auto;
+}
+.rd-sheet__field {
+  display: flex;
+  align-items: center;
+  padding: 2px 13px;
+  border-radius: var(--rd-r-12);
+  border: 1px solid var(--rd-hair-strong);
+  background: var(--rd-raised);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.rd-sheet__field:focus-within {
+  border-color: var(--rd-blue);
+  box-shadow: 0 0 0 3px var(--rd-wash);
+}
+.rd-sheet__field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--rd-sans);
+  font-size: 13.5px;
+  color: var(--rd-fg);
+  padding: 9px 0;
+}
+.rd-sheet__field input::placeholder {
+  color: var(--rd-fg-4);
+}
+.rd-sheet__amountwrap {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.rd-sheet__amount {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  border-bottom: 1px solid var(--rd-hair-strong);
+  padding-bottom: 10px;
+  transition: border-color 0.18s ease;
+}
+.rd-sheet__amount:focus-within {
+  border-color: var(--rd-blue);
+}
+.rd-sheet__amount span {
+  font-family: var(--rd-mono);
+  font-size: 24px;
+  color: var(--rd-fg-4);
+}
+.rd-sheet__amount input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--rd-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--rd-fg);
+  padding: 0;
+}
+.rd-sheet__amount input::placeholder {
+  color: var(--rd-fg-4);
+  opacity: 0.5;
+}
+.rd-sheet__quick {
+  display: flex;
+  gap: 7px;
+}
+.rd-sheet__quick .rd-chip {
+  font-size: 11px;
+  padding: 5px 11px;
+}
+.rd-sheet__acts {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 4px;
+}
+.rd-sheet__note {
+  font-size: 11.5px;
+  color: var(--rd-fg-3);
+  margin: 0;
+}
+.rd-sheet__done {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+/* ==========================================================================
+   BUSINESS · CONSOLE — the vertical-tab merchant view.
+   ========================================================================== */
+.rd-console__grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: clamp(16px, 2.5vw, 28px);
+  padding: clamp(20px, 3vh, 32px) clamp(18px, 3vw, 36px);
+  max-width: 1280px;
+  width: 100%;
+  margin: 0 auto;
+}
+.rd-console__rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-self: start;
+  position: sticky;
+  top: 0;
+}
+.rd-console__tab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--rd-r-12);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--rd-fg-3);
+  text-align: left;
+  transition: color 0.16s ease, background 0.16s ease;
+}
+.rd-console__tab:hover {
+  color: var(--rd-fg);
+  background: var(--rd-quiet);
+}
+.rd-console__tab.is-active {
+  color: var(--rd-fg);
+  font-weight: 600;
+  background: var(--rd-raised);
+  border: 1px solid var(--rd-hair);
+  box-shadow: var(--rd-card-shadow);
+}
+.rd-console__tabicon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--rd-r-8);
+  background: var(--rd-quiet);
+  color: var(--rd-fg-3);
+  flex: 0 0 auto;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.rd-console__tab--overview.is-active .rd-console__tabicon {
+  background: var(--rd-wash);
+  color: var(--rd-blue-deep);
+}
+.rd-console__tab--revenue.is-active .rd-console__tabicon {
+  background: rgba(63, 210, 192, 0.12);
+  color: #1f9e91;
+}
+.rd-console__tab--subscriptions.is-active .rd-console__tabicon {
+  background: rgba(139, 148, 255, 0.12);
+  color: #5c63d6;
+}
+:root[data-theme='dark'] .rd-console__tab--overview.is-active .rd-console__tabicon {
+  color: var(--rd-blue-bright);
+}
+:root[data-theme='dark'] .rd-console__tab--revenue.is-active .rd-console__tabicon {
+  color: #3fd2c0;
+}
+:root[data-theme='dark'] .rd-console__tab--subscriptions.is-active .rd-console__tabicon {
+  color: #aab0ff;
+}
+.rd-console__main {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(18px, 3vh, 26px);
+  padding-right: 4px;
+}
+.rd-console__balance .rd-pot__acts {
+  flex-wrap: wrap;
+}
+.rd-console__statgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+}
+.rd-console__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 15px 18px;
+  border: 1px solid var(--rd-hair);
+  border-radius: var(--rd-r-12);
+  background: var(--rd-raised);
+  box-shadow: var(--rd-card-shadow);
+}
+.rd-console__statnum {
+  font-family: var(--rd-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--rd-fg);
+}
+/* the 12-month chart */
+.rd-months {
+  display: flex;
+  align-items: flex-end;
+  gap: clamp(6px, 1vw, 12px);
+  padding: 18px 2px 4px;
+}
+.rd-months__col {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.rd-months__val {
+  font-family: var(--rd-mono);
+  font-size: 9px;
+  color: var(--rd-fg-4);
+}
+.rd-months .rd-bars__bar {
+  width: 100%;
+  max-width: 38px;
+}
+
+/* ==========================================================================
+   WALLET · MINIMAL — type-led, hairlines only, the giant number IS the page;
+   the assistant lives behind the floating dock.
+   ========================================================================== */
+.rd-min {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.rd-min__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.rd-min__wrap {
+  width: min(880px, 100%);
+  margin: 0 auto;
+  padding: clamp(28px, 6vh, 64px) clamp(20px, 4vw, 32px) 96px;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(26px, 4.5vh, 40px);
+}
+.rd-min__hero {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rd-min__big {
+  font-family: var(--rd-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(52px, 9vw, 88px);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--rd-fg);
+  margin: 0;
+  border-radius: var(--rd-r-12);
+  align-self: flex-start;
+  padding: 0 8px;
+  margin-left: -8px;
+}
+.rd-min__big.is-paid {
+  animation: rd-debit 1.5s var(--rd-ease) both;
+}
+.rd-min__under {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--rd-fg-3);
+}
+.rd-min__under .rd-money {
+  font-size: 13px;
+}
+.rd-min__act {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rd-fg-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: color 0.16s ease;
+}
+.rd-min__act:hover {
+  color: var(--rd-blue);
+}
+.rd-min__cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(24px, 4vw, 48px);
+  align-items: start;
+}
+
+/* ==========================================================================
+   WALLET · JOURNAL — the broadsheet: dossier markers, dotted leaders, serif
+   titles; the assistant is a quiet flat rail on the right.
+   ========================================================================== */
+.rd-jr {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.rd-jr__grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+  max-width: 1280px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 clamp(16px, 2.5vw, 28px);
+}
+.rd-jr__main {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: clamp(18px, 3vh, 30px) clamp(18px, 3vw, 40px) 40px 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(22px, 3.5vh, 34px);
+}
+.rd-jr__rail {
+  min-height: 0;
+  border-left: 1px solid var(--rd-hair);
+  padding: clamp(18px, 3vh, 30px) 0 16px clamp(16px, 2vw, 24px);
+  display: flex;
+  flex-direction: column;
+}
+.rd-jr__marker {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.rd-jr__no {
+  font-family: var(--rd-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--rd-blue);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+.rd-jr__mlabel {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+  flex: 0 0 auto;
+}
+.rd-jr__mline {
+  flex: 1 1 auto;
+  height: 1px;
+  background: linear-gradient(90deg, var(--rd-hair-strong), var(--rd-hair) 50%, transparent);
+}
+.rd-jr__balances {
+  display: flex;
+  align-items: stretch;
+  gap: clamp(22px, 4vw, 44px);
+}
+.rd-jr__bal {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.rd-jr__bal + .rd-jr__bal {
+  border-left: 1px solid var(--rd-hair);
+  padding-left: clamp(22px, 4vw, 44px);
+}
+.rd-jr__balnum {
+  font-family: var(--rd-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(26px, 3.6vw, 38px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  color: var(--rd-fg);
+  border-radius: var(--rd-r-8);
+  align-self: flex-start;
+  padding: 0 6px;
+  margin-left: -6px;
+}
+.rd-jr__balnum.is-paid {
+  animation: rd-debit 1.5s var(--rd-ease) both;
+}
+.rd-jr__balnote {
+  font-size: 11.5px;
+  color: var(--rd-fg-3);
+  max-width: 30ch;
+}
+.rd-jr__balacts {
+  display: flex;
+  gap: 14px;
+  margin-top: 6px;
+}
+.rd-jr__grand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+.rd-jr__grandnum {
+  font-family: var(--rd-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--rd-fg);
+}
+.rd-jr__title {
+  font-family: var(--rd-serif);
+  font-size: clamp(19px, 2.4vw, 24px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--rd-fg);
+  margin: 0 0 4px;
+}
+
+/* ==========================================================================
+   BUSINESS · MINIMAL — stat-led; the analytics chat behind the dock.
+   ========================================================================== */
+.rd-bizmin__wrap {
+  width: min(980px, 100%);
+  margin: 0 auto;
+  padding: clamp(28px, 5vh, 56px) clamp(20px, 4vw, 32px) 96px;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(24px, 4vh, 36px);
+}
+.rd-bizmin__hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: clamp(20px, 4vw, 48px);
+  flex-wrap: wrap;
+}
+@media (max-width: 920px) {
+  .rd-biz__grid {
+    grid-template-columns: 1fr;
+  }
+  .rd-bizchat {
+    position: static;
+    max-height: none;
+    min-height: 440px;
+    order: -1; /* the analytics chat leads on mobile */
+  }
+  /* Deck: a single scrolling stack — the money first, the assistant below it
+     (a grid with a constrained height starves its rows; flex-stack instead) */
+  .rd-deck__grid {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .rd-deck__main {
+    overflow: visible;
+    flex: 0 0 auto;
+  }
+  .rd-deck__aside {
+    flex: 0 0 auto;
+    height: 520px;
+  }
+  .rd-deck__pots {
+    grid-template-columns: 1fr;
+  }
+  .rd-deck__resizer {
+    display: none;
+  }
+  /* Console: the vertical rail folds into a horizontal strip */
+  .rd-console__grid {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .rd-console__rail {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .rd-console__main {
+    overflow: visible;
+    flex: 0 0 auto;
+  }
+  /* Journal: the rail folds under the ledger, same flex-stack */
+  .rd-jr__grid {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .rd-jr__main {
+    overflow: visible;
+    flex: 0 0 auto;
+    padding-right: 0;
+  }
+  .rd-jr__rail {
+    flex: 0 0 auto;
+    border-left: none;
+    border-top: 1px solid var(--rd-hair);
+    padding-left: 0;
+    height: 520px;
+  }
+  .rd-jr__balances {
+    flex-direction: column;
+    gap: 18px;
+  }
+  .rd-jr__bal + .rd-jr__bal {
+    border-left: none;
+    padding-left: 0;
+    border-top: 1px solid var(--rd-hair);
+    padding-top: 18px;
+  }
+  /* Minimal: the two flat columns stack */
+  .rd-min__cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .rd-wallet {
+    grid-template-columns: 1fr;
+  }
+  .rd-rail {
+    position: absolute;
+    inset: 0 18% 0 0;
+    z-index: 9;
+    background: var(--rd-base);
+    transform: translateX(-102%);
+    transition: transform 0.32s var(--rd-ease);
+    border-right: 1px solid var(--rd-hair);
+  }
+  .rd-rail.is-open {
+    transform: translateX(0);
+  }
+  .rd-mast__menu {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--rd-r-8);
+    border: 1px solid var(--rd-hair);
+    color: var(--rd-fg-2);
+    flex: 0 0 auto;
+  }
+  .rd-mast {
+    padding: 10px 14px;
+  }
+  .rd-mast__handle {
+    display: none;
+  }
+  .rd-mast__sep {
+    display: none;
+  }
+  .rd-mast__agent span:not(.rd-switch) {
+    display: none;
+  }
+  .rd-mast__ballabel {
+    letter-spacing: 0.1em;
+  }
+  .rd-bubble {
+    max-width: 86%;
+  }
+  .rd-lab {
+    gap: 10px;
+    padding: 0 12px;
+  }
+  .rd-lab__tag {
+    display: none;
+  }
+  .rd-lab__key {
+    display: none;
+  }
+  .rd-biz__band {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+/* ==========================================================================
+   REDUCED MOTION — keep fades, drop movement.
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .rd-row,
+  .rd-row.is-in {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .rd-dots span,
+  .rd-spark svg,
+  .rd-bars__bar {
+    animation: none;
+  }
+  .rd-mast__balnum.is-paid {
+    animation: none;
+  }
+  .rd-onb__pane {
+    animation: none;
+  }
+  .rd-books {
+    transition: none;
+  }
+  .rd-jny__beat > *,
+  .rd-jny__hot::after {
+    opacity: 1;
+    transform: none;
+    animation: none;
+    right: 0;
+  }
+  .rd-manifest__row,
+  .rd-jny__done {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .rd-manifest__spin {
+    animation: none;
+  }
+  .rd-manifest__bar i {
+    transition: none;
+  }
+  .rd-min__big.is-paid,
+  .rd-jr__balnum.is-paid,
+  .rd-debit-flash {
+    animation: none;
+  }
+  .rd-dockpanel {
+    transition: none;
+  }
+}

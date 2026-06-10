@@ -121,8 +121,8 @@ export const IconMoon = ({ size = 16 }: IconProps) => (
   </svg>
 )
 
-// The permanence seal — a small star/asterisk burst (a press registration mark),
-// used inside the "PRESSED · PERMANENT" letterpress wafer.
+// The permanence seal — a small star/asterisk burst, used inside the
+// "Live · permanent on Walrus" mark on each site card.
 export const IconSeal = ({ size = 10 }: IconProps) => (
   <svg
     width={size}
@@ -139,7 +139,7 @@ export const IconSeal = ({ size = 10 }: IconProps) => (
   </svg>
 )
 
-// The press plate — a printing platen with an up-feed arrow. Head of the feed.
+// The upload glyph — a plate with an up-feed arrow, used on the deploy drop zone.
 export const IconPress = ({ size = 22 }: IconProps) => (
   <svg
     width={size}
@@ -279,7 +279,7 @@ export const Toasts = ({ toasts }: { toasts: Toast[] }) => {
 
 export const LoadingState = ({ label }: { label: string }) => (
   <div className="dx-state" role="status" aria-busy="true">
-    <p className="dx-state__kicker">On the press</p>
+    <p className="dx-state__kicker">Working</p>
     <span className="spin" />
     <p className="dx-state__body">{label}</p>
   </div>
@@ -292,13 +292,15 @@ export const EmptyState = ({
   action,
 }: {
   kicker?: string
-  title: string
+  // Optional — omit to render just the kicker + body (e.g. when a page H1 above
+  // already states the prompt and a card title would duplicate it).
+  title?: string
   body: React.ReactNode
   action?: React.ReactNode
 }) => (
   <div className="dx-state">
     <p className="dx-state__kicker">{kicker}</p>
-    <p className="dx-state__title">{title}</p>
+    {title && <p className="dx-state__title">{title}</p>}
     <p className="dx-state__body">{body}</p>
     {action}
   </div>
@@ -332,6 +334,16 @@ export const describe_error = (err: unknown): { title: string; body: React.React
     }
   if (e?.status === 404)
     return { title: 'Not found', body: 'That site no longer exists.' }
+  if (e?.status === 402)
+    return {
+      title: e?.detail || 'Payment required',
+      body: 'Settle the deploy charge, then retry.',
+    }
+  if (e?.status === 409)
+    return {
+      title: e?.detail || 'Charge already used',
+      body: 'That charge digest was already consumed — confirm again to pay a fresh one.',
+    }
   return {
     title: 'Something went wrong',
     body: e?.detail || e?.message || 'Unexpected error talking to the backend.',

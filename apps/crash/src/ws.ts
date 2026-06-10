@@ -35,7 +35,7 @@
  * `register_signer`, then drives connect/disconnect off the signed-in address.
  */
 
-import { NETWORK } from '@suize/shared'
+import { CRASH_NETWORK } from './config'
 import {
   buildAuthMessage,
   decodePacket,
@@ -371,7 +371,9 @@ export function ws_sponsor(opts: {
     type: 'sponsorRequest',
     id,
     data: {
-      network: NETWORK,
+      // Crash is network-PINNED to testnet (LOCKED #11); the backend's sponsor
+      // guard additionally allows 'testnet' even after a suite-wide mainnet flip.
+      network: CRASH_NETWORK,
       transactionKindBytes: opts.transactionKindBytes,
       // The backend OVERRIDES this with the verified ws.data.address, so a socket
       // for A can never sponsor for B. We still send the signed-in address to keep

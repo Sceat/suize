@@ -17,17 +17,20 @@ import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SuiClientProvider, WalletProvider, createNetworkConfig } from '@mysten/dapp-kit';
-import { getJsonRpcFullnodeUrl, SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
+import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
 import { registerEnokiWallets, isEnokiNetwork } from '@mysten/enoki';
-import { ENOKI_API_KEY, GOOGLE_CLIENT_ID, NETWORK } from '../lib/env';
+import { fullnodeUrl } from '@suize/shared';
+import { ENOKI_API_KEY, GOOGLE_CLIENT_ID, NETWORK, RPC_URL } from '../lib/env';
 import { ThemeProvider } from '../system';
 
 import '@mysten/dapp-kit/dist/index.css';
 
-// @mysten/sui@2.x: network config needs both a url and the network name.
+// @mysten/sui@2.x: network config needs both a url and the network name. The
+// env-selected network (NETWORK) carries the env RPC override (RPC_URL); the
+// other keeps its public fullnode.
 const { networkConfig } = createNetworkConfig({
-  mainnet: { url: getJsonRpcFullnodeUrl('mainnet'), network: 'mainnet' },
-  testnet: { url: getJsonRpcFullnodeUrl('testnet'), network: 'testnet' },
+  mainnet: { url: NETWORK === 'mainnet' ? RPC_URL : fullnodeUrl('mainnet'), network: 'mainnet' },
+  testnet: { url: NETWORK === 'testnet' ? RPC_URL : fullnodeUrl('testnet'), network: 'testnet' },
 });
 
 const queryClient = new QueryClient();
@@ -45,7 +48,7 @@ function RegisterEnoki() {
     if (!isEnokiNetwork(NETWORK)) return;
 
     const client = new SuiJsonRpcClient({
-      url: getJsonRpcFullnodeUrl(NETWORK),
+      url: RPC_URL,
       network: NETWORK,
     });
     const { unregister } = registerEnokiWallets({
@@ -78,10 +81,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <SuiClientProvider
-          networks={networkConfig}
-          defaultNetwork={NETWORK === 'mainnet' ? 'mainnet' : 'testnet'}
-        >
+        <SuiClientProvider networks={networkConfig} defaultNetwork={NETWORK}>
           {enokiConfigured && <RegisterEnoki />}
           <WalletProvider autoConnect>{children}</WalletProvider>
         </SuiClientProvider>

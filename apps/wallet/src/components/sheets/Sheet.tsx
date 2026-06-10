@@ -56,6 +56,11 @@ export function Sheet({ title, sub, onClose, children }: SheetProps) {
   return (
     <div
       // The scrim. Clicking it (but not the panel) closes the sheet.
+      // `className="journal"` scopes the v3 token ramp (Martian Mono numbers,
+      // the blue accent, 3px radii via the legacy-token bridge in
+      // tokens-journal.css) over the portaled sheet — it renders on <body>,
+      // OUTSIDE the .journal shell, so this is how it inherits the language.
+      className="journal"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

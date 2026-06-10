@@ -1,0 +1,904 @@
+/* ==========================================================================
+   SUIZE · #/docs — HOW SUIZE WORKS. The demoable visual explainer.
+   --------------------------------------------------------------------------
+   Reads ONLY the theme.css semantic contract (--fg / --ink-* / --hair* /
+   --blue-* / --accent-* / --grad-* / --r-*) so light + dark both resolve, and
+   reuses the house furniture (.sx-station / .sx-marker / .ed-eyebrow /
+   .sx-cta / .sx-ghost / .dx-copy). Adds NO new colour, NO new font.
+
+   LAWS: glassmorphism cards (~12px radius), light default, high contrast,
+   NO diode dots, NO device chrome, NO left accent rails. ALL motion here is
+   pure CSS keyframes (the Lenis+GSAP clock stays the only JS clock) and every
+   animation carries a prefers-reduced-motion guard — reduced motion shows the
+   loop as a static, fully-lit, labeled sequence.
+   ========================================================================== */
+
+.dxd-page {
+  padding-top: clamp(96px, 12vw, 150px);
+}
+
+/* the docs stations breathe a little tighter than the marketing stations —
+   this page is a reading surface, not a scroll-theatre. */
+.dxd-station {
+  padding: clamp(72px, 9vw, 140px) 0;
+}
+
+/* ==========================================================================
+   THE GLASS PANE — the house frosted card (mirrors the convo/notification
+   language) on the SEMANTIC tokens so it re-skins in dark untouched.
+   ========================================================================== */
+.dxd-glass {
+  position: relative;
+  border-radius: var(--r-12);
+  border: 1px solid var(--hair-strong);
+  background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ink-raised) 86%, transparent),
+      color-mix(in srgb, var(--ink-raised) 64%, transparent)
+    );
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  backdrop-filter: blur(18px) saturate(1.25);
+  box-shadow:
+    var(--card-shadow),
+    0 18px 44px -28px var(--scrim);
+}
+/* the lit top hairline — elevation by light, never a left rail */
+.dxd-glass::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  border-radius: var(--r-12) var(--r-12) 0 0;
+  background: var(--edge-lit);
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   HERO — an editorial masthead, left-anchored (not a centered slide).
+   ========================================================================== */
+.dxd-hero {
+  padding: clamp(24px, 4vw, 56px) 0 clamp(8px, 2vw, 24px);
+}
+.dxd-hero__claim {
+  max-width: 880px;
+}
+.dxd-hero__h1 {
+  font-family: var(--serif);
+  font-size: clamp(2.8rem, 6.6vw, 5.4rem);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
+  color: var(--fg);
+  margin: 22px 0 0;
+}
+.dxd-hero__sub {
+  font-family: var(--sans);
+  font-size: clamp(15px, 1.8vw, 19px);
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 24px 0 0;
+  max-width: 54ch;
+}
+
+/* ==========================================================================
+   SECTION HEADS — the station scale, capped below the home's giant masthead
+   (a docs page reads, it doesn't shout).
+   ========================================================================== */
+.dxd-head__title {
+  font-family: var(--serif);
+  font-size: clamp(2rem, 4.4vw, 3.4rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.06;
+  color: var(--fg);
+  margin: 16px 0 0;
+  max-width: 18ch;
+}
+.dxd-head__sub {
+  font-family: var(--sans);
+  font-size: clamp(14.5px, 1.6vw, 17px);
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 18px 0 0;
+  max-width: 52ch;
+}
+.dxd-head {
+  margin-bottom: clamp(36px, 5vw, 64px);
+}
+
+/* ==========================================================================
+   SECTION 1 · THE ONBOARDING LADDER — four glass rungs, high-level → low-
+   level. Each rung: the tier head (mono tier no + serif title + who line)
+   over three labeled fact columns (you / Suize / paid). Tier 3 embeds the
+   approved loop demo below its facts. No new colour, no new font, no new
+   animation — reveals ride the shared Reveal/scrub helpers only.
+   ========================================================================== */
+.dxd-ladder {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(16px, 2.2vw, 26px);
+}
+.dxd-tier {
+  padding: clamp(20px, 2.8vw, 32px);
+}
+/* deterministic grid (NOT wrap-flex — a max-width'd flex child clamps its
+   hypothetical main size, so `flex-basis: 100%` never forces the row break):
+   the tier no + title share the top row, the who line always sits beneath. */
+.dxd-tier__head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 14px;
+  align-items: baseline;
+}
+.dxd-tier__no {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.dxd-tier__title {
+  font-family: var(--serif);
+  font-size: clamp(20px, 2.3vw, 26px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  margin: 0;
+}
+/* the who line — its own full-width row under the title */
+.dxd-tier__who {
+  grid-column: 1 / -1;
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 8px 0 0;
+  max-width: 64ch;
+}
+/* the three labeled fact columns — minmax(0,·) tracks so a nowrap child (the
+   Tier-2 code chip) scrolls inside its cell instead of widening the track */
+.dxd-tier__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(14px, 2vw, 26px);
+  margin-top: clamp(16px, 2.2vw, 24px);
+  padding-top: clamp(14px, 1.8vw, 18px);
+  border-top: 1px solid var(--hair-2);
+}
+@media (max-width: 900px) {
+  .dxd-tier__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.dxd-tier__k {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.dxd-tier__v {
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--fg-2);
+  margin: 8px 0 0;
+  max-width: 44ch;
+}
+/* the exact call — a small mono chip (Tier 2) */
+.dxd-tier__code {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  background: var(--ink-0);
+  border: 1px solid var(--hair-2);
+  border-radius: var(--r-3);
+  padding: 6px 10px;
+  margin-top: 10px;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+/* the tier footnote (Tier 2's "Stripe-Checkout shape" aside) */
+.dxd-tier__note {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--fg-3);
+  margin: 14px 0 0;
+}
+/* Tier 3's embedded demo — the approved loop, breathing inside the rung */
+.dxd-tier .dxd-loop {
+  margin-top: clamp(22px, 3vw, 34px);
+  padding-top: clamp(18px, 2.4vw, 26px);
+  border-top: 1px solid var(--hair-2);
+}
+
+/* ---- the coexistence footnote — quiet, editorial, after the ladder -------- */
+.dxd-coexist {
+  margin-top: clamp(32px, 4.5vw, 56px);
+  padding-top: clamp(18px, 2.4vw, 26px);
+  border-top: 1px solid transparent;
+  border-image: var(--rule-fade) 1;
+  max-width: 66ch;
+}
+.dxd-coexist__title {
+  font-family: var(--serif);
+  font-size: clamp(17px, 1.9vw, 21px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  margin: 0;
+}
+.dxd-coexist__body {
+  font-family: var(--sans);
+  font-size: clamp(13.5px, 1.5vw, 15px);
+  line-height: 1.6;
+  color: var(--fg-2);
+  margin: 10px 0 0;
+}
+
+/* ==========================================================================
+   THE LOOP DEMO (Tier 3) — asymmetric 5/7 split: the one-liner card
+   anchors left, the animated sequence runs down the right.
+   ========================================================================== */
+.dxd-loop {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(28px, 4.5vw, 72px);
+  align-items: start;
+}
+@media (max-width: 940px) {
+  .dxd-loop {
+    /* minmax(0,·) — the nowrap one-liner <pre> must scroll inside its card,
+       never widen the column past the viewport */
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* the code card hangs sticky-ish high while the sequence scrolls past it */
+.dxd-loop__left {
+  position: sticky;
+  top: 110px;
+}
+@media (max-width: 940px) {
+  .dxd-loop__left {
+    position: static;
+  }
+}
+
+/* ---- the glass code card -------------------------------------------------- */
+.dxd-code__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 0;
+}
+.dxd-code__file {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--fg-3);
+}
+.dxd-code__tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.dxd-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-3);
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.dxd-code__pre {
+  margin: 12px 14px 14px;
+  padding: 16px 16px;
+  background: var(--ink-0);
+  border: 1px solid var(--hair-2);
+  border-radius: var(--r-8);
+  overflow-x: auto;
+}
+.dxd-code__pre code,
+.dxd-term__pre code {
+  font-family: var(--mono);
+  font-size: clamp(11.5px, 1.35vw, 13px);
+  line-height: 1.7;
+  letter-spacing: -0.01em;
+  color: var(--fg-2);
+  white-space: pre;
+}
+.dxd-code__pre .c-fn {
+  color: var(--fg);
+  font-weight: 600;
+}
+.dxd-code__pre .c-str {
+  color: var(--blue);
+}
+.dxd-caption {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(14.5px, 1.6vw, 17px);
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 20px 2px 0;
+  max-width: 40ch;
+}
+
+/* ---- the auto-playing sequence --------------------------------------------
+   A vertical rail; each step lights in order on a shared 12s CSS loop (the
+   stagger is per-step animation-delay — the phase offset persists across
+   iterations, so the loop reads as one packet travelling the rail forever).
+   The packet itself is a short gradient streak translating down the rail. */
+.dxd-seq {
+  --beat: 2.4s; /* one step's share of the loop */
+  --cycle: 12s; /* 5 steps × --beat */
+  position: relative;
+  padding-left: clamp(22px, 3vw, 34px);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(18px, 2.6vw, 28px);
+}
+.dxd-seq__rail {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    var(--hair-strong) 8%,
+    var(--hair-strong) 92%,
+    transparent
+  );
+}
+/* the travelling payment packet — a soft gradient streak (not a diode dot)
+   sweeping the full rail via background-position (paint-only, no layout):
+   a 64px gradient riding a full-height track, 0% = top, 100% = bottom. */
+.dxd-seq__packet {
+  position: absolute;
+  left: -1px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: var(--r-2);
+  background-image: linear-gradient(
+    180deg,
+    transparent,
+    var(--accent),
+    transparent
+  );
+  background-size: 100% 64px;
+  background-repeat: no-repeat;
+  animation: dxd-packet var(--cycle) linear infinite;
+}
+@keyframes dxd-packet {
+  from {
+    background-position: 0 0%;
+  }
+  to {
+    background-position: 0 100%;
+  }
+}
+
+.dxd-seq__step {
+  position: relative;
+  /* dim base state — still readable (high-contrast law), lit on its beat */
+  opacity: 0.62;
+  animation: dxd-step var(--cycle) ease-in-out infinite;
+  animation-delay: calc(var(--i) * var(--beat));
+}
+@keyframes dxd-step {
+  0%,
+  2% {
+    opacity: 0.62;
+  }
+  6%,
+  22% {
+    opacity: 1;
+  }
+  30%,
+  100% {
+    opacity: 0.62;
+  }
+}
+/* the step marker — the house gradient hairline tick, igniting on its beat */
+.dxd-seq__tick {
+  position: absolute;
+  left: calc(-1 * clamp(22px, 3vw, 34px));
+  top: 9px;
+  width: clamp(14px, 2vw, 20px);
+  height: 2px;
+  border-radius: var(--r-1);
+  background: var(--grad-accent);
+  opacity: 0.35;
+  transform: scaleX(0.55);
+  transform-origin: left center;
+  animation: dxd-tick var(--cycle) ease-in-out infinite;
+  animation-delay: calc(var(--i) * var(--beat));
+}
+@keyframes dxd-tick {
+  0%,
+  2% {
+    opacity: 0.35;
+    transform: scaleX(0.55);
+  }
+  6%,
+  22% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  30%,
+  100% {
+    opacity: 0.35;
+    transform: scaleX(0.55);
+  }
+}
+
+.dxd-seq__line {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.dxd-seq__no {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+.dxd-seq__title {
+  font-family: var(--serif);
+  font-size: clamp(18px, 2vw, 23px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+.dxd-seq__tag {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--fg-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-3);
+  padding: 2px 7px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.dxd-seq__desc {
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 8px 0 0;
+  max-width: 46ch;
+}
+
+/* ---- the 402 challenge JSON — a small pretty payload card ----------------- */
+.dxd-402 {
+  margin-top: 14px;
+  max-width: 380px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-8);
+  background: var(--ink-0);
+  overflow: hidden;
+}
+.dxd-402__status {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  padding: 9px 14px 8px;
+  border-bottom: 1px solid var(--hair-2);
+}
+.dxd-402__json {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.75;
+  letter-spacing: -0.01em;
+  padding: 10px 14px 12px;
+}
+.dxd-402__brace {
+  display: block;
+  color: var(--fg-3);
+}
+.dxd-402__row {
+  display: block;
+  padding-left: 14px;
+  white-space: nowrap;
+}
+.dxd-402__k {
+  color: var(--fg);
+}
+.dxd-402__sep {
+  color: var(--fg-3);
+}
+.dxd-402__v {
+  color: var(--blue);
+}
+
+/* ==========================================================================
+   SECTION 2 · THREE WAYS — three glass cards, depth-staggered (asymmetric,
+   not a flat centered row).
+   ========================================================================== */
+.dxd-ways {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(16px, 2.4vw, 28px);
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .dxd-ways {
+    grid-template-columns: 1fr;
+    max-width: 520px;
+  }
+}
+.dxd-way {
+  padding: clamp(20px, 2.6vw, 28px);
+  /* the editorial Z-stagger — each card hangs a step deeper than the last */
+  margin-top: calc(var(--i) * clamp(0px, 2.4vw, 40px));
+}
+@media (max-width: 900px) {
+  .dxd-way {
+    margin-top: 0;
+  }
+}
+.dxd-way__glyph {
+  display: inline-flex;
+  width: 48px;
+  height: 24px;
+  color: var(--accent);
+}
+.dxd-way__glyph svg {
+  width: 100%;
+  height: 100%;
+}
+.dxd-way__title {
+  font-family: var(--serif);
+  font-size: clamp(19px, 2.1vw, 24px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  margin: 14px 0 0;
+}
+.dxd-way__body {
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--fg-2);
+  margin: 10px 0 0;
+}
+.dxd-ways__foot {
+  margin-top: clamp(32px, 4.5vw, 56px);
+  max-width: 62ch;
+}
+.dxd-foot {
+  font-family: var(--sans);
+  font-size: clamp(13.5px, 1.5vw, 15.5px);
+  line-height: 1.6;
+  color: var(--fg-2);
+  margin: 0;
+}
+.dxd-foot--fee {
+  margin-top: 10px;
+  color: var(--fg-3);
+}
+.dxd-foot--fee .sx-ghost {
+  margin-left: 2px;
+}
+
+/* ==========================================================================
+   SECTION 3 · THE CONSUMER HALF — controls ledger (left, 7) + the glass
+   sub-account motif (right, 5): the loop split mirrored, so the page reads
+   asymmetric beat to beat.
+   ========================================================================== */
+.dxd-consumer {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: clamp(28px, 4.5vw, 72px);
+  align-items: start;
+}
+@media (max-width: 940px) {
+  .dxd-consumer {
+    grid-template-columns: 1fr;
+  }
+}
+.dxd-controls {
+  display: flex;
+  flex-direction: column;
+}
+.dxd-control {
+  padding: clamp(16px, 2vw, 22px) 2px;
+  border-bottom: 1px solid transparent;
+  border-image: var(--rule-fade) 1;
+}
+.dxd-control:first-child {
+  padding-top: 4px;
+}
+.dxd-control__title {
+  font-family: var(--serif);
+  font-size: clamp(18px, 2vw, 22px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  margin: 0;
+}
+.dxd-control__body {
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--fg-2);
+  margin: 8px 0 0;
+  max-width: 52ch;
+}
+
+/* ---- the sub-account motif (illustrative, number-free) --------------------- */
+.dxd-consumer__motif {
+  position: sticky;
+  top: 110px;
+}
+@media (max-width: 940px) {
+  .dxd-consumer__motif {
+    position: static;
+    max-width: 440px;
+  }
+}
+.dxd-wallet {
+  padding: clamp(18px, 2.4vw, 24px);
+}
+.dxd-wallet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dxd-wallet__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fg-2);
+}
+/* the toggle — a small glass switch, ON (a control, not a diode) */
+.dxd-wallet__knob {
+  position: relative;
+  width: 26px;
+  height: 15px;
+  border-radius: var(--r-pill);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-hair);
+}
+.dxd-wallet__knob::after {
+  content: '';
+  position: absolute;
+  top: 1.5px;
+  right: 1.5px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: var(--grad-accent);
+}
+/* the allowance meter — spent vs cap, deliberately number-free */
+.dxd-wallet__meter {
+  position: relative;
+  height: 8px;
+  margin-top: 18px;
+  border-radius: var(--r-pill);
+  background: var(--ink-raised-2);
+  border: 1px solid var(--hair-2);
+  overflow: hidden;
+}
+.dxd-wallet__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 38%;
+  border-radius: inherit;
+  background: var(--grad-accent);
+  opacity: 0.85;
+}
+.dxd-wallet__scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--fg-3);
+}
+/* the confirm dial — three modes, one engaged */
+.dxd-wallet__dial {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+.dxd-wallet__mode {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--fg-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-8);
+  padding: 6px 11px;
+  white-space: nowrap;
+}
+.dxd-wallet__mode.is-on {
+  color: var(--accent-deep);
+  border-color: var(--accent-hair);
+  background: var(--accent-wash);
+}
+:root[data-theme='dark'] .dxd-wallet__mode.is-on {
+  color: var(--accent-bright);
+}
+/* one approved allowance — and its one-tap revoke */
+.dxd-wallet__allow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hair-2);
+}
+.dxd-wallet__merchant {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.dxd-wallet__note {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--fg-3);
+}
+.dxd-wallet__revoke {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--bear);
+  border: 1px solid var(--bear-edge);
+  background: var(--bear-fill);
+  border-radius: var(--r-8);
+  padding: 6px 12px;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   SECTION 4 · THE MCP DOOR — the terminal card (left) + the three tools.
+   ========================================================================== */
+.dxd-mcp {
+  display: grid;
+  grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+  gap: clamp(28px, 4.5vw, 72px);
+  align-items: center;
+}
+@media (max-width: 940px) {
+  .dxd-mcp {
+    grid-template-columns: 1fr;
+  }
+}
+.dxd-term__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 0;
+}
+.dxd-term__file {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+}
+.dxd-term__pre {
+  margin: 10px 14px 14px;
+  padding: 18px 18px;
+  background: var(--ink-0);
+  border: 1px solid var(--hair-2);
+  border-radius: var(--r-8);
+  overflow-x: auto;
+}
+.dxd-term__prompt {
+  color: var(--accent);
+  font-weight: 600;
+}
+.dxd-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.dxd-tool {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--r-8);
+  background: color-mix(in srgb, var(--ink-raised) 70%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  padding: 8px 13px;
+  white-space: nowrap;
+}
+.dxd-mcp__note {
+  margin-top: 16px;
+  max-width: 46ch;
+}
+
+/* ==========================================================================
+   SECTION 5 · THE CLOSE — two doors, one quiet pricing exit.
+   ========================================================================== */
+.dxd-close {
+  text-align: center;
+  padding-bottom: clamp(96px, 12vw, 180px);
+}
+.dxd-close__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(26px, 3.6vw, 40px);
+}
+.dxd-close__title {
+  font-family: var(--serif);
+  font-size: clamp(2.4rem, 6vw, 4.6rem);
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  line-height: 1.04;
+  color: var(--fg);
+  margin: 0;
+}
+.dxd-close__ctas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.dxd-close__pricing {
+  font-size: 13px;
+}
+
+/* ==========================================================================
+   REDUCED MOTION — the loop becomes a static, fully-lit, labeled sequence;
+   the packet hides; nothing translates. (Reveal/scrub already degrade to
+   visible via ui.jsx + theme.css.)
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .dxd-seq__packet {
+    display: none;
+  }
+  .dxd-seq__step,
+  .dxd-seq__tick {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .dxd-loop__left,
+  .dxd-consumer__motif {
+    position: static;
+  }
+}

@@ -9,12 +9,16 @@ import {
 import '@mysten/dapp-kit/dist/index.css'
 import { App } from './App'
 import './styles.css'
-import { RPC_URL } from './config'
+import { fullnodeUrl } from '@suize/shared'
+import { RPC_URL, SUI_NETWORK } from './config'
 import { setup_enoki } from './enoki'
 
-// dapp-kit builds the network client itself from { network, url }.
+// dapp-kit builds the network client itself from { network, url }. Both networks
+// are declared; the env-selected one (SUI_NETWORK) is the default and carries the
+// env RPC override — the other keeps its public fullnode.
 const { networkConfig } = createNetworkConfig({
-  testnet: { network: 'testnet', url: RPC_URL },
+  testnet: { network: 'testnet', url: SUI_NETWORK === 'testnet' ? RPC_URL : fullnodeUrl('testnet') },
+  mainnet: { network: 'mainnet', url: SUI_NETWORK === 'mainnet' ? RPC_URL : fullnodeUrl('mainnet') },
 })
 
 const queryClient = new QueryClient()
@@ -40,7 +44,7 @@ if (
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
+      <SuiClientProvider networks={networkConfig} defaultNetwork={SUI_NETWORK}>
         {/* autoConnect restores a previous session (incl. zkLogin) silently. */}
         <WalletProvider autoConnect>
           <App />

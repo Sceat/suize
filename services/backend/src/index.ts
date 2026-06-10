@@ -26,6 +26,8 @@ import { corsHeaders, json, text } from "./http";
 import { sponsorReady, sponsorInfo, maskKey } from "./sponsor";
 import { handleReady, handleInfo } from "./handle";
 import { handleDeployRoute, deployReady, deployInfo } from "./deploy";
+import { startRenewalRelayer, relayerInfo } from "./relayer";
+import { handleMcpRoute, mcpInfo } from "./mcp";
 import { tryUpgrade, websocketHandler, wsConnectionCount, type WsData } from "./ws";
 
 // Fail fast on missing secrets — same guard the standalone sponsor had.
@@ -52,6 +54,12 @@ const readiness = async (): Promise<{ sponsor: boolean; handle: boolean; deploy:
 
 Bun.serve({
   port: config.port,
+  // A deploy is a long synchronous surface — two Walrus publisher PUTs (quilt +
+  // manifest, ~16s) plus the on-chain Site mint (~4s), ~20s total with no bytes
+  // flowing to the client. Bun's default 10s idleTimeout would close that idle
+  // connection mid-deploy (the tunnel then 502s). 200s headroom (max 255); the WS
+  // keeps itself alive via its own 30s server ping, fast HTTP surfaces are unaffected.
+  idleTimeout: 200,
   fetch: async (req, server: Server<WsData>) => {
     const url = new URL(req.url);
     const origin = req.headers.get("origin");
@@ -138,6 +146,13 @@ Bun.serve({
     //
     // NOTE: the sponsor module has NO HTTP route matcher anymore — POST /sponsor +
     // POST /execute were removed (sponsorship is WS-only; see the ws upgrade above).
+
+    // MCP module — POST /mcp (Streamable-HTTP JSON-RPC: initialize/tools/list/
+    // tools/call). No-auth bare transport probe; placed BEFORE deploy. Returns
+    // null for non-/mcp paths so the matcher chain continues.
+    const mcp = handleMcpRoute(req, url, origin, server);
+    if (mcp) return mcp;
+
     // Deploy module — POST /deploy, GET /sites[/:id], POST /domains,
     // DELETE /domains/:domain. 503s cleanly when the deploy wallet is unconfigured.
     const deployed = handleDeployRoute(req, url, origin, server);
@@ -166,11 +181,15 @@ Bun.serve({
 });
 
 console.log(`[backend] listening on :${config.port}`);
-console.log(`[backend] sui rpc: ${config.suiRpcUrl}`);
+console.log(`[backend] sui network: ${config.suiNetwork}`);
+console.log(`[backend] sui rpc: ${config.suiRpcUrl}${config.suiRpcUrls.length > 1 ? ` (+${config.suiRpcUrls.length - 1} fallback)` : ""}`);
 console.log(`[backend] enoki key: ${maskKey(config.enokiPrivateApiKey)}`);
 console.log(
   `[backend] sponsor move targets: ${sponsorInfo.allowedMoveTargetCount} ` +
-    `(crash=${sponsorInfo.crashTargetCount}, wallet=${sponsorInfo.walletTargetCount})`,
+    `(crash=${sponsorInfo.crashTargetCount}, ` +
+    (sponsorInfo.accountPublished
+      ? `account=${sponsorInfo.accountTargetCount} [RAIL LIVE])`
+      : `wallet=${sponsorInfo.walletTargetCount} [legacy; rail unpublished])`),
 );
 console.log(`[backend] allowed origins: ${config.allowedOrigins.join(", ") || "(none)"}`);
 console.log(
@@ -182,12 +201,33 @@ console.log(
   `[backend] deploy: ${deployInfo.enabled
     ? `enabled (base=${deployInfo.baseDomain}, epochs=${deployInfo.epochs}, ` +
       `cf=${deployInfo.cloudflare ? "on" : "off"})` +
-      (deployInfo.chainReady ? "" : " — WAITING ON deploy_sui PUBLISH (placeholder on-chain ids)")
+      (deployInfo.chainReady ? "" : " — WAITING ON deploy_sui PUBLISH (placeholder on-chain ids)") +
+      (deployInfo.chargeGate
+        ? " — CHARGE GATE LIVE ($0.50/deploy)"
+        : " — charge gate OFF (rail unpublished / merchant unpinned; un-gated deploys)")
     : "DISABLED (DEPLOY_WALLET_PRIVATE_KEY not set)"}`,
 );
 console.log(
+  `[backend] mcp: POST ${mcpInfo.endpoint} (${mcpInfo.transport}, ` +
+    `protocol=${mcpInfo.protocolVersion}, tools=[${mcpInfo.tools.join(", ")}])`,
+);
+
+// The renewal relayer — the deterministic subscription↔storage cron. Enabled
+// only when the deploy wallet is set AND the charge gate is live; a no-op start
+// otherwise (the rest of the backend is unaffected).
+startRenewalRelayer();
+console.log(
+  `[backend] renewal relayer: ${relayerInfo.enabled
+    ? `ON (tick=${relayerInfo.tickMs}ms, extend=${relayerInfo.extendEpochs} epochs, ` +
+      `safety=${relayerInfo.safetyEpochs} epochs, period=${relayerInfo.subPeriodMs}ms)`
+    : "OFF (deploy wallet unset or rail/deploy ids unpinned)"}`,
+);
+
+console.log(
   `[backend] routes: GET /ws (websocket — incl. sponsor/execute + handle ops), ` +
-    `POST /deploy, GET /sites, GET /sites/:id, POST /domains, ` +
+    `POST /mcp, POST /deploy/quote, POST /deploy/charge, POST /deploy/subscribe, ` +
+    `POST|DELETE /deploy/renewal, POST /execute, POST /deploy, ` +
+    `GET /sites, GET /sites/:id, POST /domains, ` +
     `DELETE /domains/:domain, ` +
     `GET /health, GET /ready, GET /ready/serve, GET /ready/sponsor, ` +
     `GET /ready/handle, GET /ready/deploy, GET /ready/ws`,

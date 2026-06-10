@@ -4,9 +4,15 @@
 // verbatim Move signatures these calls target.
 // ============================================================================
 
-import { PACKAGE_IDS } from '@suize/shared'
+import { PACKAGE_IDS, fullnodeUrl } from '@suize/shared'
 
-export const RPC_URL = 'https://fullnode.testnet.sui.io:443'
+// LOCKED #11/#12: Crash stays TESTNET (DeepBook Predict is testnet-only) on a
+// network-PINNED path. This pin is DELIBERATE and documented — Crash is the one
+// app that does NOT read VITE_SUI_NETWORK, so the suite-wide env-driven mainnet
+// flip can never drag it along.
+export const CRASH_NETWORK = 'testnet' as const
+
+export const RPC_URL = fullnodeUrl(CRASH_NETWORK)
 
 export const PREDICT_PACKAGE =
   '0xf5ea2b3749c65d6e56507cc35388719aadb28f9cab873696a2f8687f5c785138'

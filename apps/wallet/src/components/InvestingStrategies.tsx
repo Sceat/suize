@@ -130,21 +130,27 @@ function positionText(
   pct: number,
   investingUsd: number,
   demo: boolean,
-): string {
+): React.ReactNode {
   const dollars = investingUsd * (pct / 100);
   if (investingUsd <= 0 || pct <= 0 || dollars < 1) return 'Not active yet';
 
+  // the blue MONEY figure (v3: money is always blue Martian Mono) + the muted words
+  // after it. The amount + every branch's copy are UNCHANGED — only the $ figure is
+  // wrapped so it reads as money, not body text.
+  const amt = <span className="sd-amt">{usd0(dollars)}</span>;
+
   // PRODUCTION — honest: allocated, but no position is open (the agent loop is stubbed).
-  if (!demo) return `${usd0(dollars)} allocated · waiting for your AI`;
+  if (!demo) return <>{amt} allocated · waiting for your AI</>;
 
   // DEV ?preview — example positions for the populated design (never a real user).
   switch (key) {
     case 'passive':
-      return `${usd0(dollars)} staked on Navi`;
+      return <>{amt} staked on Navi</>;
     case 'degen':
-      return `${usd0(dollars)} open on DeepBook`;
+      return <>{amt} open on DeepBook</>;
     case 'gamefi': {
       const bets = Math.max(1, Math.min(9, Math.round(dollars / 5)));
+      // a bet COUNT is not money — stays plain (no blue $).
       return `${bets} recent Crash ${bets === 1 ? 'bet' : 'bets'}`;
     }
   }
@@ -309,6 +315,13 @@ export function InvestingStrategies({ home, demo }: InvestingStrategiesProps) {
 
   return (
     <div className="pane__scroll">
+      {/* editorial title — the ONE Newsreader serif line (never on a number), the v3
+          soul. Plain-words, monkey-simple: this is how the money is split. */}
+      <h3 className="pane__name strat__title">How your money is split</h3>
+      <p className="strat__lede">
+        Drag a divider to move money between the kinds. It always adds up to all of it.
+      </p>
+
       {/* live remainder readout (>100% → .warn) */}
       <div
         className={`remainder${!exact && waiting < 0 ? ' warn' : ''}`}

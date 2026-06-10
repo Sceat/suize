@@ -70,6 +70,9 @@ type SendPhase = 'idle' | 'sending' | 'sent' | 'error';
 /** Flat SUI gas estimate for non-sponsored coins (display-only, deterministic). */
 const SUI_GAS_EST = '0.002';
 
+/** Quick-fill amount chips under the field — one tap drops a common value in. */
+const QUICK_AMOUNTS = ['5', '10', '25', '100'];
+
 /**
  * Parse a human decimal string into the coin's smallest unit (bigint), WITHOUT
  * floating point — float math drops precision on large balances. Returns null when
@@ -343,7 +346,7 @@ export function SendSheet({ currencies, onClose, onSend }: SendSheetProps) {
           </p>
         </div>
 
-        {/* amount */}
+        {/* amount — Martian Mono figure (via the journal scope) + quick chips */}
         <div>
           <div
             style={{
@@ -366,6 +369,36 @@ export function SendSheet({ currencies, onClose, onSend }: SendSheetProps) {
             suffix={selected?.sym ?? ''}
             disabled={sending || sent}
           />
+          {/* QUICK CHIPS — common amounts, one tap fills the field. Mono, hairline,
+              the v3 chip look; disabled once a send is in flight/done. */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 9 }}>
+            {QUICK_AMOUNTS.map((q) => {
+              const active = amount.trim() === q;
+              return (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => setAmount(q)}
+                  disabled={sending || sent}
+                  className="tnum"
+                  style={{
+                    appearance: 'none',
+                    padding: '6px 11px',
+                    borderRadius: 'var(--r-chip)',
+                    border: `1px solid ${active ? 'var(--accent-line)' : 'var(--hair)'}`,
+                    background: active ? 'var(--accent-wash)' : 'transparent',
+                    color: active ? 'var(--accent-deep)' : 'var(--ink-2)',
+                    fontSize: 12,
+                    cursor: sending || sent ? 'not-allowed' : 'pointer',
+                    opacity: sending || sent ? 0.5 : 1,
+                    transition: 'color .25s var(--e-quart), border-color .25s var(--e-quart), background .25s var(--e-quart)',
+                  }}
+                >
+                  {isStable ? '$' : ''}{q}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* gas line */}
