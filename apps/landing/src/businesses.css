@@ -94,10 +94,10 @@
   /* the hot-word clip + every CTA/edge fill go to the deeper corporate gradient */
   --grad-hot: var(--biz-grad);
   --grad-accent: var(--biz-grad);
-  /* frosted glass fills — light corporate paper (a cool white frost, not navy) */
+  /* frosted glass fills — light corporate paper (a cool white frost, not navy).
+     (the old --cta-fill overrides are GONE — the raised-paper CTA reads
+     --ink-raised, which the room already re-tints.) */
   --notif-fill: rgba(255, 255, 255, 0.66);
-  --cta-fill: rgba(255, 255, 255, 0.6);
-  --cta-fill-hov: rgba(234, 241, 251, 0.78);
   /* PANEL CHROME tokens every frosted pane reads (light = editorial paper depth):
      the top glint, the inner top hairline, the elevation shadow. */
   --biz-pane-glint: rgba(28, 92, 184, 0.05); /* the faint top gradient on a pane */
@@ -113,8 +113,6 @@
    shadows all flip to the cinema deep set under [data-theme='dark']. ---------- */
 :root[data-theme='dark'] .bz-page {
   --notif-fill: rgba(16, 37, 68, 0.62);
-  --cta-fill: rgba(16, 37, 68, 0.58);
-  --cta-fill-hov: rgba(22, 52, 94, 0.7);
   --biz-pane-glint: rgba(180, 205, 240, 0.05);
   --biz-pane-inset: inset 0 1px 0 0 rgba(180, 205, 240, 0.06);
   --biz-pane-shadow: 0 36px 80px -44px rgba(0, 0, 0, 0.8),
@@ -556,8 +554,8 @@
 
 /* ==========================================================================
    STANDARDS-ONLY STRIP — a restrained capability band between the payment lane
-   and the charge station. ONE confident line ("plugs in anywhere — 402-shaped,
-   same standards as Stripe/Coinbase/Google AP2"), NO platform logos, NO trust
+   and the charge station. ONE confident line ("plugs in anywhere — x402-compatible
+   by design, same standards as Stripe/Coinbase/Google AP2"), NO platform logos, NO trust
    marquee. A short corporate-accent rule, a quiet eyebrow, the line centred on a
    readable measure, a closing rule — connective tissue, not a full station, so
    the band sits TIGHT (smaller top/bottom padding than a station). Reads ONLY

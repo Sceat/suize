@@ -1,4 +1,5 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { fmt_id } from './format'
 
 // ============================================================================
 // Tiny shared UI primitives + hooks for the dashboard. No component library —
@@ -121,6 +122,39 @@ export const IconMoon = ({ size = 16 }: IconProps) => (
   </svg>
 )
 
+export const IconChevronDown = ({ size = 12 }: IconProps) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M4 6l4 4 4-4" />
+  </svg>
+)
+
+export const IconPower = ({ size = 13 }: IconProps) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M8 2v6" />
+    <path d="M4.6 4.6a4.5 4.5 0 1 0 6.8 0" />
+  </svg>
+)
+
 // The permanence seal — a small star/asterisk burst, used inside the
 // "Live · permanent on Walrus" mark on each site card.
 export const IconSeal = ({ size = 10 }: IconProps) => (
@@ -236,6 +270,86 @@ export const CopyButton = ({
     >
       {done ? <IconCheck /> : <IconCopy />}
     </button>
+  )
+}
+
+// ---- Identity menu ------------------------------------------------------
+// The masthead handle becomes an account menu (the wallet's pattern): TAP the
+// handle to open a small dropdown — copy your address or sign out. Clicking the
+// handle no longer signs you out (the old footgun); sign-out is one explicit row.
+
+export const IdentityMenu = ({
+  handle,
+  address,
+  onSignOut,
+}: {
+  // The `<name>@suize` handle, or null when the address has none (we fall back
+  // to the truncated hex so the menu still labels the connected account).
+  handle: string | null
+  address: string
+  onSignOut: () => void
+}) => {
+  const [open, setOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  // Escape closes the menu (the click-catcher handles taps elsewhere).
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
+  return (
+    <span className="dx-id">
+      <button
+        type="button"
+        className="dx-id__btn"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen(v => !v)}
+      >
+        <span className="dx-acct">{handle ?? fmt_id(address)}</span>
+        <IconChevronDown />
+      </button>
+
+      {open && (
+        <>
+          <span
+            className="dx-id__catch"
+            onClick={() => setOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="dx-id__menu" role="menu">
+            <button
+              type="button"
+              className="dx-id__row"
+              role="menuitem"
+              onClick={() => {
+                void navigator.clipboard?.writeText(address).catch(() => {})
+                setCopied(true)
+                window.setTimeout(() => setCopied(false), 1400)
+              }}
+            >
+              <span className="dx-id__addr">{fmt_id(address)}</span>
+              {copied ? <IconCheck /> : <IconCopy />}
+            </button>
+            <div className="dx-id__rule" />
+            <button
+              type="button"
+              className="dx-id__row dx-id__out"
+              role="menuitem"
+              onClick={onSignOut}
+            >
+              Sign out
+              <IconPower />
+            </button>
+          </div>
+        </>
+      )}
+    </span>
   )
 }
 

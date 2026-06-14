@@ -1028,11 +1028,6 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     color: var(--ink); font-weight: 700; font-size: 15px;
     margin-left: 2px;
   }
-  /* gross total — "pays $3.90 total" (smallest, most muted) */
-  .e05 .e05-pos-gross {
-    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.01em;
-    color: var(--ink-4); font-variant-numeric: tabular-nums; margin-top: 1px;
-  }
   /* ===== CASH-OUT (EXIT) button — GHOST/OUTLINED secondary, subordinate to the
      filled WAGER primaries. Transparent fill, hairline border, lighter weight. The
      signed live net colours it green (.net-pos) / red (.net-neg); .is-inert renders
@@ -1972,7 +1967,6 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
       <span class="e05-pos-pending" data-pos-${k}-pending hidden>payout pending</span>
       <div class="e05-pos-rule"></div>
       <span class="e05-pos-if tnum" data-pos-${k}-if></span>
-      <span class="e05-pos-gross tnum" data-pos-${k}-gross></span>
       <span class="e05-pos-iflose tnum" data-pos-${k}-iflose hidden></span>
       <button type="button" class="e05-pos-cta" data-pos-${k}-cta>Cash out</button>
     </div>`
@@ -2272,7 +2266,6 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     math: HTMLElement
     pending: HTMLElement
     ifWin: HTMLElement
-    gross: HTMLElement
     ifLose: HTMLElement
     cta: HTMLButtonElement
   }
@@ -2285,7 +2278,6 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     math: $(`[data-pos-${k}-math]`) as HTMLElement,
     pending: $(`[data-pos-${k}-pending]`) as HTMLElement,
     ifWin: $(`[data-pos-${k}-if]`) as HTMLElement,
-    gross: $(`[data-pos-${k}-gross]`) as HTMLElement,
     ifLose: $(`[data-pos-${k}-iflose]`) as HTMLElement,
     cta: $(`[data-pos-${k}-cta]`) as HTMLButtonElement,
   })
@@ -2751,7 +2743,10 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
 
       idWrap.append(balRow, addrBtn)
 
-      // ACTIONS group — Add funds + Sign out as identical muted-ink siblings.
+      // ACTIONS group — Add funds + Withdraw + Sign out as identical muted-ink
+      // siblings. "Withdraw" is a funnel to the Suize wallet (opens wallet.suize.io
+      // in a new tab): Crash is testnet play-money, so real funds management lives
+      // in the consumer PAY wallet, not here — the button just sends them there.
       const actions = document.createElement('div')
       actions.className = 'e05-acct-actions'
       const funds = document.createElement('button')
@@ -2759,12 +2754,17 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
       funds.className = 'e05-link'
       funds.textContent = 'Add funds'
       funds.addEventListener('click', () => host.actions.addFunds())
+      const wd = document.createElement('button')
+      wd.type = 'button'
+      wd.className = 'e05-link'
+      wd.textContent = 'Withdraw'
+      wd.addEventListener('click', () => host.actions.withdraw())
       const out = document.createElement('button')
       out.type = 'button'
       out.className = 'e05-link'
       out.textContent = 'Sign out'
       out.addEventListener('click', () => host.actions.signOut())
-      actions.append(funds, out)
+      actions.append(funds, wd, out)
 
       // acctEl gets ONLY its own rebuilt content: [identity] | [actions]. The
       // theme toggle is the permanent sibling to acctEl's right (in .e05-acct),
@@ -3046,7 +3046,6 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
           r.math.hidden = true
           r.pending.hidden = true
           r.ifWin.textContent = vm.ifWinsStr
-          r.gross.hidden = true
           r.ifLose.hidden = false
           r.ifLose.textContent = vm.ifLosesStr
           r.cta.className = 'e05-pos-cta is-inert'
@@ -3068,14 +3067,14 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
         r.math.hidden = false
         r.math.textContent = `${vm.exitValueStr} · ${vm.paidStr}`
         r.pending.hidden = true
-        // The conditional settle line — label stays quiet/grey; the PRIZE NUMBER is
-        // bright high-contrast NEUTRAL (never green/red — it is the conditional, not
-        // live P&L). label + number are app-controlled strings (no user input).
+        // The conditional settle line — ONE aggregated line: quiet/grey label +
+        // the bright PRIZE NUMBER = the FULL payout if right (vm.ifWinTotalStr,
+        // "$9.50" — the total that lands; "paid $X" above carries the basis).
+        // NEUTRAL bright, never green/red (it is the conditional, not live P&L).
+        // label + number are app-controlled strings (no user input).
         r.ifWin.innerHTML =
           `IF ${vm.side} WINS AT SETTLE ` +
-          `<span class="e05-pos-if-num">${vm.profitIfRightStr}</span>`
-        r.gross.hidden = false
-        r.gross.textContent = vm.totalIfSettledStr
+          `<span class="e05-pos-if-num">${vm.ifWinTotalStr}</span>`
         r.ifLose.hidden = true
 
         // Cash-out button — signed live net, green/red, agreeing with the hero.

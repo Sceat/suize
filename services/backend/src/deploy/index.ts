@@ -1,25 +1,31 @@
 // Deploy module — "Suize Deploy" (Vercel for Sui). The ORCHESTRATION BRAIN.
 //
-// POST /deploy is ALWAYS AUTHENTICATED — there is NO anonymous deploy. Every
-// deployer Google-logs-in (the dashboard via zkLogin, the future MCP via OAuth → a
-// Suize wallet) and signs a single-use server nonce (buildDeployAuthMessage). The
-// on-chain `owner` is ALWAYS the cryptographically-recovered signer — there is no
-// client-claimed `owner` field and no service-wallet fallback, so a caller can only
-// ever set THEMSELVES as the owner.
+// POST /deploy is AUTHENTICATED BY THE PAYMENT ITSELF (nonce-free since 2026-06-14).
+// There is NO anonymous deploy and NO separate deploy-auth signature: the X-PAYMENT
+// header carries a signed gasless payment, and the RECOVERED PAYER becomes the on-chain
+// `owner` — whoever pays, owns. The payment payload IS the private signed authorization,
+// so a caller can only ever set THEMSELVES (the address that paid) as the owner. The
+// recovery dispatches by signature scheme (zkLogin, plain Ed25519, OR a 1-of-2
+// sub-account MultiSig — the multisig address is recovered), so a detached-agent deploy
+// paying FROM a sub-account is owned BY that sub-account.
 //
-// An authenticated deployer POSTs a built static site as a tar (+ nonce + signature);
-// this module:
-//   0. requires { nonce, signature }, verifies the signature recovers an address
-//      (verifyPersonalMessageSignature — zkLogin OR plain Ed25519) over the live
-//      nonce, burns the nonce, and uses the recovered address as `owner`,
+// The no-Sui-key door is the SAME path: pay.suize.io (mode=authorize) hands the human's
+// SIGNED-UNSETTLED payload back; the agent submits THAT as X-PAYMENT; owner = the human.
+//
+// A deployer POSTs a built static site as a tar (+ the X-PAYMENT header); this module:
+//   0. VERIFIES the X-PAYMENT pays the exact $0.50 to the Deploy treasury and recovers
+//      the payer (→ `owner`); there is no client-claimed `owner` and no service-wallet
+//      fallback,
 //   1. unpacks the tar in-memory, enforcing size + file-count caps,
 //   2. uploads ALL files as ONE Walrus quilt via the HTTP publisher (the publisher
 //      pays WAL; the deploy wallet only pays the on-chain create_site gas),
 //   3. builds a manifest JSON (path -> {patch, sha256, ct, size}), stores it as a
 //      Walrus blob, computes its sha256,
-//   4. mints a FRESH on-chain `deploy_sui::site::Site` (signed by the deploy
-//      service wallet — NOT Enoki-sponsored; the agent signs nothing), with the
-//      recovered deployer as `owner`,
+//   4. SETTLES the verified payment (keyless gRPC), then mints a FRESH on-chain
+//      `deploy_sui::site::Site` (signed by the deploy service wallet — NOT
+//      Enoki-sponsored; the agent signs nothing), with the recovered payer as `owner`
+//      and the settled payment digest recorded in the on-chain SiteDigestRegistry (the
+//      atomic one-site-per-payment guard — a duplicate aborts EDigestUsed → 409),
 //   5. returns { siteId, subdomain: base36(siteId), url, version: 1, digest }.
 //
 // Every deploy mints a NEW immutable Site (new id -> new URL) — there is no
@@ -40,46 +46,34 @@ import { fromBase64 } from "@mysten/sui/utils";
 import { verifyPersonalMessageSignature } from "@mysten/sui/verify";
 import {
   PACKAGE_IDS,
-  SUIZE_DEPLOY_MERCHANT,
-  DEPLOY_SUB_PRICE_USDC,
-  buildDeployAuthMessage,
   buildDeployLinkAuthMessage,
   buildDeployUnlinkAuthMessage,
-  buildDeployRenewalLinkAuthMessage,
-  buildDeployRenewalUnlinkAuthMessage,
 } from "@suize/shared";
 import type {
   DeployResponse,
   SiteInfo,
   DomainChallengeResponse,
-  DeployNonceResponse,
-  DeployRenewalLinkRequest,
-  DeployRenewalUnlinkRequest,
-  DeployRenewalResponse,
 } from "@suize/shared";
 import { config } from "../config";
 import { json, getIp } from "../http";
-import { parseMoveAbort } from "../move-abort";
 import { deployDailyCeiling } from "../quota";
 import { encodeObjectIdToBase36 } from "./base36";
 import { contentTypeFor } from "./content-type";
 import { storeQuilt, storeBlob, WalrusError, type QuiltInputFile } from "./walrus";
+// x402 V2 first-party charge gate (account.move DEAD): the payer signs a gasless
+// send_funds PTB, this process verifies + settles it keyless. See deploy/payment.ts.
 import {
   chargeGateReady,
-  chargeGateReason,
-  deployQuote,
-  buildDeployCharge,
-  buildDeploySubscribe,
-  buildDeployAccountCreate,
-  executeDeployCharge,
-  reserveDeployCharge,
-  commitDeployCharge,
-  releaseDeployCharge,
-  ChargeError,
-  SponsorError,
+  deployRequirements,
+  gateDeployPayment,
+  settleDeployPayment,
+  DeployPaymentError,
   chargeInfo,
-} from "./charge";
-import type { DeployChargeRequest } from "@suize/shared";
+  type VerifiedDeployPayment,
+} from "./payment";
+import { extendOnce, storageEndForSite, epochToMs } from "./extend";
+import { deploySubs, isValidDeploySub } from "./subs-state";
+import { handleSubscribeBuild, handleSubscribeSubmit } from "./subscribe";
 import {
   cloudflareEnabled,
   provisionCustomHostname,
@@ -102,15 +96,22 @@ const DEPLOY_ENABLED = Boolean(config.deployWalletKey);
 const DEPLOY_PACKAGE: string = PACKAGE_IDS.DEPLOY.PACKAGE;
 const VERSION_OBJECT: string = PACKAGE_IDS.DEPLOY.VERSION_OBJECT;
 const DOMAIN_REGISTRY_OBJECT: string = PACKAGE_IDS.DEPLOY.DOMAIN_REGISTRY_OBJECT;
-const CHARGE_LEDGER_OBJECT: string = PACKAGE_IDS.DEPLOY.CHARGE_LEDGER_OBJECT;
-const RENEWAL_REGISTRY_OBJECT: string = PACKAGE_IDS.DEPLOY.RENEWAL_REGISTRY_OBJECT;
-const ACCOUNT_PACKAGE: string = PACKAGE_IDS.ACCOUNT.PACKAGE;
+// The shared SiteDigestRegistry — the on-chain one-site-per-payment dedup set.
+// create_site records the deploy's payment digest here + aborts EDigestUsed on a
+// duplicate (the multi-replica-safe consume guard; replaces the in-memory map).
+const SITE_DIGEST_REGISTRY_OBJECT: string =
+  PACKAGE_IDS.DEPLOY.SITE_DIGEST_REGISTRY_OBJECT;
+// The owned DeployerCap — create_site's mint authority (the FIRST moveCall arg). Only
+// the deploy service wallet (which owns it) can mint a Site, so owner/size/blob-ids are
+// service-attested (no free-mint, no renewer-draining forged Site). Mainnet '0x0' until
+// the cap is transferred to the prod service wallet → deploy stays disabled there.
+const DEPLOYER_CAP_OBJECT: string = PACKAGE_IDS.DEPLOY.DEPLOYER_CAP_OBJECT;
 const CHAIN_IDS_PUBLISHED =
   DEPLOY_PACKAGE !== "0x0" &&
   VERSION_OBJECT !== "0x0" &&
   DOMAIN_REGISTRY_OBJECT !== "0x0" &&
-  CHARGE_LEDGER_OBJECT !== "0x0" &&
-  RENEWAL_REGISTRY_OBJECT !== "0x0";
+  SITE_DIGEST_REGISTRY_OBJECT !== "0x0" &&
+  DEPLOYER_CAP_OBJECT !== "0x0";
 
 const notConfigured = (origin: string | null): Response =>
   json(
@@ -265,35 +266,13 @@ const normalizeEntries = (
 // ---------------------------------------------------------------------------
 // On-chain: build + sign + execute the create_site PTB. The Site is a SHARED
 // object (the worker reads it); the returned SiteAdminCap is transferred to the
-// service wallet (for later domain/renewal ops). When the charge gate is live the
-// SAME PTB appends `charge_ledger::record_charge` — the paid digest is burned
-// on-chain ATOMICALLY with the Site mint (Table key uniqueness = the replay
-// physics; it holds across restarts/replicas, unlike the in-memory sets). We
+// service wallet (for later domain ops). Payment is settled (the x402 gasless
+// send_funds in deploy/payment.ts) IMMEDIATELY before this runs, and the settled
+// digest is threaded in as `paymentDigest` — create_site records it in the shared
+// SiteDigestRegistry and aborts EDigestUsed on a duplicate (the atomic, multi-replica-
+// safe one-site-per-payment guard; the chain is the database — no in-process map). We
 // parse the created Site object id out of objectChanges.
 // ---------------------------------------------------------------------------
-
-// The LedgerCap (`charge_ledger::LedgerCap`) owned by the deploy service wallet —
-// the only authority that may record charge digests (front-run-recording guard;
-// see charge_ledger.move). Discovered once via getOwnedObjects and cached, exactly
-// like the per-site SiteAdminCap discovery below (the cap never moves).
-let _ledgerCapId: string | null = null;
-
-const findLedgerCap = async (): Promise<string | null> => {
-  if (_ledgerCapId) return _ledgerCapId;
-  try {
-    const owned = await suiClient().getOwnedObjects({
-      owner: serviceAddress(),
-      filter: { StructType: `${DEPLOY_PACKAGE}::charge_ledger::LedgerCap` },
-      limit: 1,
-    });
-    const id = owned.data[0]?.data?.objectId ?? null;
-    if (id) _ledgerCapId = id;
-    return id;
-  } catch (err) {
-    console.error("[deploy/ledger-cap]", (err as Error).message);
-    return null;
-  }
-};
 
 interface CreatedSite {
   siteId: string;
@@ -310,21 +289,32 @@ const createSiteOnChain = async (
   manifestBlobObject: string,
   sizeBytes: number,
   fileCount: number,
-  chargeDigest: string | null,
+  // The deploy's one-site-per-payment key: the settled payment digest (the ONE door —
+  // an X-PAYMENT payload, self-paid or relayed via the pay-link). create_site records
+  // it in the on-chain SiteDigestRegistry + aborts EDigestUsed on a duplicate. It is
+  // the base58 tx-digest STRING, so we key the registry on its UTF-8 bytes — stable +
+  // unique per deploy, no base58/hex decode to get wrong.
+  paymentDigest: string,
 ): Promise<CreatedSite> => {
   const tx = new Transaction();
   const manifestHashBytes = Uint8Array.from(Buffer.from(manifestHashHex, "hex"));
+  const paymentDigestBytes = new TextEncoder().encode(paymentDigest);
 
-  // create_site(v: &Version, name: String, owner: address, quilt_id: String,
-  //   manifest_blob_id: String, manifest_hash: vector<u8>, quilt_blob_object: ID,
-  //   manifest_blob_object: ID, size_bytes: u64, file_count: u64, ctx): SiteAdminCap
-  // The two blob OBJECT ids (owned by the service wallet via send_object_to) are
-  // recorded on-chain so the renewal relayer knows WHICH Walrus objects to extend.
+  // create_site(v: &Version, reg: &mut SiteDigestRegistry, payment_digest: vector<u8>,
+  //   name: String, owner: address, quilt_id: String, manifest_blob_id: String,
+  //   manifest_hash: vector<u8>, quilt_blob_object: ID, manifest_blob_object: ID,
+  //   size_bytes: u64, file_count: u64, ctx): SiteAdminCap
+  // The registry + digest are the atomic on-chain dedup (multi-replica-safe). The two
+  // blob OBJECT ids (owned by the service wallet via send_object_to) are recorded
+  // on-chain so the storage extender knows WHICH Walrus objects to extend.
   // size_bytes/file_count are recorded so the read endpoints surface real metrics.
   const cap = tx.moveCall({
     target: PACKAGE_IDS.DEPLOY.TARGETS.CREATE_SITE,
     arguments: [
+      tx.object(DEPLOYER_CAP_OBJECT), // mint authority — the gate; first param `_deployer`
       tx.object(VERSION_OBJECT),
+      tx.object(SITE_DIGEST_REGISTRY_OBJECT),
+      tx.pure.vector("u8", paymentDigestBytes),
       tx.pure.string(name),
       tx.pure.address(owner),
       tx.pure.string(quiltId),
@@ -337,44 +327,11 @@ const createSiteOnChain = async (
     ],
   });
 
-  // CHARGE gate live → burn the paid digest ON-CHAIN in the same PTB (atomic with
-  // the mint: no Site without the burn, no burn without the Site). The fresh cap
-  // result from create_site proves which site the digest paid for.
-  if (chargeDigest) {
-    const ledgerCap = await findLedgerCap();
-    if (!ledgerCap) {
-      // Retryable (503): the reservation is RELEASED by the caller's catch — the
-      // paid digest stays valid for a retry once the cap is reachable.
-      throw new DeployError("deploy LedgerCap not found on the service wallet (cannot record charge)", 503);
-    }
-    tx.moveCall({
-      target: PACKAGE_IDS.DEPLOY.TARGETS.RECORD_CHARGE,
-      arguments: [
-        tx.object(VERSION_OBJECT),
-        tx.object(CHARGE_LEDGER_OBJECT),
-        tx.object(ledgerCap),
-        cap,
-        tx.pure.string(chargeDigest),
-      ],
-    });
-  }
-
   // create_site RETURNS the SiteAdminCap (composable style — it does NOT transfer it
   // internally), so the PTB must take ownership or it fails resolution with
   // UnusedValueWithoutDrop. Send it to the deploy service wallet (the signer), which
-  // holds the cap for later domain/renewal ops.
+  // holds the cap for later domain ops.
   tx.transferObjects([cap], wallet().toSuiAddress());
-
-  // charge_ledger abort 0 (EChargeAlreadyUsed) = the digest is burned ON-CHAIN for
-  // good (it already bought a Site, possibly via another replica / before a restart).
-  // Surfaced as ChargeError 409 so handleDeploy COMMITS — never releases — the
-  // in-memory reservation: a retry with this digest can never succeed.
-  const duplicateCharge = (error: string): ChargeError | null => {
-    const abort = parseMoveAbort(error);
-    return abort?.module === "charge_ledger" && abort.code === 0
-      ? new ChargeError("charge already used for a deploy (recorded on-chain)", 409)
-      : null;
-  };
 
   let res;
   try {
@@ -384,15 +341,22 @@ const createSiteOnChain = async (
       options: { showObjectChanges: true, showEffects: true },
     });
   } catch (err) {
-    const dup = duplicateCharge((err as Error).message ?? "");
-    if (dup) throw dup;
     throw new DeployError(`create_site failed: ${(err as Error).message}`, 502);
   }
 
   if (res.effects?.status?.status === "failure") {
-    const dup = duplicateCharge(res.effects.status.error ?? "");
-    if (dup) throw dup;
-    throw new DeployError(`create_site aborted: ${res.effects.status.error ?? "unknown"}`, 502);
+    const abortErr = res.effects.status.error ?? "unknown";
+    // EDigestUsed (site.move code 0): this payment digest already minted a Site —
+    // the on-chain one-site-per-payment guard fired (a retry that landed here after
+    // the first mint already committed, or a double-submit). Surface 409, the
+    // multi-replica-safe replacement for the old in-memory settledDeploys 409. The
+    // SDK formats a MoveAbort as e.g.
+    //   MoveAbort(MoveLocation { ... name: Identifier("site") ... }, 0) in command 0
+    // so we match the `site` module + the `, <code>)` abort code 0.
+    if (/MoveAbort\b/.test(abortErr) && /Identifier\("site"\)/.test(abortErr) && /,\s*0\)/.test(abortErr)) {
+      throw new DeployError("payment already used for a deploy", 409);
+    }
+    throw new DeployError(`create_site aborted: ${abortErr}`, 502);
   }
 
   const siteType = `${DEPLOY_PACKAGE}::site::Site`;
@@ -421,15 +385,14 @@ const createSiteOnChain = async (
 };
 
 // ---------------------------------------------------------------------------
-// POST /deploy — the one-call deploy flow. ALWAYS AUTHENTICATED.
+// POST /deploy — the one-call deploy flow. AUTHENTICATED BY THE PAYMENT ITSELF.
 //
-// Every deploy MUST carry { nonce, signature } multipart fields: the deployer
-// (Google-logged-in → a Suize wallet) signs a single-use server nonce
-// (buildDeployAuthMessage) and the backend recovers the signer address via
-// verifyPersonalMessageSignature (zkLogin OR plain Ed25519). The recovered address
-// IS the on-chain `owner` — there is no client-claimed `owner` field and no
-// service-wallet fallback, so a caller can only ever set THEMSELVES as owner.
-// Missing/invalid auth → 401, no anonymous deploy.
+// Every deploy carries the X-PAYMENT header (a signed gasless payment). The backend
+// VERIFIES it pays the exact $0.50 to the Deploy treasury and recovers the payer; the
+// recovered payer IS the on-chain `owner` — there is no client-claimed `owner` field,
+// no separate deploy-auth signature, and no service-wallet fallback, so a caller can
+// only ever set THEMSELVES (the address that paid) as owner. Whoever pays, owns.
+// Missing payment (gate live) → 402 with a fresh x402 challenge; no anonymous deploy.
 // ---------------------------------------------------------------------------
 
 const handleDeploy = async (req: Request, origin: string | null, server?: Server<unknown>): Promise<Response> => {
@@ -452,11 +415,55 @@ const handleDeploy = async (req: Request, origin: string | null, server?: Server
   const len = Number(req.headers.get("content-length") ?? 0);
   if (len > MAX_BUNDLE_BYTES) return json({ error: "bundle too large" }, 413, origin);
 
+  // ── x402 V2 PAYMENT GATE — is the charge join live? ─────────────────────────
+  // When the Deploy treasury (fee_recipient) resolves, every deploy is a one-off
+  // $0.50 settlement on the rail FIRST: a payment-less POST /deploy answers 402
+  // with the x402 V2 PaymentRequired body (+ PAYMENT-REQUIRED header) BEFORE any
+  // auth demand, so a generic agent discovers the price zero-shot. The paid retry
+  // carries the signed gasless payment in the X-PAYMENT header. When the gate is
+  // OFF (treasury unresolved) the deploy runs un-gated (auth + rate limits + the
+  // gas-drain ceiling only) — the documented "abuse mitigation, not billing" mode.
+  const gateLive = await chargeGateReady();
+  const proto = req.headers.get("x-forwarded-proto");
+
+  // Answer the x402 V2 402 with the PaymentRequired body + the PAYMENT-REQUIRED
+  // header. Returns null when the treasury is unresolved (caller stays un-gated).
+  const challenge402 = async (errorOverride?: string): Promise<Response | null> => {
+    const body = await deployRequirements(req.url, proto);
+    if (!body) return null;
+    if (errorOverride) body.error = errorOverride;
+    return json(body, 402, origin, {
+      "PAYMENT-REQUIRED": Buffer.from(JSON.stringify(body), "utf8").toString("base64"),
+    });
+  };
+
+  // The signed gasless payment (b64 PaymentPayload) — the deploy's sole authorization.
+  // Absent on the discovery shot. The no-Sui-key door submits the SAME header (the
+  // human's signed-unsettled payload, handed back by pay.suize.io mode=authorize).
+  const payHeader = (req.headers.get("X-PAYMENT") ?? req.headers.get("PAYMENT-SIGNATURE") ?? "").trim();
+
+  // ── PAYMENT GATE, leg 1: presence — public price discovery ───────────────────
+  // A payment-less POST /deploy answers 402 (the zero-shot entry point), not a 400.
+  // No payment → no deploy. The verify runs after input validation, immediately before
+  // the paid work.
+  if (gateLive && !payHeader) {
+    const c = await challenge402();
+    if (c) return c;
+  }
+
   // ── parse multipart ────────────────────────────────────────────────────────
+  // A caller with NO parsable body and NO payment header is an agent discovering
+  // the price — answer the 402 (handled above; here a broken body with no payment is
+  // also a fresh challenge). With a payment header present, a broken body is a real
+  // client error.
   let form: FormData;
   try {
     form = await req.formData();
   } catch {
+    if (gateLive && !payHeader) {
+      const c = await challenge402();
+      if (c) return c;
+    }
     return json({ error: "invalid multipart body" }, 400, origin);
   }
 
@@ -465,82 +472,69 @@ const handleDeploy = async (req: Request, origin: string | null, server?: Server
     return json({ error: "missing or oversized 'name' field" }, 400, origin);
   }
 
-  // ── AUTHENTICATION (REQUIRED) ────────────────────────────────────────────────
-  // There is NO anonymous deploy. The deployer signs a single-use server nonce
-  // (buildDeployAuthMessage) with their Suize wallet; `owner` is ALWAYS the
-  // recovered signer — never client-claimed, never the service wallet. A deploy
-  // can't bind to a siteId (it doesn't exist until create_site), so the message
-  // proves only the signer + the fresh nonce, which means a caller can only ever
-  // set THEMSELVES as owner. Missing/invalid → 401.
-  const nonce = String(form.get("nonce") ?? "").trim();
-  const signature = String(form.get("signature") ?? "").trim();
-  if (!nonce || !signature || !authNonceLive(nonce)) {
-    return json({ error: "deploy requires a signed-in deployer" }, 401, origin);
-  }
-  const recovered = await verifyDeployRequester(buildDeployAuthMessage(nonce), signature);
-  if (!recovered) {
-    return json({ error: "deploy requires a signed-in deployer" }, 401, origin);
-  }
-  burnAuthNonce(nonce); // single-use: replay-resistant once the deploy is attempted.
-  const owner = recovered;
-
-  // ── PAYMENT GATE, leg 1: presence (the CHARGE↔Deploy join) ──────────────────
-  // A deploy is a one-off $0.50 `charge` on the rail. When the join is LIVE (the
-  // `account` package is published AND the Deploy merchant is pinned), the deploy
-  // REQUIRES a `chargeDigest` multipart field — the executed charge tx the caller
-  // settled via POST /deploy/charge → POST /execute. The cheap presence check runs
-  // here (402 + quote before any tar work); the on-chain verification + single-use
-  // RESERVATION runs after input validation, immediately before the paid work, so
-  // an input-rejected deploy never strands a reservation. No payment → no deploy.
-  //
-  // When the join is NOT live yet (pre-publish / merchant unpinned), the deploy
-  // runs un-gated (auth + rate limits + the gas-drain ceiling only) — the documented
-  // "abuse mitigation, not billing" mode. The moment the two ids are set in
-  // @suize/shared, this gate lights up with zero further code change.
-  let chargeDigest: string | null = null;
-  if (chargeGateReady()) {
-    chargeDigest = String(form.get("chargeDigest") ?? "").trim();
-    if (!chargeDigest) {
-      // 402-shaped: the caller must settle the quote first.
-      return json(
-        { error: "payment required", quote: deployQuote() },
-        402,
-        origin,
-      );
+  // ── AUTHENTICATION = the payment ────────────────────────────────────────────
+  // VERIFY (simulate-only — no settle yet) the X-PAYMENT pays the exact $0.50 to the
+  // Deploy treasury; the recovered payer IS the on-chain `owner` (whoever pays, owns).
+  // There is no separate deploy-auth signature and no client-claimed owner — the
+  // payment payload is the private signed authorization. When the gate is OFF (treasury
+  // unresolved) the deploy runs un-gated and `owner` is the service wallet (the
+  // documented "abuse mitigation, not billing" mode — no real owner attribution).
+  let owner: string;
+  let verifiedPayment: VerifiedDeployPayment | null = null;
+  if (gateLive) {
+    try {
+      verifiedPayment = await gateDeployPayment(payHeader);
+    } catch (err) {
+      if (err instanceof DeployPaymentError) {
+        if (err.challenge) {
+          const c = await challenge402(err.message);
+          if (c) return c;
+        }
+        return json({ error: err.message }, err.status, origin);
+      }
+      throw err;
     }
+    owner = verifiedPayment.payer;
+  } else {
+    owner = serviceAddress();
   }
+
+  const badInput = (message: string, status: number): Response =>
+    json({ error: message }, status, origin);
 
   const file = form.get("site.tar");
-  if (!(file instanceof File)) return json({ error: "missing 'site.tar' file" }, 400, origin);
+  if (!(file instanceof File)) return badInput("missing 'site.tar' file", 400);
 
   const tarBytes = new Uint8Array(await file.arrayBuffer());
-  if (tarBytes.byteLength === 0) return json({ error: "empty 'site.tar'" }, 400, origin);
-  if (tarBytes.byteLength > MAX_BUNDLE_BYTES) return json({ error: "bundle too large" }, 413, origin);
+  if (tarBytes.byteLength === 0) return badInput("empty 'site.tar'", 400);
+  if (tarBytes.byteLength > MAX_BUNDLE_BYTES) return badInput("bundle too large", 413);
 
   // ── unpack + validate ────────────────────────────────────────────────────────
   let files: NormalizedFile[];
   try {
     files = normalizeEntries(parseTar(tarBytes));
   } catch (err) {
-    if (err instanceof DeployError) return json({ error: err.message }, err.status, origin);
-    return json({ error: `unreadable tar: ${(err as Error).message}` }, 400, origin);
+    if (err instanceof DeployError) return badInput(err.message, err.status);
+    return badInput(`unreadable tar: ${(err as Error).message}`, 400);
   }
-  if (files.length === 0) return json({ error: "no files in bundle" }, 400, origin);
+  if (files.length === 0) return badInput("no files in bundle", 400);
   if (files.length > MAX_FILE_COUNT) {
-    return json({ error: `too many files (max ${MAX_FILE_COUNT})` }, 400, origin);
+    return badInput(`too many files (max ${MAX_FILE_COUNT})`, 400);
   }
 
   // ── deploy receipt (dedup salt) ──────────────────────────────────────────────
   // Inject ONE extra file into every bundle: a tiny JSON receipt whose bytes are
-  // UNIQUE per deploy (wall-clock ms + the single-use auth nonce). Identical site
-  // bundles would otherwise dedup on Walrus (`alreadyCertified` — no new Blob
-  // OBJECT, nothing for the relayer to own/extend); the unique receipt guarantees
-  // `newlyCreated` every time. It IS served (at /.suize/deploy.json) — that's fine
-  // and documented; it's counted in the manifest/size/file-count like any user
-  // file. The reserved path is OURS: a user file at it is dropped first.
+  // UNIQUE per deploy (wall-clock ms + a fresh CSPRNG salt). Identical site bundles
+  // would otherwise dedup on Walrus (`alreadyCertified` — no new Blob OBJECT, nothing
+  // for the relayer to own/extend); the unique receipt guarantees `newlyCreated` every
+  // time. It IS served (at /.suize/deploy.json) — that's fine and documented; it's
+  // counted in the manifest/size/file-count like any user file. The reserved path is
+  // OURS: a user file at it is dropped first.
   files = files.filter((f) => f.servedPath !== DEPLOY_RECEIPT_PATH);
   const receiptBytes = new TextEncoder().encode(
-    JSON.stringify({ deployedAt: Date.now(), owner, nonce }),
+    // A fresh per-deploy salt (the on-chain digest dedup lives in create_site now, so
+    // the receipt only needs to be byte-unique for Walrus, not carry the auth token).
+    JSON.stringify({ deployedAt: Date.now(), owner, salt: randomBytes(16).toString("hex") }),
   );
   let receiptId = identifierFor(DEPLOY_RECEIPT_PATH);
   // Defend against an identifier collision after flattening (mirrors normalizeEntries).
@@ -550,19 +544,7 @@ const handleDeploy = async (req: Request, origin: string | null, server?: Server
   files.push({ servedPath: DEPLOY_RECEIPT_PATH, identifier: receiptId, data: receiptBytes });
 
   const totalBytes = files.reduce((n, f) => n + f.data.byteLength, 0);
-  if (totalBytes > MAX_BUNDLE_BYTES) return json({ error: "bundle too large" }, 413, origin);
-
-  // ── PAYMENT GATE, leg 2: verify + RESERVE the charge (single-use) ────────────
-  // Last stop before the paid work. The digest is reserved (in-flight) here,
-  // COMMITTED only after the Site mints, and RELEASED in the catch below — so a
-  // transient Walrus/mint failure never burns a paid charge, and two concurrent
-  // deploys can't ride one digest.
-  if (chargeDigest) {
-    const chargeErr = await reserveDeployCharge(chargeDigest, owner);
-    if (chargeErr) {
-      return json({ error: chargeErr.message, quote: deployQuote() }, chargeErr.status, origin);
-    }
-  }
+  if (totalBytes > MAX_BUNDLE_BYTES) return badInput("bundle too large", 413);
 
   // ── build the quilt parts in-memory (the HTTP publisher takes bytes directly) ─
   try {
@@ -590,7 +572,7 @@ const handleDeploy = async (req: Request, origin: string | null, server?: Server
 
     // ── 1. upload ALL files as one quilt ────────────────────────────────────────
     // The Blob OBJECT is transferred to the service wallet (send_object_to) so the
-    // renewal relayer can later `extend_blob` it; its id is recorded on the Site.
+    // storage extender can later `extend_blob` it; its id is recorded on the Site.
     const { quiltId, patchIds, quiltBlobObject } = await storeQuilt(quiltInputs, serviceAddress());
 
     // ── 2. build the manifest (SPEC §4) ─────────────────────────────────────────
@@ -618,9 +600,23 @@ const handleDeploy = async (req: Request, origin: string | null, server?: Server
       serviceAddress(),
     );
 
-    // ── 4. mint the on-chain Site (+ burn the charge digest in the same PTB) ────
+    // ── 4. SETTLE the payment, then mint the on-chain Site ──────────────────────
+    // Settle the verified payment NOW (keyless gRPC, idempotent by digest) so the
+    // settled digest threads into create_site's on-chain one-site-per-payment registry.
+    // Settlement is deferred to here (not the auth block) so the Walrus work happens on
+    // a VERIFIED-but-unsettled payment — and a re-presented payment re-settles
+    // idempotently; the on-chain EDigestUsed (→ 409) is what blocks a second Site, not
+    // an in-process map (THE PRINCIPLE: the chain is the database, multi-replica-safe).
+    // When the gate is OFF (un-gated mode) there is no payment — key the registry on a
+    // fresh per-deploy salt so create_site still records SOMETHING unique.
+    const paymentDigest = verifiedPayment
+      ? await settleDeployPayment(verifiedPayment)
+      : `ungated-${Date.now()}-${randomBytes(8).toString("hex")}`;
+
     // size_bytes/file_count are the real bundle metrics (computed above when we
     // validated the caps) — recorded on-chain so the read endpoints don't return 0.
+    // `paymentDigest` is the one-site-per-payment key: a duplicate aborts EDigestUsed
+    // (→ 409) at the mint, the multi-replica-safe consume guard.
     const { siteId, digest } = await createSiteOnChain(
       name,
       owner,
@@ -631,13 +627,8 @@ const handleDeploy = async (req: Request, origin: string | null, server?: Server
       manifestBlobObject,
       totalBytes,
       files.length,
-      chargeDigest,
+      paymentDigest,
     );
-
-    // The Site exists on-chain — the paid charge is now spent for good. Commit
-    // BEFORE anything else can throw, or a post-mint failure would release a
-    // digest that already bought a live Site (free second deploy).
-    if (chargeDigest) commitDeployCharge(chargeDigest);
 
     // ── 5. respond ──────────────────────────────────────────────────────────────
     const body: DeployResponse = {
@@ -657,18 +648,20 @@ const handleDeploy = async (req: Request, origin: string | null, server?: Server
 
     return json(body, 200, origin);
   } catch (err) {
-    // The deploy died before (or at) the mint. Two distinct outcomes for the paid
-    // charge: a ChargeError 409 from record_charge means the digest is burned
-    // ON-CHAIN for good (it already bought a Site) — COMMIT it so no retry loops on
-    // a dead digest; anything else hands the paid charge back so the caller can
-    // retry with the same digest. No-op if already committed.
-    if (chargeDigest) {
-      if (err instanceof ChargeError && err.status === 409) commitDeployCharge(chargeDigest);
-      else releaseDeployCharge(chargeDigest);
+    // The deploy died before (or at) the mint. The settled $0.50 is NOT stranded: the
+    // payment is idempotent (doSettle re-settles from chain/cache) and the on-chain
+    // dedup only consumes the digest when a Site actually mints — so the SAME X-PAYMENT
+    // header can retry and re-mint. A settle failure surfaces its own status (402/503);
+    // an EDigestUsed mint abort surfaces 409 (already used for a deploy).
+    if (err instanceof DeployPaymentError) {
+      if (err.challenge) {
+        const c = await challenge402(err.message);
+        if (c) return c;
+      }
+      return json({ error: err.message }, err.status, origin);
     }
     if (err instanceof WalrusError) return json({ error: err.message }, err.status, origin);
     if (err instanceof DeployError) return json({ error: err.message }, err.status, origin);
-    if (err instanceof ChargeError) return json({ error: err.message }, err.status, origin);
     console.error("[deploy]", (err as Error).message);
     return json({ error: "deploy failed" }, 500, origin);
   }
@@ -694,6 +687,44 @@ interface SiteCreatedJson {
 const toNum = (v: unknown): number => {
   const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : 0;
   return Number.isFinite(n) ? n : 0;
+};
+
+/** One owned site, distilled to what the storage auto-renewer needs. `sizeBytes` is
+ * the SiteCreated event's on-chain `size_bytes` (or 0 if the field was absent — the
+ * renewer treats an unreadable size conservatively against its budget, see extend.ts). */
+export interface OwnedSite {
+  siteId: string;
+  sizeBytes: number;
+}
+
+/**
+ * Every site whose on-chain `owner` == `owner` — the SAME SiteCreated-events-by-owner
+ * scan the GET /sites?owner= listing uses, deduped by siteId (a SiteCreated is emitted
+ * once per immutable Site, so dedupe is belt-and-suspenders). Pages newest-first up to
+ * `maxPages` × 50 events. Used by the per-address storage auto-renewer (extend.ts) to
+ * fan out a single owner's subscription across all that owner's sites. The `owner` is
+ * compared case-insensitively (events carry the canonical `0x…` form; we lowercase both).
+ */
+export const sitesForOwner = async (owner: string, maxPages = 10): Promise<OwnedSite[]> => {
+  const ownerLc = owner.toLowerCase();
+  const out = new Map<string, OwnedSite>();
+  let cursor: any = null;
+  for (let page = 0; page < maxPages; page++) {
+    const events = await suiClient().queryEvents({
+      query: { MoveEventType: `${DEPLOY_PACKAGE}::site::SiteCreated` },
+      order: "descending",
+      cursor,
+      limit: 50,
+    });
+    for (const ev of events.data) {
+      const pj = ev.parsedJson as SiteCreatedJson;
+      if (!pj?.site_id || String(pj.owner ?? "").toLowerCase() !== ownerLc) continue;
+      if (!out.has(pj.site_id)) out.set(pj.site_id, { siteId: pj.site_id, sizeBytes: toNum(pj.size_bytes) });
+    }
+    if (!events.hasNextPage || events.nextCursor == null) break;
+    cursor = events.nextCursor;
+  }
+  return [...out.values()];
 };
 
 const handleListSites = async (req: Request, url: URL, origin: string | null, server?: Server<unknown>): Promise<Response> => {
@@ -755,11 +786,32 @@ const handleGetSite = async (req: Request, siteId: string, origin: string | null
     const expectedType = `${DEPLOY_PACKAGE}::site::Site`;
     if (content.type !== expectedType) return json({ error: "not a Site object" }, 404, origin);
 
-    // Linked domains for this site + the creation timestamp (from the SiteCreated
-    // event — the Move struct doesn't store time; the event's timestampMs does).
-    const [domains, createdAtMs] = await Promise.all([
+    // Linked domains + creation timestamp (from the SiteCreated event — the Move
+    // struct doesn't store time) + the Walrus storage end-epoch (the binding blob's
+    // end, read live; drives the dashboard's expiry/auto-renewal copy).
+    const [domains, createdAtMs, storageEndEpoch, subscribed] = await Promise.all([
       domainsForSite(siteId),
       createdAtMsForSite(siteId),
+      storageEndForSite(siteId),
+      // Sub state through the MERCHANT SDK — drives the dashboard's "subscribed /
+      // auto-renewing" copy + the custom-domain unlock affordance. PER-ADDRESS: one
+      // active Deploy subscription owned by THIS site's on-chain owner unlocks every
+      // site that owner holds, so we read the site owner and check subs.activeFor(owner)
+      // (NOT findByRef(siteId) — the sub is no longer per-site). A read blip / unreadable
+      // owner degrades to `undefined` (omitted), never a false claim of subscribed.
+      (async (): Promise<boolean | undefined> => {
+        const subs = await deploySubs();
+        if (!subs) return undefined;
+        try {
+          const owner = await siteOwner(siteId);
+          if (!owner || !SUI_ADDRESS_RE.test(owner)) return undefined;
+          // VALID terms, not mere existence — a Subscription<Junk> or a $0.01/100yr sub
+          // must NOT read subscribed (audit: subs free/underpriced-premium class).
+          return (await subs.activeFor(owner)).some(isValidDeploySub);
+        } catch {
+          return undefined;
+        }
+      })(),
     ]);
 
     const info: SiteInfo = {
@@ -772,6 +824,10 @@ const handleGetSite = async (req: Request, siteId: string, origin: string | null
       fileCount: toNum(fields.file_count),
       createdAtMs,
       domains,
+      // Walrus storage lifecycle — the end-epoch + the wall-clock ms it lapses at.
+      storageEndEpoch: storageEndEpoch ?? undefined,
+      expiresAtMs: storageEndEpoch !== null ? epochToMs(storageEndEpoch) : undefined,
+      subscribed,
     };
     return json(info, 200, origin);
   } catch (err) {
@@ -850,13 +906,15 @@ const domainsForSite = async (siteId: string): Promise<string[]> => {
 // ---------------------------------------------------------------------------
 // Custom-domain linkage. POST /domains issues the challenge; POST /domains?verify=1
 // (or { verify: true }) verifies BOTH the ownership TXT AND the routing CNAME, then
-// links on-chain. DELETE /domains/:domain unlinks. Both link AND unlink require proof
-// of control via the SAME DNS-TXT challenge, plus link requires a SITE-OWNER SIGNATURE
+// links on-chain. DELETE /domains/:domain unlinks. LINK requires a SITE-OWNER
+// SIGNATURE (the recovered signer must == Site.owner) PLUS the DNS-TXT + CNAME proof,
 // so a party who controls only the DNS cannot bind the domain to a site they do not
-// own (M6).
+// own (M6). UNLINK requires the SITE-OWNER SIGNATURE ONLY — no DNS proof (you may be
+// unlinking precisely because you no longer control the domain's DNS); it is immediate
+// (no propagation wait).
 //
 // TWO-RECORD GATE: verify requires TXT (ownership: `_suize-verify.<domain>` ==
-// nonce) AND CNAME (routing: `<domain>` -> `<base36(siteId)>.<baseDomain>`) — we
+// token) AND CNAME (routing: `<domain>` -> `<base36(siteId)>.<baseDomain>`) — we
 // NEVER call link_domain for a domain that won't actually serve. While either is
 // missing the response is HTTP 200 `status:"pending"` with `txtOk`/`cnameOk` flags
 // and a `detail` naming the missing/propagating record. On a successful link the
@@ -865,106 +923,69 @@ const domainsForSite = async (siteId: string): Promise<string[]> => {
 // REQUIREMENT note in cloudflare.ts for the CF_API_TOKEN + CF_ZONE_ID + CF-for-SaaS
 // setup that enables auto-SSL.
 //
-// DNS-NONCE (was a security bug): the TXT challenge used to be
-// sha256(deployWalletKey : siteId : domain) — a PUBLIC value DERIVED FROM THE
-// SIGNING KEY. Publishing it in DNS (its entire purpose) leaked a function of the
-// secret to the world. It is now a RANDOM per-request nonce, generated with a CSPRNG
-// and persisted server-side (challengeStore), never derived from any secret.
+// DNS CHALLENGE TOKEN — deterministic, KEYLESS, multi-replica-safe. The TXT value
+// the owner publishes to prove control of `domain` for `siteId`.
+//
+// HISTORY — two past bugs, neither reintroduced:
+//  1. It was sha256(deployWalletKey : siteId : domain) — a value DERIVED FROM THE
+//     SIGNING KEY, published in DNS → it leaked a function of the secret.
+//  2. It was then a RANDOM CSPRNG nonce held in a per-replica in-memory Map — which
+//     BREAKS at >1 replica (issue lands on pod A, verify on pod B → no token).
+// It is now a deterministic, KEYLESS namespaced hash of PUBLIC identifiers: any
+// replica re-derives the same value with NO shared store, and it leaks no key. The
+// token NEED NOT be secret — security is the DNS-CONTROL (only the domain's DNS
+// holder can publish the TXT) PLUS the owner SIGNATURE on verify (recovered ==
+// Site.owner). A guessable token grants nothing: you still cannot edit a domain you
+// don't control, nor sign as an owner you aren't. No TTL (a deterministic challenge
+// is always valid); freshness lives in the OWNER-SIGNATURE's ts window, not here.
 // ---------------------------------------------------------------------------
 
 const txtName = (domain: string): string => `_suize-verify.${domain}`;
 
-// ── Random-nonce challenge store ────────────────────────────────────────────
-// A CSPRNG nonce per {siteId, domain}, persisted in-memory until verified or it
-// expires. Stateless determinism is GONE on purpose — the old scheme leaked a
-// function of the signing key. A process restart simply invalidates pending
-// challenges (the caller re-requests one). Keyed by `<siteId>:<domain>`.
-const CHALLENGE_TTL_MS = 60 * 60 * 1000; // 1h to publish the TXT and verify.
-interface PendingChallenge {
-  token: string;
-  expires: number;
-}
-const challengeStore = new Map<string, PendingChallenge>();
+/** The TXT value to publish for {siteId, domain} — deterministic + stateless. */
+const dnsToken = (siteId: string, domain: string): string =>
+  createHash("sha256")
+    .update(`suize-deploy-dns:${siteId}:${domain.toLowerCase()}`)
+    .digest("hex");
 
-const challengeKey = (siteId: string, domain: string): string =>
-  `${siteId}:${domain.toLowerCase()}`;
+// ── Stateless timestamped owner-signature (domain link/unlink auth) ──────────
+// The domain-op authority is a zkLogin personal-message signature over an op-bound,
+// TIMESTAMPED message (buildDeployLink/UnlinkAuthMessage(domain, …, ts)). There is NO
+// server-issued nonce store (THE PRINCIPLE: no per-replica shared map — the chain is
+// the database; this auth is multi-replica-safe with zero coordination). The backend
+// accepts a `ts` within a freshness window, reconstructs the exact message, recovers
+// the signer, and requires it == Site.owner. A within-window replay by whoever already
+// saw the signature is HARMLESS: link/unlink are owner-gated AND idempotent on-chain
+// (re-linking a domain already pointed at the owner's site re-asserts the same state;
+// the registry's EDomainTaken/EWrongCap block any cross-site grab).
+//
+// WINDOW SIZING — the owner signs the link ONCE, then the AGENT polls verify (it
+// cannot re-sign; it does not hold the owner key) while the TXT + CNAME propagate, so
+// that one signature must stay fresh ACROSS DNS PROPAGATION. ±60 min covers the common
+// case; a slow zone just means the owner re-signs. Unlink shares the window — it needs
+// no propagation, but a longer window there is equally harmless (owner-gated +
+// idempotent: re-unlinking an already-unlinked domain is a no-op).
+const AUTH_TS_WINDOW_MS = 60 * 60 * 1000; // ±60 min — covers DNS propagation (see above).
 
-/** Mint + persist a fresh random challenge token for {siteId, domain}. */
-const issueChallenge = (siteId: string, domain: string): string => {
-  const token = randomBytes(24).toString("hex"); // 192-bit, unguessable
-  challengeStore.set(challengeKey(siteId, domain), {
-    token,
-    expires: Date.now() + CHALLENGE_TTL_MS,
-  });
-  return token;
-};
-
-/** The currently-valid (non-expired) challenge token for {siteId, domain}, or null. */
-const currentChallenge = (siteId: string, domain: string): string | null => {
-  const key = challengeKey(siteId, domain);
-  const c = challengeStore.get(key);
-  if (!c) return null;
-  if (c.expires < Date.now()) {
-    challengeStore.delete(key);
-    return null;
-  }
-  return c.token;
-};
-
-// Sweep expired challenges so the map can't grow unbounded.
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, c] of challengeStore) if (c.expires < now) challengeStore.delete(k);
-}, CHALLENGE_TTL_MS).unref?.();
-
-// ── Auth-nonce store (single-use, replay-resistant) ─────────────────────────
-// A CSPRNG nonce minted by GET /auth/nonce (or piggy-backed on the link ISSUE
-// response), persisted in-memory with a short TTL until it is BURNED on the first
-// successful verify. The domain-op authority is a zkLogin personal-message
-// signature that BINDS this nonce to the exact op (link/unlink + params); the
-// nonce being single-use means a captured signature can never be replayed after
-// the op lands. Mirrors `challengeStore`'s mint/lookup/sweep shape.
-const AUTH_NONCE_TTL_MS = 5 * 60 * 1000; // 5 min to sign + submit.
-const authNonceStore = new Map<string, number>(); // nonce -> expires (ms)
-
-/** Mint + persist a fresh single-use auth nonce (192-bit hex). */
-const issueAuthNonce = (): string => {
-  const nonce = randomBytes(24).toString("hex");
-  authNonceStore.set(nonce, Date.now() + AUTH_NONCE_TTL_MS);
-  return nonce;
-};
-
-/** True iff `nonce` is live (known + unexpired). Lazily evicts an expired entry. */
-const authNonceLive = (nonce: string): boolean => {
-  const expires = authNonceStore.get(nonce);
-  if (expires === undefined) return false;
-  if (expires < Date.now()) {
-    authNonceStore.delete(nonce);
-    return false;
-  }
-  return true;
-};
-
-/** Burn a nonce (single-use) after a successful verify. */
-const burnAuthNonce = (nonce: string): void => {
-  authNonceStore.delete(nonce);
-};
-
-// Sweep expired auth nonces so the map can't grow unbounded.
-setInterval(() => {
-  const now = Date.now();
-  for (const [n, expires] of authNonceStore) if (expires < now) authNonceStore.delete(n);
-}, AUTH_NONCE_TTL_MS).unref?.();
+/** True iff `ts` (ms epoch, client-supplied) is within the freshness window. */
+const tsFresh = (ts: number): boolean =>
+  Number.isFinite(ts) && Math.abs(Date.now() - ts) <= AUTH_TS_WINDOW_MS;
 
 /**
  * Recover the Sui address that signed `expectedMessage` as a personal message.
  *
  * REUSES the exact primitive the WS auth uses (`verifyPersonalMessageSignature`
- * from @mysten/sui/verify — zkLogin-aware via the Sui client): it recovers the
- * signer's public key from the base64 personal-message `signature` over the UTF-8
- * bytes of `expectedMessage`, and we return `toSuiAddress()`. The caller builds
- * `expectedMessage` from the op params + the server-issued nonce, so a valid
- * signature here proves the holder of THAT address authorized THIS exact op.
+ * from @mysten/sui/verify — zkLogin-aware via the Sui client): it DISPATCHES BY
+ * SIGNATURE SCHEME — plain Ed25519, zkLogin, OR a MultiSig signature recovers the
+ * MULTISIG public key, whose `.toSuiAddress()` is the multisig address (verified in
+ * node_modules: the MultiSig branch reconstructs a MultiSigPublicKey from the embedded
+ * member set, validates the threshold over the PersonalMessage-wrapped bytes, and a
+ * 1-of-2 sub-account satisfies threshold 1 with the lone agent-member signature). It
+ * recovers the signer's public key from the base64 personal-message `signature` over
+ * the UTF-8 bytes of `expectedMessage`, and we return `toSuiAddress()`. The caller
+ * builds `expectedMessage` from the op params + a client timestamp, so a valid
+ * signature here proves the holder of THAT address (an EOA OR a sub-account multisig)
+ * authorized THIS exact op.
  *
  * Returns the recovered 0x-address, or null on ANY failure (bad sig, malformed
  * input, wrong message) — the caller maps null to a 403.
@@ -1038,12 +1059,12 @@ const cnameRoutesToUs = async (domain: string, expectedTarget: string): Promise<
 // │ `requesterAddress` is NO LONGER client-claimed. It is the address RECOVERED │
 // │ by `verifyDeployRequester` from a zkLogin personal-message signature the    │
 // │ client made over the EXACT op message (`buildDeployLinkAuthMessage` /       │
-// │ `buildDeployUnlinkAuthMessage`) bound to a server-issued single-use nonce.  │
-// │ The client cannot forge an address it does not hold the key for, and the    │
-// │ op-bound + nonce-fresh message makes a captured signature non-replayable    │
-// │ against a different op or after the nonce is burned. The recovered address  │
-// │ is then required to equal `Site.owner` below — a real cryptographic         │
-// │ ownership proof, not a UX gate.                                             │
+// │ `buildDeployUnlinkAuthMessage`) bound to a client `ts` (ms epoch) the        │
+// │ backend accepts within a freshness window — STATELESS (no nonce store). The │
+// │ client cannot forge an address it does not hold the key for; the recovered  │
+// │ address is required to equal `Site.owner` below — a real cryptographic       │
+// │ ownership proof, not a UX gate. A within-window replay is owner-gated +      │
+// │ on-chain-idempotent (harmless — see the AUTH_TS_WINDOW_MS note above).      │
 // └────────────────────────────────────────────────────────────────────────────┘
 
 /** Read the on-chain `owner` address recorded on a Site object, or null if unreadable. */
@@ -1067,8 +1088,8 @@ const siteOwner = async (siteId: string): Promise<string | null> => {
  * `requesterAddress` is the address that must match the Site's on-chain `owner`.
  *
  * IMPORTANT: this value is the address RECOVERED at the call site from a verified
- * zkLogin personal-message signature (op-bound, nonce-fresh, single-use — see the
- * CRYPTOGRAPHIC AUTHORITY note above), NOT a client-claimed field. The owner
+ * zkLogin personal-message signature (op-bound, ts-fresh within the auth window — see
+ * the CRYPTOGRAPHIC AUTHORITY note above), NOT a client-claimed field. The owner
  * compare + 403 below are unchanged from the prior seam; only the source of the
  * address became cryptographic.
  *
@@ -1223,250 +1244,9 @@ const findAdminCapForSite = async (siteId: string): Promise<string | null> => {
   return null;
 };
 
-// ---------------------------------------------------------------------------
-// Renewal join (subscription ↔ site) — the on-chain reads + the cap-signed
-// RenewalRegistry writes behind POST/DELETE /deploy/renewal and the relayer.
-//
-// The registry (`renewal_registry::RenewalRegistry`) maps SubRef{account_id,
-// sub_key} -> site id; the relayer walks it each tick to know which site's
-// Walrus storage a due subscription renews. Linking is gated THREE ways: (a)
-// the signer must be the rail Account.owner (verified on-chain — closes the
-// steal-a-stranger's-subscription hole: without it, any site owner could point
-// their site at someone ELSE's subscription and drain that stranger's Account
-// every period), (b) the subscription's on-chain terms must actually fund the
-// Deploy renewal (payee == the Deploy merchant, period_cap >= the price), and
-// (c) the site must be a v2 Site carrying its Walrus Blob OBJECT ids (a pre-v2
-// site has nothing the relayer could extend).
-// ---------------------------------------------------------------------------
-
-/** Read the rail `Account<USDC>`'s `owner` address, or null if unreadable/not an Account. */
-const accountOwner = async (accountId: string): Promise<string | null> => {
-  try {
-    const res = await suiClient().getObject({ id: accountId, options: { showContent: true } });
-    const content = res.data?.content;
-    if (!content || content.dataType !== "moveObject") return null;
-    if (!content.type.startsWith(`${ACCOUNT_PACKAGE}::account::Account<`)) return null;
-    const owner = (content.fields as Record<string, unknown>).owner;
-    return typeof owner === "string" ? owner : null;
-  } catch {
-    return null;
-  }
-};
-
-/** The on-chain terms of a rail subscription (the relayer's due/cancelled source). */
-export interface SubscriptionTerms {
-  payee: string;
-  periodCap: number;
-  periodMs: number;
-  lastChargedMs: number;
-}
-
-/**
- * Read the `Subscription` dynamic field keyed by `subKey` (a raw `u64`) on the
- * rail Account. Returns null when the field is missing (never created OR
- * cancelled — `cancel_subscription` removes the df) or unreadable. EXPORTED for
- * the relayer (its cancelled-check + due-check both read this).
- */
-export const readSubscription = async (
-  accountId: string,
-  subKey: number,
-): Promise<SubscriptionTerms | null> => {
-  try {
-    const field = await suiClient().getDynamicFieldObject({
-      parentId: accountId,
-      name: { type: "u64", value: String(subKey) },
-    });
-    const content = field.data?.content;
-    if (!content || content.dataType !== "moveObject") return null;
-    // The df object is Field<u64, Subscription>; `value` carries the struct
-    // (rendered as { type, fields } or flat depending on RPC) — read both shapes.
-    const value = (content.fields as Record<string, unknown>).value as
-      | { fields?: Record<string, unknown> }
-      | Record<string, unknown>
-      | undefined;
-    const f = ((value as { fields?: Record<string, unknown> })?.fields ?? value) as
-      | Record<string, unknown>
-      | undefined;
-    if (!f || typeof f.payee !== "string") return null;
-    return {
-      payee: f.payee,
-      periodCap: toNum(f.period_cap),
-      periodMs: toNum(f.period_ms),
-      lastChargedMs: toNum(f.last_charged_ms),
-    };
-  } catch {
-    return null;
-  }
-};
-
-/**
- * Read a v2 Site's two Walrus Blob OBJECT ids (what `extend_blob` extends).
- * Returns null for a missing/pre-v2 site. EXPORTED for the relayer.
- */
-export const siteBlobObjects = async (
-  siteId: string,
-): Promise<{ quilt: string; manifest: string } | null> => {
-  try {
-    const res = await suiClient().getObject({ id: siteId, options: { showContent: true } });
-    const content = res.data?.content;
-    if (!content || content.dataType !== "moveObject") return null;
-    if (content.type !== `${DEPLOY_PACKAGE}::site::Site`) return null;
-    const fields = content.fields as Record<string, unknown>;
-    const quilt = fields.quilt_blob_object;
-    const manifest = fields.manifest_blob_object;
-    if (typeof quilt !== "string" || typeof manifest !== "string") return null;
-    if (!SUI_ADDRESS_RE.test(quilt) || !SUI_ADDRESS_RE.test(manifest)) return null;
-    return { quilt, manifest };
-  } catch {
-    return null;
-  }
-};
-
-/**
- * The site id the subscription `{accountId, subKey}` currently renews, from the
- * RenewalRegistry's `Table<SubRef, ID>` (read the registry → its table UID → the
- * SubRef-keyed dynamic field). Null when not linked.
- */
-const renewalSiteFor = async (accountId: string, subKey: number): Promise<string | null> => {
-  try {
-    // The Table's dynamic fields hang off the TABLE's UID, not the registry's.
-    const reg = await suiClient().getObject({
-      id: RENEWAL_REGISTRY_OBJECT,
-      options: { showContent: true },
-    });
-    const content = reg.data?.content;
-    if (!content || content.dataType !== "moveObject") return null;
-    const subs = (content.fields as Record<string, unknown>).subs as
-      | { fields?: { id?: { id?: string } } }
-      | undefined;
-    const tableId = subs?.fields?.id?.id;
-    if (!tableId) return null;
-
-    const field = await suiClient().getDynamicFieldObject({
-      parentId: tableId,
-      name: {
-        type: `${DEPLOY_PACKAGE}::renewal_registry::SubRef`,
-        value: { account_id: accountId, sub_key: String(subKey) },
-      },
-    });
-    const fieldContent = field.data?.content;
-    if (fieldContent?.dataType === "moveObject") {
-      const value = (fieldContent.fields as Record<string, unknown>).value;
-      if (typeof value === "string") return value;
-    }
-  } catch {
-    /* not linked */
-  }
-  return null;
-};
-
-/** Service-wallet-signed `link_renewal` (cap↔site binding is the on-chain auth). */
-const linkRenewalOnChain = async (
-  siteId: string,
-  accountId: string,
-  subKey: number,
-): Promise<string> => {
-  const cap = await findAdminCapForSite(siteId);
-  if (!cap) throw new DeployError("SiteAdminCap not found for site (cannot link renewal)", 409);
-
-  // Abort mapping: renewal_registry 0 = ERenewalTaken (sub already funds a site) → 409.
-  const taken = (error: string): DeployError | null => {
-    const abort = parseMoveAbort(error);
-    return abort?.module === "renewal_registry" && abort.code === 0
-      ? new DeployError("subscription already linked to a site (unlink it first)", 409)
-      : null;
-  };
-
-  const tx = new Transaction();
-  tx.moveCall({
-    target: PACKAGE_IDS.DEPLOY.TARGETS.LINK_RENEWAL,
-    arguments: [
-      tx.object(VERSION_OBJECT),
-      tx.object(RENEWAL_REGISTRY_OBJECT),
-      tx.object(cap),
-      tx.object(siteId),
-      tx.pure.id(accountId),
-      tx.pure.u64(subKey),
-    ],
-  });
-
-  try {
-    const res = await suiClient().signAndExecuteTransaction({
-      transaction: tx,
-      signer: wallet(),
-      options: { showEffects: true },
-    });
-    if (res.effects?.status?.status === "failure") {
-      const err = taken(res.effects.status.error ?? "");
-      if (err) throw err;
-      throw new DeployError(`link_renewal aborted: ${res.effects.status.error ?? "unknown"}`, 502);
-    }
-    return res.digest;
-  } catch (err) {
-    if (err instanceof DeployError) throw err;
-    const dup = taken((err as Error).message ?? "");
-    if (dup) throw dup;
-    throw new DeployError(`link_renewal failed: ${(err as Error).message}`, 502);
-  }
-};
-
-/**
- * Service-wallet-signed `unlink_renewal` for the subscription's CURRENT site
- * (read from the registry — the cap must be the linked site's own, per the Move
- * EWrongCap gate). EXPORTED for the relayer (it unlinks cancelled subs).
- */
-export const unlinkRenewalOnChain = async (
-  accountId: string,
-  subKey: number,
-): Promise<string> => {
-  const siteId = await renewalSiteFor(accountId, subKey);
-  if (!siteId) throw new DeployError("renewal not linked", 404);
-  const cap = await findAdminCapForSite(siteId);
-  if (!cap) throw new DeployError("SiteAdminCap not found for linked site", 409);
-
-  // Abort mapping: renewal_registry 2 = ENoSuchRenewal (raced an earlier unlink) → 404.
-  const missing = (error: string): DeployError | null => {
-    const abort = parseMoveAbort(error);
-    return abort?.module === "renewal_registry" && abort.code === 2
-      ? new DeployError("renewal not linked", 404)
-      : null;
-  };
-
-  const tx = new Transaction();
-  tx.moveCall({
-    target: PACKAGE_IDS.DEPLOY.TARGETS.UNLINK_RENEWAL,
-    arguments: [
-      tx.object(VERSION_OBJECT),
-      tx.object(RENEWAL_REGISTRY_OBJECT),
-      tx.object(cap),
-      tx.pure.id(accountId),
-      tx.pure.u64(subKey),
-    ],
-  });
-
-  try {
-    const res = await suiClient().signAndExecuteTransaction({
-      transaction: tx,
-      signer: wallet(),
-      options: { showEffects: true },
-    });
-    if (res.effects?.status?.status === "failure") {
-      const err = missing(res.effects.status.error ?? "");
-      if (err) throw err;
-      throw new DeployError(`unlink_renewal aborted: ${res.effects.status.error ?? "unknown"}`, 502);
-    }
-    return res.digest;
-  } catch (err) {
-    if (err instanceof DeployError) throw err;
-    const gone = missing((err as Error).message ?? "");
-    if (gone) throw gone;
-    throw new DeployError(`unlink_renewal failed: ${(err as Error).message}`, 502);
-  }
-};
-
-// The relayer signs its own charge_subscription/extend_blob PTBs with the SAME
-// service wallet + RPC client — exported accessors so it never re-derives either
-// (one key source: config.deployWalletKey; same lazy singletons).
+// The storage extender (deploy/extend.ts) signs its own extend_blob PTBs with the
+// SAME service wallet + RPC client — exported accessors so it never re-derives
+// either (one key source: config.deployWalletKey; same lazy singletons).
 export {
   suiClient as deploySuiClient,
   wallet as deployWallet,
@@ -1502,67 +1282,87 @@ const handleDomains = async (req: Request, url: URL, origin: string | null, serv
   if (!SUI_ADDRESS_RE.test(siteId)) return json({ error: "invalid siteId" }, 400, origin);
   if (!DOMAIN_RE.test(domain)) return json({ error: "invalid domain" }, 400, origin);
 
+  // SUBSCRIPTION GATE (LOCKED #10) — custom domains are the recurring unlock. PER-ADDRESS:
+  // ONE active Deploy subscription owned by the site's on-chain owner unlocks custom
+  // domains for ALL that owner's sites. We read the site's on-chain owner, then check the
+  // MERCHANT SDK (suizeSubs.activeFor(owner) — NOT findByRef(siteId); the sub is no longer
+  // per-site) for any active Deploy-merchant subscription that owner holds. No active sub
+  // → 402. Gates BOTH the challenge ISSUE and the verify/link path (the issue step is
+  // useless without a sub, and surfacing the wall up front is the clearest UX). The
+  // one-off $0.50 deploy + extend stay UNGATED (pay-per-use, not the sub).
+  const subs = await deploySubs();
+  if (subs) {
+    try {
+      const owner = await siteOwner(siteId);
+      if (!owner || !SUI_ADDRESS_RE.test(owner)) {
+        // Owner unreadable — a transient RPC blip OR a non-existent Site. Fail CLOSED,
+        // but as a RETRYABLE 503: never tell a genuinely-subscribed owner "you need a
+        // sub" on a hiccup (siteOwner swallows RPC errors, so we can't distinguish here;
+        // a truly bad siteId keeps 503-ing, which is acceptable). Audit: 402-vs-503.
+        return json({ error: "site owner unreadable; retry" }, 503, origin);
+      }
+      // VALID TERMS, not mere existence: a Subscription<Junk> or a $0.01/100yr sub is
+      // "active" yet worthless. isValidDeploySub binds USDC + amount >= price + monthly
+      // period (audit: subs free/underpriced-premium class).
+      if (!(await subs.activeFor(owner)).some(isValidDeploySub)) {
+        return json(
+          { error: "custom domains require an active Deploy subscription on your account" },
+          402,
+          origin,
+        );
+      }
+    } catch (err) {
+      // RPC error from activeFor propagates here — fail CLOSED with a retryable 503, not
+      // a wrong 402.
+      console.error("[deploy/domains] sub gate read failed:", (err as Error).message);
+      return json({ error: "subscription state temporarily unavailable; retry" }, 503, origin);
+    }
+  }
+
   const cname = cnameTarget(siteId);
 
   // ── issue the challenge (no verify) ──────────────────────────────────────────
-  // UNAUTHENTICATED on purpose: this step writes NOTHING on-chain — it only mints
-  // DNS/nonce material. We mint (a) a FRESH RANDOM DNS challenge token (never
-  // derived from the signing key) for the TXT record AND (b) a FRESH single-use
-  // AUTH nonce the caller must SIGN (buildDeployLinkAuthMessage) for the verify
-  // step. The owner gate runs ONLY on verify, where the signature is present.
+  // UNAUTHENTICATED on purpose: this step writes NOTHING on-chain — it only returns
+  // the DNS challenge token (deterministic + keyless — see dnsToken) for the TXT
+  // record. The owner gate runs ONLY on verify, where the owner signature is present.
+  // No auth nonce is issued: the verify step's signature is STATELESS-timestamped
+  // (the client picks its own `ts`).
   if (!verify) {
-    const token = issueChallenge(siteId, domain);
-    const nonce = issueAuthNonce();
+    const token = dnsToken(siteId, domain);
     const res: DomainChallengeResponse = {
       domain,
       status: "pending",
       txtName: txtName(domain),
       txtValue: token,
       cname,
-      nonce,
     };
     return json(res, 200, origin);
   }
 
-  // ── verify path: CRYPTOGRAPHIC OWNER AUTH (op-bound, nonce-fresh, single-use) ──
+  // ── verify path: CRYPTOGRAPHIC OWNER AUTH (op-bound, stateless-timestamped) ────
   // The authority is a zkLogin personal-message signature over the EXACT op
   // message; the recovered address — NOT any client-claimed `requester` — must
-  // equal Site.owner. Require { nonce, signature }, assert the nonce is live (else
-  // 403 stale/unknown), reconstruct the exact message, recover the signer (else
-  // 403 invalid signature), burn the nonce, then gate on owner.
-  const nonce = typeof body?.nonce === "string" ? body.nonce.trim() : "";
+  // equal Site.owner. Require { ts, signature }, assert the ts is fresh (else 403
+  // stale/skewed), reconstruct the exact message, recover the signer (else 403
+  // invalid signature), then gate on owner. No nonce store (THE PRINCIPLE).
+  const ts = typeof body?.ts === "number" ? body.ts : Number(body?.ts);
   const signature = typeof body?.signature === "string" ? body.signature.trim() : "";
-  if (!nonce || !signature) return json({ error: "nonce and signature required" }, 403, origin);
-  if (!authNonceLive(nonce)) return json({ error: "stale or unknown nonce" }, 403, origin);
+  if (!Number.isFinite(ts) || !signature) return json({ error: "ts and signature required" }, 403, origin);
+  if (!tsFresh(ts)) return json({ error: "stale or skewed timestamp — re-sign with a fresh ts" }, 403, origin);
 
   const recovered = await verifyDeployRequester(
-    buildDeployLinkAuthMessage(domain, siteId, nonce),
+    buildDeployLinkAuthMessage(domain, siteId, ts),
     signature,
   );
   if (!recovered) return json({ error: "invalid signature" }, 403, origin);
-  burnAuthNonce(nonce); // single-use: replay-resistant once the op is attempted.
 
   const authErr = await authorizeSiteOwner(siteId, recovered);
   if (authErr) {
     return json({ error: authErr.message }, authErr.status, origin);
   }
 
-  // ── verify path: there must be an outstanding (non-expired) challenge ─────────
-  const token = currentChallenge(siteId, domain);
-  if (!token) {
-    return json(
-      {
-        domain,
-        status: "pending",
-        txtName: txtName(domain),
-        txtValue: "",
-        cname,
-        detail: "no active challenge — request one first (POST /domains without verify)",
-      },
-      409,
-      origin,
-    );
-  }
+  // ── the TXT challenge token is deterministic — always derivable, no store ─────
+  const token = dnsToken(siteId, domain);
 
   // ── verify BOTH the TXT (ownership) AND the CNAME (routing) ───────────────────
   // We require BOTH before linking on-chain: the TXT proves the requester controls
@@ -1574,7 +1374,7 @@ const handleDomains = async (req: Request, url: URL, origin: string | null, serv
   try {
     const flat = (await resolveTxt(txtName(domain))).map((chunks) => chunks.join(""));
     if (flat.includes(token)) txtOk = true;
-    else txtDetail = `TXT ${txtName(domain)} present but does not match the challenge nonce`;
+    else txtDetail = `TXT ${txtName(domain)} present but does not match the challenge token`;
   } catch (err) {
     // NXDOMAIN / no TXT yet — still pending, not an error.
     txtDetail = `TXT ${txtName(domain)} not found yet (${(err as Error).message})`;
@@ -1602,8 +1402,9 @@ const handleDomains = async (req: Request, url: URL, origin: string | null, serv
     );
   }
 
-  // TXT + CNAME verified, owner signature already proven above — link on-chain,
-  // then burn the single-use DNS challenge (the auth nonce is already burned).
+  // TXT + CNAME verified, owner signature already proven above — link on-chain.
+  // Nothing to burn: the DNS token is deterministic (no store), and EDomainTaken on
+  // the registry is the on-chain guard against a duplicate link.
   let digest: string;
   try {
     digest = await linkDomainOnChain(siteId, domain);
@@ -1611,7 +1412,6 @@ const handleDomains = async (req: Request, url: URL, origin: string | null, serv
     if (err instanceof DeployError) return json({ error: err.message }, err.status, origin);
     throw err;
   }
-  challengeStore.delete(challengeKey(siteId, domain));
 
   // Best-effort auto-SSL via Cloudflare. A failure here does NOT fail the link.
   const ssl = await provisionCustomHostname(domain);
@@ -1662,27 +1462,26 @@ const handleDeleteDomain = async (req: Request, domain: string, origin: string |
   // AUTHORIZATION (M1) — unlinking was fully UNAUTHENTICATED: anyone could DELETE
   // /domains/<domain> and detach a victim's custom domain (griefing / takeover
   // setup). It now requires the SAME CRYPTOGRAPHIC ownership gate as linking:
-  // a zkLogin personal-message signature over the op-bound, nonce-fresh message
-  // (buildDeployUnlinkAuthMessage); the RECOVERED address — not a client-claimed
-  // field — must equal Site.owner for the site the domain currently points at. A
-  // service-owned / unowned site is REJECTED (403), mirroring link.
+  // a zkLogin personal-message signature over the op-bound, STATELESS-timestamped
+  // message (buildDeployUnlinkAuthMessage); the RECOVERED address — not a client-
+  // claimed field — must equal Site.owner for the site the domain currently points
+  // at. A service-owned / unowned site is REJECTED (403), mirroring link.
   const currentSiteId = await siteForDomain(d);
   if (!currentSiteId) return json({ error: "domain not linked" }, 404, origin);
 
-  // DELETE carries { nonce, signature } in the (size-capped) JSON body.
+  // DELETE carries { ts, signature } in the (size-capped) JSON body.
   const parsed = await readDomainsBody(req);
   if (!parsed.ok) return json({ error: "invalid or oversized body" }, 400, origin);
-  const nonce = typeof parsed.body?.nonce === "string" ? parsed.body.nonce.trim() : "";
+  const ts = typeof parsed.body?.ts === "number" ? parsed.body.ts : Number(parsed.body?.ts);
   const signature = typeof parsed.body?.signature === "string" ? parsed.body.signature.trim() : "";
-  if (!nonce || !signature) return json({ error: "nonce and signature required" }, 403, origin);
-  if (!authNonceLive(nonce)) return json({ error: "stale or unknown nonce" }, 403, origin);
+  if (!Number.isFinite(ts) || !signature) return json({ error: "ts and signature required" }, 403, origin);
+  if (!tsFresh(ts)) return json({ error: "stale or skewed timestamp — re-sign with a fresh ts" }, 403, origin);
 
   const recovered = await verifyDeployRequester(
-    buildDeployUnlinkAuthMessage(d, nonce),
+    buildDeployUnlinkAuthMessage(d, ts),
     signature,
   );
   if (!recovered) return json({ error: "invalid signature" }, 403, origin);
-  burnAuthNonce(nonce);
 
   const authErr = await authorizeSiteOwner(currentSiteId, recovered);
   if (authErr) {
@@ -1702,277 +1501,121 @@ const handleDeleteDomain = async (req: Request, domain: string, origin: string |
 };
 
 // ---------------------------------------------------------------------------
-// CHARGE↔Deploy join routes — the 402 quote + the sponsored-charge builder.
-//
-// POST /deploy/quote  -> the 402-shaped price the caller settles before a deploy.
-// POST /deploy/charge -> build + Enoki-sponsor the $0.50 `charge` PTB for the
-//                        caller's Account; the caller signs `bytes` locally and
-//                        executes via the existing POST /execute path, then passes
-//                        the resulting digest to POST /deploy as `chargeDigest`.
-//
-// Both 503 with a precise reason until the join is live (account published + Deploy
-// merchant pinned) — mirrors the deploy module's 0x0-package gate. The actual chain
-// write (the charge) is signed by the CALLER's local zkLogin session; the backend
-// NEVER signs an owner tx — it only builds the sponsored bytes.
+// POST /sites/:id/extend — a paid one-off $0.50 Walrus-storage EXTEND. Same x402
+// V2 first-party gate as a deploy: no payment → 402 (the PaymentRequired body +
+// PAYMENT-REQUIRED header); the paid retry carries the signed gasless payment in
+// the X-PAYMENT header. The payer MUST be the site owner (payer == owner), so a
+// third party can't extend (and pay for) a stranger's site. After the settlement
+// the service wallet extends the site's two blobs by config.renewalEpochs.
 // ---------------------------------------------------------------------------
 
-const chargeNotReady = (origin: string | null): Response =>
-  json({ error: chargeGateReason() }, 503, origin);
-
-const handleDeployQuote = (req: Request, origin: string | null, server?: Server<unknown>): Response => {
-  if (!takeToken(getIp(req, server))) return json({ error: "too many requests" }, 429, origin, { "Retry-After": "1" });
-  if (!chargeGateReady()) return chargeNotReady(origin);
-  return json(deployQuote(), 200, origin);
-};
-
-const handleDeployCharge = async (req: Request, origin: string | null, server?: Server<unknown>): Promise<Response> => {
-  if (!takeToken(getIp(req, server))) return json({ error: "too many requests" }, 429, origin, { "Retry-After": "1" });
-  if (!chargeGateReady()) return chargeNotReady(origin);
-
-  const parsed = await readDomainsBody(req); // reuses the size-capped JSON reader
-  if (!parsed.ok) return json({ error: "invalid or oversized body" }, 400, origin);
-  const body = parsed.body as Partial<DeployChargeRequest>;
-
-  try {
-    const res = await buildDeployCharge({
-      account: String(body?.account ?? ""),
-      sender: String(body?.sender ?? ""),
-      memo: typeof body?.memo === "string" ? body.memo : undefined,
-    });
-    return json(res, 200, origin);
-  } catch (err) {
-    // ChargeError (bad input / gate) and SponsorError (Enoki/quota) both carry a
-    // client-safe message + HTTP-equivalent status. Anything else is a 500.
-    if (err instanceof ChargeError) return json({ error: err.message }, err.status, origin);
-    if (err instanceof SponsorError) return json({ error: err.message }, err.status, origin);
-    console.error("[deploy/charge]", (err as Error).message);
-    return json({ error: "could not build deploy charge" }, 500, origin);
-  }
-};
-
-// POST /execute — submit { digest, signature } for the sponsored charge the caller
-// signed locally. The minimal HTTP execute slice the join needs (the full SPEC §6
-// HTTP-only sponsor transport is a separate refactor). Gated like the rest of the
-// join; SponsorError maps to its own status.
-const handleExecute = async (req: Request, origin: string | null, server?: Server<unknown>): Promise<Response> => {
-  if (!takeToken(getIp(req, server))) return json({ error: "too many requests" }, 429, origin, { "Retry-After": "1" });
-  if (!chargeGateReady()) return chargeNotReady(origin);
-
-  const parsed = await readDomainsBody(req);
-  if (!parsed.ok) return json({ error: "invalid or oversized body" }, 400, origin);
-
-  try {
-    const res = await executeDeployCharge({
-      digest: typeof parsed.body?.digest === "string" ? parsed.body.digest : undefined,
-      signature: typeof parsed.body?.signature === "string" ? parsed.body.signature : undefined,
-    });
-    return json(res, 200, origin);
-  } catch (err) {
-    if (err instanceof ChargeError) return json({ error: err.message }, err.status, origin);
-    if (err instanceof SponsorError) return json({ error: err.message }, err.status, origin);
-    console.error("[deploy/execute]", (err as Error).message);
-    return json({ error: "could not execute charge" }, 500, origin);
-  }
-};
-
-// POST /deploy/subscribe — build + Enoki-sponsor the `create_subscription` PTB
-// for the caller's Account (the $19.99/mo Deploy subscription terms). The CALLER
-// signs locally + submits via POST /execute; the backend never signs this owner
-// tx. Gated like the other charge endpoints.
-const handleDeploySubscribe = async (req: Request, origin: string | null, server?: Server<unknown>): Promise<Response> => {
-  if (!takeToken(getIp(req, server))) return json({ error: "too many requests" }, 429, origin, { "Retry-After": "1" });
-  if (!chargeGateReady()) return chargeNotReady(origin);
-
-  const parsed = await readDomainsBody(req); // reuses the size-capped JSON reader
-  if (!parsed.ok) return json({ error: "invalid or oversized body" }, 400, origin);
-
-  try {
-    const res = await buildDeploySubscribe({
-      account: String(parsed.body?.account ?? ""),
-      sender: String(parsed.body?.sender ?? ""),
-    });
-    return json(res, 200, origin);
-  } catch (err) {
-    if (err instanceof ChargeError) return json({ error: err.message }, err.status, origin);
-    if (err instanceof SponsorError) return json({ error: err.message }, err.status, origin);
-    console.error("[deploy/subscribe]", (err as Error).message);
-    return json({ error: "could not build subscription" }, 500, origin);
-  }
-};
-
-// POST /deploy/account — build + Enoki-sponsor the `create_account<USDC>` PTB for
-// a zkLogin user with NO rail Account yet (the first rung: the CLI can't sign for
-// a zkLogin address, and `create_account` sets owner = sender). The CALLER signs
-// locally + submits via POST /execute; the Account id comes from the executed
-// tx's AccountCreated event. Gated + rate-limited like the other builders.
-const handleDeployAccountCreate = async (req: Request, origin: string | null, server?: Server<unknown>): Promise<Response> => {
-  if (!takeToken(getIp(req, server))) return json({ error: "too many requests" }, 429, origin, { "Retry-After": "1" });
-  if (!chargeGateReady()) return chargeNotReady(origin);
-
-  const parsed = await readDomainsBody(req); // reuses the size-capped JSON reader
-  if (!parsed.ok) return json({ error: "invalid or oversized body" }, 400, origin);
-
-  try {
-    const res = await buildDeployAccountCreate(String(parsed.body?.sender ?? ""));
-    return json(res, 200, origin);
-  } catch (err) {
-    if (err instanceof ChargeError) return json({ error: err.message }, err.status, origin);
-    if (err instanceof SponsorError) return json({ error: err.message }, err.status, origin);
-    console.error("[deploy/account]", (err as Error).message);
-    return json({ error: "could not build account creation" }, 500, origin);
-  }
-};
-
-// ---------------------------------------------------------------------------
-// POST /deploy/renewal — link a rail subscription to a site's storage renewal.
-// DELETE /deploy/renewal — unlink it.
-//
-// Same cryptographic authority shape as the domain ops (op-bound message + a
-// single-use server nonce, signer recovered server-side) PLUS the on-chain
-// checks documented at the renewal-join helpers above. LINK authority is the
-// rail Account.owner ONLY (their money); UNLINK is accepted from the
-// Account.owner (stop my sub renewing) OR the Site.owner (stop renewing my
-// site) — both ends of the join may sever it, neither can forge the other.
-// ---------------------------------------------------------------------------
-
-/** Coerce a body subKey (number or numeric string) to a non-negative integer, or null. */
-const parseSubKey = (v: unknown): number | null => {
-  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() ? Number(v) : NaN;
-  return Number.isSafeInteger(n) && n >= 0 ? n : null;
-};
-
-const handleRenewalLink = async (req: Request, origin: string | null, server?: Server<unknown>): Promise<Response> => {
+const handleExtendSite = async (
+  req: Request,
+  siteId: string,
+  origin: string | null,
+  server?: Server<unknown>,
+): Promise<Response> => {
   if (!DEPLOY_ENABLED || !CHAIN_IDS_PUBLISHED) return notConfigured(origin);
   if (!takeToken(getIp(req, server))) return json({ error: "too many requests" }, 429, origin, { "Retry-After": "1" });
-  if (!chargeGateReady()) return chargeNotReady(origin);
+  if (!SUI_ADDRESS_RE.test(siteId)) return json({ error: "invalid site id" }, 400, origin);
 
-  const parsed = await readDomainsBody(req);
-  if (!parsed.ok) return json({ error: "invalid or oversized body" }, 400, origin);
-  const body = parsed.body as Partial<DeployRenewalLinkRequest>;
+  const gateLive = await chargeGateReady();
+  const proto = req.headers.get("x-forwarded-proto");
 
-  const siteId = String(body?.siteId ?? "").trim();
-  const accountId = String(body?.accountId ?? "").trim();
-  const subKey = parseSubKey(body?.subKey);
-  if (!SUI_ADDRESS_RE.test(siteId)) return json({ error: "invalid siteId" }, 400, origin);
-  if (!SUI_ADDRESS_RE.test(accountId)) return json({ error: "invalid accountId" }, 400, origin);
-  if (subKey === null) return json({ error: "invalid subKey" }, 400, origin);
+  const challenge402 = async (errorOverride?: string): Promise<Response | null> => {
+    const body = await deployRequirements(req.url, proto);
+    if (!body) return null;
+    if (errorOverride) body.error = errorOverride;
+    return json(body, 402, origin, {
+      "PAYMENT-REQUIRED": Buffer.from(JSON.stringify(body), "utf8").toString("base64"),
+    });
+  };
 
-  // ── cryptographic auth (op-bound, nonce-fresh, single-use) ──────────────────
-  const nonce = typeof body?.nonce === "string" ? body.nonce.trim() : "";
-  const signature = typeof body?.signature === "string" ? body.signature.trim() : "";
-  if (!nonce || !signature) return json({ error: "nonce and signature required" }, 403, origin);
-  if (!authNonceLive(nonce)) return json({ error: "stale or unknown nonce" }, 403, origin);
+  // The site must exist + we need its owner (the payer must EQUAL it — a stranger must
+  // not extend+pay for your site). A missing/unreadable site is a 404 BEFORE the
+  // payment wall (don't make a payer settle for nothing).
+  const owner = await siteOwner(siteId);
+  if (!owner) return json({ error: "site not found" }, 404, origin);
 
-  const recovered = await verifyDeployRequester(
-    buildDeployRenewalLinkAuthMessage(siteId, accountId, subKey, nonce),
-    signature,
-  );
-  if (!recovered) return json({ error: "invalid signature" }, 403, origin);
-  burnAuthNonce(nonce);
-
-  // ── on-chain check 1: the signer owns the Account being debited ─────────────
-  // THE critical gate: only the person whose Account pays each period can
-  // authorize the join (a site owner can never renew on a stranger's sub).
-  const owner = await accountOwner(accountId);
-  if (!owner) return json({ error: "rail Account not found" }, 404, origin);
-  if (owner.toLowerCase() !== recovered.toLowerCase()) {
-    return json({ error: "signer is not the Account owner" }, 403, origin);
+  // When the gate is OFF (treasury unresolved) the extend runs un-gated — same
+  // "abuse mitigation, not billing" mode as the deploy route.
+  let verifiedPayment: VerifiedDeployPayment | null = null;
+  if (gateLive) {
+    const payHeader = (req.headers.get("X-PAYMENT") ?? req.headers.get("PAYMENT-SIGNATURE") ?? "").trim();
+    if (!payHeader) {
+      const c = await challenge402();
+      if (c) return c;
+    }
+    try {
+      verifiedPayment = await gateDeployPayment(payHeader);
+    } catch (err) {
+      if (err instanceof DeployPaymentError) {
+        if (err.challenge) {
+          const c = await challenge402(err.message);
+          if (c) return c;
+        }
+        return json({ error: err.message }, err.status, origin);
+      }
+      throw err;
+    }
+    // EXTEND-only ownership gate: the recovered payer MUST be the site owner (deploy
+    // has no pre-existing owner to compare — owner is the payer; extend does). A
+    // stranger paying to extend your site is rejected (their $0.50 is NOT settled — we
+    // throw before settleDeployPayment).
+    if (verifiedPayment.payer.toLowerCase() !== owner.toLowerCase()) {
+      const c = await challenge402("the payment must be signed by the site owner to extend its storage");
+      if (c) return c;
+      return json({ error: "payer is not the site owner" }, 402, origin);
+    }
   }
 
-  // ── on-chain check 2: the subscription's terms actually fund Deploy ─────────
-  const sub = await readSubscription(accountId, subKey);
-  if (!sub) return json({ error: "subscription not found on the Account" }, 404, origin);
-  if (sub.payee.toLowerCase() !== SUIZE_DEPLOY_MERCHANT.toLowerCase()) {
-    return json({ error: "subscription payee is not the Deploy merchant" }, 400, origin);
-  }
-  if (sub.periodCap < DEPLOY_SUB_PRICE_USDC) {
-    return json({ error: "subscription period cap is below the Deploy price" }, 400, origin);
-  }
-
-  // ── on-chain check 3: a v2 Site carrying its Walrus Blob OBJECT ids ──────────
-  const blobs = await siteBlobObjects(siteId);
-  if (!blobs) {
+  // Settled (or un-gated) — extend the site's storage. extendOnce resolves the
+  // Walrus package + WAL coin and extends both blobs by config.renewalEpochs.
+  try {
+    // Settle the verified, owner-signed payment NOW (idempotent by digest), then
+    // extend. The extend mints no Site, so there is no on-chain digest registry —
+    // a re-presented payment re-settles idempotently and never double-charges.
+    if (verifiedPayment) await settleDeployPayment(verifiedPayment);
+    const digest = await extendOnce(siteId);
+    if (!digest) {
+      return json(
+        { error: "nothing to extend (storage already near max, or the site has no extendable blobs)" },
+        409,
+        origin,
+      );
+    }
+    const end = await storageEndForSite(siteId);
     return json(
-      { error: "site has no Walrus blob objects (pre-v2 site — redeploy to enable renewal)" },
-      400,
+      { siteId, digest, storageEndEpoch: end, expiresAtMs: end !== null ? epochToMs(end) : null },
+      200,
       origin,
     );
-  }
-
-  let digest: string;
-  try {
-    digest = await linkRenewalOnChain(siteId, accountId, subKey);
   } catch (err) {
-    if (err instanceof DeployError) return json({ error: err.message }, err.status, origin);
-    throw err;
+    if (err instanceof DeployPaymentError) {
+      if (err.challenge) {
+        const c = await challenge402(err.message);
+        if (c) return c;
+      }
+      return json({ error: err.message }, err.status, origin);
+    }
+    console.error("[deploy/extend-site]", (err as Error).message);
+    return json({ error: "extend failed" }, 500, origin);
   }
-
-  const res: DeployRenewalResponse = { siteId, accountId, subKey, digest };
-  return json(res, 200, origin);
-};
-
-const handleRenewalUnlink = async (req: Request, origin: string | null, server?: Server<unknown>): Promise<Response> => {
-  if (!DEPLOY_ENABLED || !CHAIN_IDS_PUBLISHED) return notConfigured(origin);
-  if (!takeToken(getIp(req, server))) return json({ error: "too many requests" }, 429, origin, { "Retry-After": "1" });
-
-  const parsed = await readDomainsBody(req);
-  if (!parsed.ok) return json({ error: "invalid or oversized body" }, 400, origin);
-  const body = parsed.body as Partial<DeployRenewalUnlinkRequest>;
-
-  const accountId = String(body?.accountId ?? "").trim();
-  const subKey = parseSubKey(body?.subKey);
-  if (!SUI_ADDRESS_RE.test(accountId)) return json({ error: "invalid accountId" }, 400, origin);
-  if (subKey === null) return json({ error: "invalid subKey" }, 400, origin);
-
-  const nonce = typeof body?.nonce === "string" ? body.nonce.trim() : "";
-  const signature = typeof body?.signature === "string" ? body.signature.trim() : "";
-  if (!nonce || !signature) return json({ error: "nonce and signature required" }, 403, origin);
-  if (!authNonceLive(nonce)) return json({ error: "stale or unknown nonce" }, 403, origin);
-
-  const recovered = await verifyDeployRequester(
-    buildDeployRenewalUnlinkAuthMessage(accountId, subKey, nonce),
-    signature,
-  );
-  if (!recovered) return json({ error: "invalid signature" }, 403, origin);
-  burnAuthNonce(nonce);
-
-  // The join must exist (also resolves which site — and so which Site.owner —
-  // may sever it alongside the Account.owner).
-  const siteId = await renewalSiteFor(accountId, subKey);
-  if (!siteId) return json({ error: "renewal not linked" }, 404, origin);
-
-  const [aOwner, sOwner] = await Promise.all([accountOwner(accountId), siteOwner(siteId)]);
-  const r = recovered.toLowerCase();
-  const authorized =
-    (aOwner && aOwner.toLowerCase() === r) || (sOwner && sOwner.toLowerCase() === r);
-  if (!authorized) {
-    return json({ error: "signer is neither the Account owner nor the Site owner" }, 403, origin);
-  }
-
-  let digest: string;
-  try {
-    digest = await unlinkRenewalOnChain(accountId, subKey);
-  } catch (err) {
-    if (err instanceof DeployError) return json({ error: err.message }, err.status, origin);
-    throw err;
-  }
-
-  const res: DeployRenewalResponse = { siteId, accountId, subKey, digest };
-  return json(res, 200, origin);
 };
 
 // ---------------------------------------------------------------------------
-// GET /auth/nonce — issue a single-use, short-TTL auth nonce the client signs
-// (op-bound, via the shared message builders) for a link-verify / unlink op. The
-// nonce is the freshness factor that makes a captured signature non-replayable.
-// Rate-limited like the other read ops; writes nothing.
-// ---------------------------------------------------------------------------
-
-const handleAuthNonce = (req: Request, origin: string | null, server?: Server<unknown>): Response => {
-  if (!DEPLOY_ENABLED || !CHAIN_IDS_PUBLISHED) return notConfigured(origin);
+// GET /deploy/wallet-address — the PUBLIC address of the deploy SERVICE WALLET
+// (the address that pays create_site gas + the Walrus-extend WAL). PUBLIC: an
+// on-chain address is not a secret, and the dashboard's read-only admin panel
+// reads its SUI + WAL balances DIRECTLY from chain — it only needs to learn WHICH
+// address to read. We also return the WAL coin type so the frontend never hardcodes
+// it (single source of truth = config.walCoinType). 503 when the deploy wallet is
+// unconfigured (no key → no address). No CHAIN_IDS_PUBLISHED gate: the address +
+// its balances exist even before the move package is published.
+const handleWalletAddress = (req: Request, origin: string | null, server?: Server<unknown>): Response => {
+  if (!DEPLOY_ENABLED) return notConfigured(origin);
   if (!takeToken(getIp(req, server))) return json({ error: "too many requests" }, 429, origin, { "Retry-After": "1" });
-  const res: DeployNonceResponse = { nonce: issueAuthNonce() };
-  return json(res, 200, origin);
+  return json({ address: serviceAddress(), walCoinType: config.walCoinType }, 200, origin);
 };
 
 // ---------------------------------------------------------------------------
@@ -2003,10 +1646,11 @@ export const deployInfo = {
   baseDomain: config.deployBaseDomain,
   epochs: config.deployEpochs,
   cloudflare: cloudflareEnabled(),
-  // The CHARGE↔Deploy join: live only when the rail package is published AND the
-  // Deploy merchant address is pinned. When false the deploy route runs un-gated
-  // (auth + rate limits only — "abuse mitigation, not billing").
-  chargeGate: chargeInfo.enabled,
+  // The CHARGE↔Deploy join (x402 V2, first-party): live only once the Deploy treasury
+  // resolves. When off the deploy route runs un-gated (auth + rate limits only). This
+  // is the async resolver — the boot log awaits it.
+  chargeGateReady: chargeInfo.ready,
+  chargePrice: chargeInfo.price,
 };
 
 // ---------------------------------------------------------------------------
@@ -2022,25 +1666,21 @@ export const handleDeployRoute = (
 ): Promise<Response> | null => {
   const path = url.pathname;
 
-  // CHARGE↔Deploy join — the 402 quote + the sponsored-charge builder. Matched
-  // BEFORE the bare /deploy so the more specific subpaths win.
-  if ((req.method === "POST" || req.method === "GET") && path === "/deploy/quote") {
-    return Promise.resolve(handleDeployQuote(req, origin, server));
-  }
-  if (req.method === "POST" && path === "/deploy/charge") return handleDeployCharge(req, origin, server);
-  // The minimal HTTP execute slice the join needs (not the full SPEC §6 transport).
-  if (req.method === "POST" && path === "/execute") return handleExecute(req, origin, server);
-
-  // Subscription leg — the sponsored create_account/create_subscription builders
-  // + the on-chain subscription↔site renewal join the relayer reads.
-  if (req.method === "POST" && path === "/deploy/account") return handleDeployAccountCreate(req, origin, server);
-  if (req.method === "POST" && path === "/deploy/subscribe") return handleDeploySubscribe(req, origin, server);
-  if (req.method === "POST" && path === "/deploy/renewal") return handleRenewalLink(req, origin, server);
-  if (req.method === "DELETE" && path === "/deploy/renewal") return handleRenewalUnlink(req, origin, server);
-
   if (req.method === "POST" && path === "/deploy") return handleDeploy(req, origin, server);
-  if (req.method === "GET" && path === "/auth/nonce") return Promise.resolve(handleAuthNonce(req, origin, server));
+  // Deploy storage SUBSCRIPTION — the raw-agent buyer-build helper (the wallet uses its
+  // own WS sponsor path). build → sign locally → submit; the buyer mints a subs::create
+  // (merchant = Deploy treasury, ref = siteId). Matched BEFORE the generic /deploy arm.
+  if (req.method === "POST" && path === "/deploy/subscribe/build") return handleSubscribeBuild(req, origin, server);
+  if (req.method === "POST" && path === "/deploy/subscribe/submit") return handleSubscribeSubmit(req, origin, server);
+  if (req.method === "GET" && path === "/deploy/wallet-address") return Promise.resolve(handleWalletAddress(req, origin, server));
   if (req.method === "GET" && path === "/sites") return handleListSites(req, url, origin, server);
+
+  // POST /sites/:id/extend — a paid one-off $0.50 Walrus-storage extend. Matched
+  // BEFORE GET /sites/:id so the more specific subpath wins.
+  if (req.method === "POST" && path.startsWith("/sites/") && path.endsWith("/extend")) {
+    const id = decodeURIComponent(path.slice("/sites/".length, path.length - "/extend".length));
+    if (id) return handleExtendSite(req, id, origin, server);
+  }
 
   // GET /sites/:id
   if (req.method === "GET" && path.startsWith("/sites/")) {

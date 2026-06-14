@@ -8,7 +8,10 @@ import {
 } from '@mysten/dapp-kit'
 import '@mysten/dapp-kit/dist/index.css'
 import { Analytics } from '@vercel/analytics/react'
+import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { App } from './App'
+import { Shell } from './shell/Shell'
+import { Markets, House, Portfolio, Leaderboard, Agent } from './shell/pages'
 import './styles.css'
 import { CRASH_NETWORK, RPC_URL } from './config'
 import { setup_enoki } from './enoki'
@@ -27,19 +30,26 @@ const queryClient = new QueryClient()
 // in which case the UI falls back to a standard ConnectButton.
 setup_enoki()
 
-// OAuth return path. Google redirects to `${origin}/enoki` after sign-in (the
-// uri registered in the OAuth client). Enoki's wallet-standard provider parses
-// the URL params internally on load; this single-page app has no router, so we
-// just give Enoki a moment to flush, then drop the user back on the main screen.
-// No router dependency — a 3-line redirect is all the callback needs.
-if (
-  typeof window !== 'undefined' &&
-  window.location.pathname.startsWith('/enoki')
-) {
-  window.setTimeout(() => {
-    window.history.replaceState({}, '', '/')
-  }, 600)
-}
+// PolySui routes. Play (`/`) is the immersive betting screen (App.tsx); the
+// dashboard tabs render inside the shared <Shell> chrome. Google/Enoki redirects
+// to `${origin}/enoki` after sign-in — the Enoki provider (setup_enoki above)
+// parses those params on boot, so /enoki just renders Play and the Shell cleans
+// the URL back to `/`. The Vercel SPA rewrite serves index.html for every path.
+const router = createBrowserRouter([
+  {
+    element: <Shell />,
+    children: [
+      { path: '/', element: <App /> },
+      { path: '/enoki', element: <App /> },
+      { path: '/markets', element: <Markets /> },
+      { path: '/house', element: <House /> },
+      { path: '/portfolio', element: <Portfolio /> },
+      { path: '/leaderboard', element: <Leaderboard /> },
+      { path: '/agent', element: <Agent /> },
+      { path: '*', element: <App /> },
+    ],
+  },
+])
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -47,7 +57,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <SuiClientProvider networks={networkConfig} defaultNetwork={CRASH_NETWORK}>
         {/* autoConnect restores the previous session (incl. zkLogin) silently. */}
         <WalletProvider autoConnect>
-          <App />
+          <RouterProvider router={router} />
           <Analytics />
         </WalletProvider>
       </SuiClientProvider>

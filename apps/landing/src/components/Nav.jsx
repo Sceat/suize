@@ -135,7 +135,7 @@ export default function Nav() {
     >
       <a
         className="sx-logo"
-        href="#/"
+        href="/"
         aria-label="Suize home"
         onClick={scrollTop}
       >

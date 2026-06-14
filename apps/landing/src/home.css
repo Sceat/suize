@@ -7,16 +7,15 @@
    accent CTA + the true green/red status rows are the only blue/colour marks.
    ========================================================================== */
 
-/* ---- the one home CTA — a TRUE FROSTED-GLASS pane in the same family as the
-   iOS notification + activity-log cards. Owner pivot: the old fill read like a
-   solid blue gradient (saturated --grad-accent EDGE + a blue radial wash); now it
-   is a genuinely TRANSLUCENT pane — a low-alpha neutral fill so the page shows
-   THROUGH the blur, a soft light/neutral edge (NOT a painted blue border), a
-   crisp inner top highlight, a fine grain, and a gentle shadow. It keeps only a
-   FAINT blue tint (an inner glow + a hairline of accent on the top edge) so the
-   primary still reads "hot" — but as a pane of lit glass, not a blue chip. The
-   ::before is the lit top edge + highlight pool; the ::after carries the grain.
-   Soft-rounded radius (~12px) is kept; the brackets are GONE. -------------- */
+/* ---- the one home CTA — RAISED PAPER (owner-locked 2026-06-10; replaces the
+   frosted-glass pane). A solid card-button SEATED on the page: the paper card
+   surface, a hairline, the lit top edge, a soft editorial drop shadow. The
+   accent arrives ONLY on hover — blue label, accent hairline, a faint blue
+   bloom, a 1px lift. Calm, tactile, high-contrast in both themes; the nav CTA
+   (sections.css) mirrors this recipe at nav scale. The business room re-tints
+   it for free (it reads --ink-raised / --hair / --accent-* / --blue-glow). --- */
+/* (the --ctap-* paper tokens live ONCE, in sections.css — the globally-loaded
+   sheet; duplicating them here is how the old --cta-fill rotted.) */
 .sx-cta {
   position: relative;
   display: inline-flex;
@@ -24,169 +23,56 @@
   gap: 8px;
   padding: 15px 26px;
   border-radius: var(--r-13);
-  /* a soft LIGHT/neutral glass edge (border-box) with only a whisper of blue —
-     replaces the fully-saturated --grad-accent border that made it read solid. */
-  border: 1px solid transparent;
+  border: 1px solid var(--hair-strong);
   font-family: var(--sans);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.05em;
   white-space: nowrap;
   color: var(--fg);
-  /* translucent frosted fill (padding-box) + a soft light glass edge (border-box)
-     in ONE paint — the background subtly shows through the blur, like the convo /
-     notification cards. NO solid blue gradient anywhere. */
-  background:
-    linear-gradient(var(--cta-fill), var(--cta-fill)) padding-box,
-    var(--cta-edge) border-box;
-  /* a strong frost so the pane clearly reads as a sheet of glass, not a flat tint */
-  -webkit-backdrop-filter: blur(26px) saturate(1.7) brightness(1.05);
-  backdrop-filter: blur(26px) saturate(1.7) brightness(1.05);
+  background: var(--ink-raised);
   box-shadow:
-    /* the soft outward GLOW (a wide, low-negative-spread bloom so it blooms FREELY
-       past the button — this is the halo the hover grows). NOT clipped: a box-shadow
-       on the element is never clipped by the element's own overflow. */
-    0 14px 40px -18px var(--blue-glow),
-    /* the gentle grounding shadow that seats the glass on the page */
-    0 8px 22px -14px var(--cta-shadow),
-    /* the crisp inner TOP highlight — the lit top edge of the glass */
-    inset 0 1px 0 0 var(--cta-hi),
-    /* a soft bottom sheen so the pane looks curved, not flat */
-    inset 0 -10px 22px -16px var(--cta-sheen);
+    var(--card-shadow),
+    0 10px 24px -16px var(--ctap-drop),
+    inset 0 1px 0 0 var(--ctap-hi);
   cursor: pointer;
-  /* NO overflow:hidden — that was clipping the outward glow to a hard rectangle
-     (owner: "the shadow constricted to their div, cut"). The grain/highlight
-     pseudo-layers clip themselves to the rounded shape via border-radius:inherit,
-     so the button stays unclipped and the bloom escapes on all four edges. */
-  /* one smooth, premium curve for the whole hover (lift + glow + frost
-     brighten); the press (:active) overrides transform with a crisp, snappier
-     curve so the click still feels tactile, not mushy. */
   transition:
-    box-shadow 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    background 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    -webkit-backdrop-filter 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    backdrop-filter 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
-/* the lit top edge (a faint accent hairline) + a soft neutral highlight pool so
-   the pane looks curved + lit rather than flat. The accent line is the ONLY blue
-   here and it is barely-there — the glass reads neutral. */
-.sx-cta::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background:
-    radial-gradient(
-      120% 80% at 24% -12%,
-      rgba(255, 255, 255, 0.5),
-      rgba(255, 255, 255, 0) 58%
-    );
-  opacity: 0.9;
-  pointer-events: none;
-}
-/* the GRAIN texture — a fine static noise overlay (an inline SVG fractal-noise
-   data URI) at very low opacity so the glass reads as a real frosted, textured
-   surface rather than a flat fill. Soft-light keeps it subtle in both themes. */
-.sx-cta::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  /* the grain clips to the rounded shape via its OWN border-radius + overflow —
-     a LOCAL clip on this layer only, so the button itself stays overflow-visible
-     and its glow box-shadow blooms freely (this replaces the button-wide
-     overflow:hidden that was cutting the halo). */
-  overflow: hidden;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 120px 120px;
-  mix-blend-mode: soft-light;
-  opacity: 0.14;
-  pointer-events: none;
-}
-/* ---- the glass tokens (shared by .sx-cta + .sx-nav__cta). LIGHT: a translucent
-   white pane with a faint blue tint; the edge is a soft light gradient that only
-   hints blue. DARK: a translucent cool-ink pane; the edge is a low-alpha light
-   gradient. Both stay clearly SEE-THROUGH so the background reads through. ---- */
-:root {
-  /* a confident, READABLE frost: enough fill that the white label stays
-     high-contrast, still clearly translucent so the page shows through the blur. */
-  --cta-fill: rgba(244, 249, 255, 0.42);
-  --cta-fill-hov: rgba(247, 251, 255, 0.58);
-  /* a crisp lit-glass rim: a bright top-left edge fading through a whisper of
-     blue to a soft light bottom-right — reads as a curved glass edge, not a
-     painted blue border. */
-  --cta-edge: linear-gradient(
-    150deg,
-    rgba(255, 255, 255, 0.95) 0%,
-    rgba(150, 190, 240, 0.5) 48%,
-    rgba(255, 255, 255, 0.78) 100%
-  );
-  --cta-hi: rgba(255, 255, 255, 0.85);
-  --cta-sheen: rgba(255, 255, 255, 0.42);
-  --cta-shadow: rgba(20, 50, 96, 0.24);
-}
-:root[data-theme='dark'] {
-  /* deep cool-ink glass, still see-through; the fill carries the label contrast
-     against the dark page while the blur keeps it glassy. */
-  --cta-fill: rgba(40, 64, 100, 0.4);
-  --cta-fill-hov: rgba(50, 80, 122, 0.54);
-  --cta-edge: linear-gradient(
-    150deg,
-    rgba(200, 222, 252, 0.5) 0%,
-    rgba(122, 196, 255, 0.42) 48%,
-    rgba(190, 214, 246, 0.28) 100%
-  );
-  --cta-hi: rgba(220, 235, 255, 0.3);
-  --cta-sheen: rgba(170, 200, 240, 0.14);
-  --cta-shadow: rgba(0, 0, 0, 0.52);
-}
+/* hover — the card rises 1px; the accent arrives: blue label, accent hairline,
+   a faint blue bloom under the deepened seat. */
 .sx-cta:hover {
-  /* a gentle lift out of the page — the pane rises toward the light */
   transform: translateY(-1px);
-  background:
-    linear-gradient(var(--cta-fill-hov), var(--cta-fill-hov)) padding-box,
-    var(--cta-edge) border-box;
-  /* the frost BRIGHTENS as it lifts — the glass catches more light (still
-     glassy: the page keeps showing through the blur, no solid fill). */
-  -webkit-backdrop-filter: blur(26px) saturate(1.95) brightness(1.12);
-  backdrop-filter: blur(26px) saturate(1.95) brightness(1.12);
+  color: var(--ctap-ink-hov);
+  border-color: var(--accent-hair);
   box-shadow:
-    /* the outward GLOW blooms WIDE + SOFT past all four edges — a low negative
-       spread + a wide blur so the halo clearly extends beyond the button instead
-       of being pulled back to its box. This is the now-unclipped bloom. */
-    0 22px 64px -16px var(--blue-glow),
-    0 0 34px -6px var(--accent-glow),
-    /* the grounding shadow deepens a touch as it lifts */
-    0 12px 30px -14px var(--cta-shadow),
-    /* a faint accent edge-ring (the lit rim catching the god-ray) */
-    0 0 0 1px var(--accent-hair),
-    /* the inner top highlight strengthens — the curved-glass lit edge */
-    inset 0 1px 0 0 var(--cta-hi),
-    inset 0 -11px 24px -15px var(--cta-sheen);
+    var(--card-shadow-hover),
+    0 16px 36px -16px var(--ctap-drop),
+    0 0 24px -10px var(--blue-glow),
+    inset 0 1px 0 0 var(--ctap-hi);
 }
-/* the press — crisp + tactile: it settles down past rest, snappier curve so
-   the click reads, then springs back on release via the base transition. */
+/* the press — crisp + tactile: settles back to seat on a snappy curve. */
 .sx-cta:active {
   transform: translateY(0);
   transition:
     transform 0.08s cubic-bezier(0.4, 0, 0.6, 1),
     box-shadow 0.08s cubic-bezier(0.4, 0, 0.6, 1);
   box-shadow:
-    /* the glow settles in close on press — tactile, the halo pulls back toward
-       the box as the glass is pushed down. */
-    0 10px 30px -18px var(--blue-glow),
-    0 6px 16px -14px var(--cta-shadow),
-    0 0 0 1px var(--accent-hair),
-    inset 0 1px 0 0 var(--cta-hi),
-    inset 0 -6px 16px -14px var(--cta-sheen);
+    var(--card-shadow),
+    0 6px 14px -12px var(--ctap-drop),
+    inset 0 1px 0 0 var(--ctap-hi);
 }
 .sx-cta:focus-visible {
   outline: none;
+  border-color: var(--accent);
   box-shadow:
-    0 18px 44px -26px var(--blue-glow),
-    0 0 0 2px var(--accent-hair),
-    inset 0 1px 0 0 var(--cta-hi);
+    0 0 0 3px var(--accent-wash),
+    var(--card-shadow),
+    0 10px 24px -16px var(--ctap-drop),
+    inset 0 1px 0 0 var(--ctap-hi);
 }
 .sx-cta--lg {
   padding: 18px 34px;
@@ -508,23 +394,9 @@
 .sx-notif__no:hover {
   color: var(--fg);
 }
-/* the Confirm — the SINGLE accent element on the card (sharp, gradient edge) */
-.sx-notif__yes {
-  color: var(--fg);
-  border: 1px solid transparent;
-  background:
-    linear-gradient(var(--cta-fill), var(--cta-fill)) padding-box,
-    var(--grad-accent) border-box;
-  box-shadow: 0 6px 18px -8px var(--blue-glow);
-}
-.sx-notif__yes:hover {
-  filter: brightness(1.05);
-  box-shadow: 0 8px 24px -8px var(--blue-glow);
-}
-.sx-notif__yes.is-pressed,
-.sx-notif__yes:active {
-  transform: scale(0.96);
-}
+/* (the old .sx-notif__yes Confirm chip is GONE — the live notification button
+   is .sx-ios__yes in sections-era CSS; this selector had no JSX consumer and
+   read the retired --cta-fill glass token.) */
 
 /* ==========================================================================
    THE BEAT HEADER — eyebrow tick + serif head + grotesk sub. Shared by every
@@ -1880,8 +1752,10 @@
   color: var(--fg);
   border: 1px solid transparent;
   border-bottom-left-radius: 3px;
+  /* the raised-paper era: a solid card fill behind the gradient edge (the old
+     --cta-fill glass token is retired) */
   background:
-    linear-gradient(var(--cta-fill), var(--cta-fill)) padding-box,
+    linear-gradient(var(--ink-raised), var(--ink-raised)) padding-box,
     var(--grad-accent) border-box;
 }
 

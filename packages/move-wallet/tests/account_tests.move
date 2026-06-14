@@ -27,6 +27,7 @@ module suize::account_tests;
 use suize::account::{Self, Account, RailConfig, RailAdminCap};
 use sui::clock::{Self, Clock};
 use sui::coin::{Self, Coin};
+use sui::event;
 use sui::test_scenario::{Self as ts, Scenario};
 
 // === Test coin type ===
@@ -148,16 +149,15 @@ fun charge_as(
     ts::return_shared(account);
 }
 
-/// Have `who` call `pay(merchant_account, config, coin → merchant)` with a
-/// freshly-minted `amount` coin (the permissionless raw-payer facilitator).
-fun pay_as(scenario: &mut Scenario, clock: &Clock, who: address, amount: u64) {
+/// Have `who` call `pay(merchant, config, coin)` with a freshly-minted `amount`
+/// coin (the permissionless raw-payer facilitator). The merchant is a PLAIN
+/// address — no Account exists on either side ("your address is your account").
+fun pay_as(scenario: &mut Scenario, clock: &Clock, who: address, amount: u64, merchant: address) {
     scenario.next_tx(who);
-    let account = scenario.take_shared<Account<TUSD>>();
     let config = scenario.take_shared<RailConfig>();
     let coin = coin::mint_for_testing<TUSD>(amount, scenario.ctx());
-    account::pay<TUSD>(&account, &config, coin, b"x", clock, scenario.ctx());
+    account::pay<TUSD>(merchant, &config, coin, b"x", clock, scenario.ctx());
     ts::return_shared(config);
-    ts::return_shared(account);
 }
 
 /// Have BACKEND charge `sub_key` for `amount` (the permissionless terms-gated path).
@@ -171,7 +171,7 @@ fun charge_subscription_as(
     scenario.next_tx(who);
     let mut account = scenario.take_shared<Account<TUSD>>();
     let config = scenario.take_shared<RailConfig>();
-    account::charge_subscription<TUSD>(&mut account, &config, sub_key, amount, clock, scenario.ctx());
+    account::charge_subscription<TUSD>(&mut account, &config, sub_key, amount, b"x", clock, scenario.ctx());
     ts::return_shared(config);
     ts::return_shared(account);
 }
@@ -345,6 +345,59 @@ fun test_charge_subscription_uses_merchant_override() {
 }
 
 #[test]
+/// The `Charged` receipt carries the caller's memo (the relayer's paymentId — what
+/// makes a recurring debit /verify-matchable, mirroring `ChargePaid` / `Paid`).
+/// Asserted field-for-field: the FIXED payee, the exact split, the memo, and the
+/// charge-time timestamp; reserved trace fields empty.
+fun test_charge_subscription_memo_lands_in_receipt() {
+    let (mut scenario, mut clock) = begin();
+    create_account_as_owner(&mut scenario);
+    deposit_as(&mut scenario, OWNER, DEPOSIT);
+
+    let sub_key;
+    scenario.next_tx(OWNER);
+    {
+        let mut account = scenario.take_shared<Account<TUSD>>();
+        sub_key = account::create_subscription<TUSD>(
+            &mut account, PAYEE, PERIOD_CAP, PERIOD_MS, &clock, scenario.ctx(),
+        );
+        ts::return_shared(account);
+    };
+
+    clock.set_for_testing(PERIOD_MS);
+
+    let amount = PERIOD_CAP;
+    let fee = (amount * FEE_BPS) / 10_000;
+    let net = amount - fee;
+
+    // Charge inline (not via the helper) so the memo is this test's own paymentId.
+    let account_id;
+    scenario.next_tx(BACKEND);
+    {
+        let mut account = scenario.take_shared<Account<TUSD>>();
+        let config = scenario.take_shared<RailConfig>();
+        account_id = object::id(&account);
+        account::charge_subscription<TUSD>(
+            &mut account, &config, sub_key, amount, b"sub_pmt_7", &clock, scenario.ctx(),
+        );
+        ts::return_shared(config);
+        ts::return_shared(account);
+    };
+
+    // Exactly one Charged receipt, every field as approved (incl. the memo).
+    let receipts = event::events_by_type<account::Charged>();
+    assert!(receipts.length() == 1, 0);
+    assert!(
+        receipts[0] == account::charged_event_for_testing(
+            account_id, sub_key, PAYEE, amount, fee, net, b"sub_pmt_7", PERIOD_MS,
+        ),
+        1,
+    );
+
+    cleanup(scenario, clock);
+}
+
+#[test]
 /// Two consecutive periods each allow exactly one charge. Proves the anti-drift
 /// advance-to-now keeps a steady cadence across periods.
 fun test_charge_subscription_two_periods() {
@@ -466,55 +519,77 @@ fun test_charge_one_off_uses_merchant_override() {
 
 #[test]
 /// PAY (open facilitator) happy path at the DEFAULT rate: an ARBITRARY sender
-/// (STRANGER, NOT the owner — proving permissionless) pays a MERCHANT with a raw
-/// minted coin and NO payer Account. The fee is read from the rail config: `fee` →
-/// TREASURY, `net` → the merchant (the merchant_account.owner). The merchant's
-/// balance is untouched (paid by transfer, not deposit).
+/// (STRANGER, NOT the owner — proving permissionless) pays a NEVER-SEEN plain
+/// address with a raw minted coin. NO Account exists on EITHER side — "your
+/// address is your account." The fee is read from the rail config: `fee` →
+/// TREASURY, `net` → the merchant address.
 fun test_pay_open_facilitator_splits_default_fee() {
     let (mut scenario, clock) = begin();
-    // The Account here is the MERCHANT's: created by OWNER. The merchant address is
-    // the Account's owner (OWNER). No deposit needed — `pay` settles a handed-in coin.
-    create_account_as_owner(&mut scenario);
+    // Deliberately NO create_account anywhere — the merchant is just an address.
 
     let amount = 1_000_000;
     let fee = (amount * FEE_BPS) / 10_000; // 20_000
     let net = amount - fee; // 980_000
 
-    pay_as(&mut scenario, &clock, STRANGER, amount);
+    pay_as(&mut scenario, &clock, STRANGER, amount, MERCHANT);
 
-    scenario.next_tx(OWNER);
-    {
-        let account = scenario.take_shared<Account<TUSD>>();
-        // The merchant Account balance is UNTOUCHED — `pay` transfers the net to the
-        // merchant OWNER address, it does not deposit into the Account.
-        assert!(account::balance_value<TUSD>(&account) == 0, 0);
-        ts::return_shared(account);
-    };
-
-    // MERCHANT (= the Account owner, OWNER) got the net; treasury got the fee.
-    assert_and_burn_coin_of(&mut scenario, OWNER, net);
+    // MERCHANT (a plain address, no Account) got the net; treasury got the fee.
+    assert_and_burn_coin_of(&mut scenario, MERCHANT, net);
     assert_and_burn_coin_of(&mut scenario, TREASURY, fee);
 
     cleanup(scenario, clock);
 }
 
 #[test]
-/// PER-MERCHANT DISCOUNT on the `pay` path: admin discounts the merchant (the
-/// merchant_account.owner == OWNER) to 0.5%; `pay` then splits 0.5%, not 2%.
+/// The `Paid` receipt carries the facilitator's full audit surface: the payer, the
+/// PLAIN merchant address, the exact gross/fee/net split, and the caller's memo
+/// (the paymentId /verify matches on). Asserted field-for-field against the
+/// expected event — clock pinned at t=0, reserved trace fields empty.
+fun test_pay_receipt_carries_memo_and_merchant_address() {
+    let (mut scenario, clock) = begin();
+
+    let amount = 1_000_000;
+    let fee = (amount * FEE_BPS) / 10_000; // 20_000
+    let net = amount - fee; // 980_000
+
+    scenario.next_tx(STRANGER);
+    {
+        let config = scenario.take_shared<RailConfig>();
+        let coin = coin::mint_for_testing<TUSD>(amount, scenario.ctx());
+        account::pay<TUSD>(MERCHANT, &config, coin, b"pmt_42", &clock, scenario.ctx());
+        ts::return_shared(config);
+    };
+
+    // Exactly one Paid receipt, every field as quoted (incl. memo + merchant ADDRESS).
+    let receipts = event::events_by_type<account::Paid>();
+    assert!(receipts.length() == 1, 0);
+    assert!(
+        receipts[0] == account::paid_event_for_testing(
+            STRANGER, MERCHANT, amount, fee, net, b"pmt_42", 0,
+        ),
+        1,
+    );
+
+    cleanup(scenario, clock);
+}
+
+#[test]
+/// PER-MERCHANT DISCOUNT on the `pay` path: admin discounts the MERCHANT address
+/// to 0.5%; `pay` then splits 0.5%, not 2%. Still no Account anywhere — the
+/// override table keys on the plain merchant address.
 fun test_pay_uses_merchant_override() {
     let (mut scenario, clock) = begin();
-    create_account_as_owner(&mut scenario);
 
-    // The merchant paid by `pay` is the merchant_account.owner == OWNER.
-    set_merchant_rate_as_admin(&mut scenario, OWNER, DISCOUNT_BPS as u16);
+    // The merchant paid by `pay` is the plain MERCHANT address.
+    set_merchant_rate_as_admin(&mut scenario, MERCHANT, DISCOUNT_BPS as u16);
 
     let amount = 1_000_000;
     let fee = (amount * DISCOUNT_BPS) / 10_000; // 5_000 (0.5%)
     let net = amount - fee; // 995_000
 
-    pay_as(&mut scenario, &clock, STRANGER, amount);
+    pay_as(&mut scenario, &clock, STRANGER, amount, MERCHANT);
 
-    assert_and_burn_coin_of(&mut scenario, OWNER, net);
+    assert_and_burn_coin_of(&mut scenario, MERCHANT, net);
     assert_and_burn_coin_of(&mut scenario, TREASURY, fee);
 
     cleanup(scenario, clock);

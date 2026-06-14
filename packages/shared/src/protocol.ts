@@ -80,6 +80,12 @@ export const WS_CLOSE = {
   REPLACED: 4002,
   /** Signature invalid / nonce mismatch / auth failed. */
   AUTH_FAILED: 4003,
+  /**
+   * The signature-verify upstream (fullnode RPC) was unavailable — a TRANSIENT
+   * infra failure, NOT a bad credential. Closed WITHOUT a `connectionRejected`
+   * packet so the client's backoff reconnect retries a fresh handshake.
+   */
+  VERIFY_UNAVAILABLE: 4004,
 } as const;
 
 /** Seconds the server waits for {@link SignatureResponse} before closing 4001. */
@@ -239,6 +245,79 @@ export interface LivechatMessage {
 }
 
 // ===========================================================================
+// BRAIN (the wallet AI) — client asks; server streams Claude's narration +
+// PROPOSED actions. The brain is KEYLESS + FENCED (CLAUDE.md LOCKED #5, amended
+// 2026-06-14): it never signs, never settles, never emits an AUTHORITATIVE
+// on-chain number. Every amount it proposes is a SUGGESTION the WALLET re-derives,
+// dial-gates, and signs LOCALLY — the number wall + non-custody hold by process
+// isolation, not by prompt.
+// ===========================================================================
+
+/**
+ * One turn of the visible transcript. Content is PLAIN TEXT only — the client
+ * flattens a prior assistant proposal to its narration text, so the server never
+ * receives raw tool_use / tool_result blocks. Keeps the wire simple and the
+ * model's history valid without tool-result bookkeeping.
+ */
+export interface BrainMessage {
+  role: 'user' | 'assistant';
+  text: string;
+}
+
+/**
+ * A read-only wallet snapshot the client computes and sends each turn. These are
+ * DETERMINISTIC numbers (the wallet owns them); the brain only narrates over the
+ * block and NEVER invents a balance. It is DATA, never an instruction.
+ */
+export interface BrainWalletState {
+  /** `<name>@suize`, if claimed. */
+  handle?: string;
+  /** The user's own USDC, decimal string. */
+  mainUsdc: string;
+  /** The agent sub-account's balance (decimal), if armed. */
+  agentUsdc?: string;
+  /** The Agent-enabled toggle. */
+  agentEnabled: boolean;
+  /** Short human activity lines — memos ALREADY stripped client-side. */
+  recentActivity?: string[];
+  /** Short human subscription lines (merchant · amount · period). */
+  subscriptions?: string[];
+}
+
+/** Client → server. A chat turn: the visible transcript + the wallet snapshot. */
+export interface BrainChatRequest {
+  messages: BrainMessage[];
+  wallet: BrainWalletState;
+}
+
+/**
+ * A PROPOSED action the model emitted (a strict tool call). The WALLET decodes
+ * it, re-derives every number, dial-gates, and signs — the brain only proposes.
+ */
+export interface BrainProposal {
+  /** Tool name: send_usdc | create_paylink | pay_merchant | deploy_site | create_subscription | cancel_subscription. */
+  tool: string;
+  /** The validated tool input. Amounts here are SUGGESTIONS the wallet re-shows on the confirm card — never authoritative. */
+  input: Record<string, unknown>;
+}
+
+/** Server → client. One streamed text delta of the assistant's narration. */
+export interface BrainChatChunk {
+  delta: string;
+}
+
+/**
+ * Server → client. The turn is complete: any proposed actions + why it stopped.
+ * `limited` is true when the strict daily token cap was hit (the chunk carried
+ * the work-in-progress notice and NO model call was made).
+ */
+export interface BrainChatDone {
+  proposals: BrainProposal[];
+  stopReason: string | null;
+  limited?: boolean;
+}
+
+// ===========================================================================
 // PACKET ENVELOPE — the discriminated union both tracks pattern-match on.
 // ===========================================================================
 //
@@ -288,6 +367,11 @@ export type BalanceUpdateFrame = Frame<'balanceUpdate', BalanceUpdate>;
 export type AgentActivityFrame = Frame<'agentActivity', AgentActivity>;
 export type LivechatMessageFrame = Frame<'livechatMessage', LivechatMessage>;
 
+// ── BRAIN (RPC: brainChatRequest carries `id`; chunk + done echo it) ─────────
+export type BrainChatRequestFrame = Frame<'brainChatRequest', BrainChatRequest>;
+export type BrainChatChunkFrame = Frame<'brainChatChunk', BrainChatChunk>;
+export type BrainChatDoneFrame = Frame<'brainChatDone', BrainChatDone>;
+
 /** Frames a client may SEND to the server. */
 export type ClientPacket =
   | SignatureResponseFrame
@@ -295,7 +379,8 @@ export type ClientPacket =
   | ExecuteRequestFrame
   | HandleAvailableRequestFrame
   | HandleMeRequestFrame
-  | HandleClaimRequestFrame;
+  | HandleClaimRequestFrame
+  | BrainChatRequestFrame;
 
 /** Frames the server may SEND to the client. */
 export type ServerPacket =
@@ -310,7 +395,9 @@ export type ServerPacket =
   | ErrorResponseFrame
   | BalanceUpdateFrame
   | AgentActivityFrame
-  | LivechatMessageFrame;
+  | LivechatMessageFrame
+  | BrainChatChunkFrame
+  | BrainChatDoneFrame;
 
 /** Any frame on the wire, either direction. The full `oneof`. */
 export type Packet = ClientPacket | ServerPacket;

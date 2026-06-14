@@ -2,36 +2,41 @@ import { useCallback, useEffect, useState } from 'react'
 import { ConnectButton } from '@mysten/dapp-kit'
 import { useAuth } from './auth'
 import { useSuizeHandle } from './suins'
-import { fmt_id } from './format'
 import { DEPLOY_PACKAGE_PUBLISHED } from './config'
 import { SitesList } from './screens/SitesList'
 import { SiteDetail } from './screens/SiteDetail'
-import { DeployView } from './screens/DeployView'
 import { AgentsView } from './screens/AgentsView'
+import { AdminView } from './screens/AdminView'
 import { CustomCursor } from './CustomCursor'
 import {
   IconMoon,
   IconSun,
+  IdentityMenu,
   Toasts,
   useToasts,
 } from './ui'
 
 // ============================================================================
 // THE DEPLOY DASHBOARD — Suize Deploy in the Crash-by-Suize palette.
-// A tiny no-router SPA with four views (list / detail / deploy / agents), an
-// optional Suize-wallet (zkLogin) login that scopes "your sites" by owner (the
-// EXACT Crash Google flow), and a light/dark theme toggle (token-driven, shared
-// with Crash). The Agents view is the B2A heart: copy-paste deploy-from-an-agent
-// instructions (curl / TS / MCP) — a first-class surface, not a footnote.
+// AGENTS deploy sites (this is a B2A product); humans sign in to VIEW + manage
+// their agent-deployed sites. A tiny no-router SPA with views (list / detail /
+// agents / admin), an optional Suize-wallet (zkLogin) login that scopes "your
+// sites" by owner (the EXACT Crash Google flow), and a light/dark theme toggle.
+// The Agents view is the heart + the ONLY deploy path: copy-paste deploy-from-an-
+// agent instructions (curl / TS) — there is intentionally no human upload UI.
 // ============================================================================
 
 type View =
   | { kind: 'list' }
   | { kind: 'detail'; siteId: string }
-  | { kind: 'deploy' }
   | { kind: 'agents' }
+  | { kind: 'admin' }
 
 const THEME_KEY = 'suize-deploy.theme'
+
+// The owner handle that unlocks the read-only admin balances tab. A CONVENIENCE
+// gate (hides the tab) — NOT security: the panel shows only public on-chain data.
+const ADMIN_HANDLE = 'sceat@suize'
 
 const apply_theme = (dark: boolean): void => {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light'
@@ -102,6 +107,18 @@ export const App = () => {
           >
             API · agents
           </button>
+          {handle === ADMIN_HANDLE && (
+            <button
+              type="button"
+              className={`dx-navlink${
+                view.kind === 'admin' ? ' is-current' : ''
+              }`}
+              onClick={() => setView({ kind: 'admin' })}
+              title="Service-wallet operational balances (read-only)"
+            >
+              Admin
+            </button>
+          )}
         </nav>
 
         <div className="dx-top__spacer" />
@@ -109,14 +126,11 @@ export const App = () => {
         <div className="dx-top__actions">
           {/* auth: Enoki Google sign-in if configured, else dapp-kit button */}
           {auth.address ? (
-            <button
-              type="button"
-              className="dx-btn is-sm"
-              onClick={auth.sign_out}
-              title="Disconnect"
-            >
-              <span className="dx-acct">{handle ?? fmt_id(auth.address)}</span>
-            </button>
+            <IdentityMenu
+              handle={handle}
+              address={auth.address}
+              onSignOut={auth.sign_out}
+            />
           ) : auth.enoki_enabled && auth.google_wallet ? (
             <button
               type="button"
@@ -165,7 +179,6 @@ export const App = () => {
             connecting={auth.connecting}
             onSignIn={auth.sign_in_google}
             onOpen={open}
-            onDeploy={() => setView({ kind: 'deploy' })}
             onAgents={() => setView({ kind: 'agents' })}
           />
         )}
@@ -180,20 +193,16 @@ export const App = () => {
           />
         )}
 
-        {view.kind === 'deploy' && (
-          <DeployView
-            owner={auth.address}
-            canSignIn={auth.enoki_enabled && !!auth.google_wallet}
-            connecting={auth.connecting}
-            onSignIn={auth.sign_in_google}
-            onBack={goList}
-            onOpen={open}
-            onDeployed={ok}
-            onError={err}
-          />
-        )}
-
         {view.kind === 'agents' && <AgentsView onBack={goList} />}
+
+        {/* Admin is handle-gated: if the viewer is no longer the owner (signed out
+            / switched account), fall back to the agents view instead of a blank. */}
+        {view.kind === 'admin' &&
+          (handle === ADMIN_HANDLE ? (
+            <AdminView onBack={goList} />
+          ) : (
+            <AgentsView onBack={goList} />
+          ))}
       </main>
 
       <Toasts toasts={toasts} />

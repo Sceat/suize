@@ -3,12 +3,14 @@
  *
  * Flow (production keys ARE present on testnet):
  *   `registerEnokiWallets` (providers.tsx) injects a Google zkLogin wallet into
- *   dapp-kit's `useWallets()`. `signInWithGoogle` connects it, which triggers a
- *   FULL-PAGE Google OAuth redirect to `${origin}/enoki`; on return, `autoConnect`
- *   (providers.tsx) silently restores the session and `useCurrentAccount()` exposes
- *   a stable Sui owner address (the MAIN wallet). Because the page navigates away,
- *   the address arrives REACTIVELY via `ownerAddress` after the round-trip — not as
- *   the resolved value of the click handler. Enoki sponsors gas on every write.
+ *   dapp-kit's `useWallets()`. `signInWithGoogle` connects it, which opens a
+ *   POPUP for the Google OAuth flow (Enoki `window.open`s the auth URL, the popup
+ *   lands on the same-origin `${origin}/enoki`, the opener polls its location for
+ *   the token and closes it — it is NOT a full-page redirect, so it MUST run
+ *   behind a user gesture or the popup is blocked). The session is then set and
+ *   `useCurrentAccount()` exposes a stable Sui owner address (the MAIN wallet);
+ *   the address arrives REACTIVELY via `ownerAddress` when the mutation settles.
+ *   Enoki sponsors gas on every write.
  *
  * NO STUB: if Enoki/Google creds are missing OR the Google zkLogin wallet isn't
  * registered, `signInWithGoogle` THROWS. App.tsx's `.catch()` then redirects to
@@ -22,6 +24,7 @@ import {
   useConnectWallet,
   useCurrentAccount,
   useCurrentWallet,
+  useDisconnectWallet,
   useWallets,
 } from '@mysten/dapp-kit';
 import { isEnokiWallet, isGoogleWallet } from '@mysten/enoki';
@@ -48,10 +51,14 @@ export interface AuthState {
    *  completed at first mount, so this flips from false→true a frame after load.
    *  Auto-sign-in MUST gate on this to avoid the mount-order race. */
   canSignIn: boolean;
-  /** Trigger Google zkLogin. Resolves to the address if already connected; the
-   *  real path navigates the page away (resolves to '' before navigation). THROWS
+  /** Trigger Google zkLogin (opens the Enoki OAuth popup — call from a user
+   *  gesture). Resolves to the address if already connected, else '' while the
+   *  popup round-trip delivers the address reactively via `ownerAddress`. THROWS
    *  if Enoki/the Google wallet is unavailable (App redirects to suize.io). */
   signInWithGoogle: () => Promise<string>;
+  /** Disconnect the zkLogin session (dapp-kit forgets the wallet, so autoConnect
+   *  will NOT silently restore it). The caller resets its own phase/UI. */
+  signOut: () => void;
 }
 
 export function useAuth(): AuthState {
@@ -60,6 +67,7 @@ export function useAuth(): AuthState {
   const { currentWallet } = useCurrentWallet();
   const wallets = useWallets();
   const { mutate: connect } = useConnectWallet();
+  const { mutate: disconnect } = useDisconnectWallet();
 
   // Local flag drives ONLY the brief "signing-in" flash before the OAuth redirect
   // navigates the page away. It never holds an address.
@@ -96,14 +104,18 @@ export function useAuth(): AuthState {
     }
     // Already connected from a prior session (autoConnect restored it).
     if (realAddress) return realAddress;
-    // REAL OAuth: this navigates the whole page to Google and back to /enoki. The
-    // address is delivered reactively via `ownerAddress` after the redirect, so
-    // this promise typically does not resolve in THIS page lifetime — the brief
-    // "signing-in" flag covers the moment before navigation.
+    // REAL OAuth: opens the Enoki popup (needs the caller's user gesture). The
+    // address is delivered reactively via `ownerAddress` when the connect
+    // mutation settles — the "signing-in" flag covers the popup round-trip.
     setPhase('signing-in');
     connect({ wallet: googleWallet });
     return '';
   }, [googleWallet, realAddress, connect]);
+
+  const signOut = useCallback(() => {
+    setPhase('idle');
+    disconnect();
+  }, [disconnect]);
 
   return {
     status,
@@ -112,5 +124,6 @@ export function useAuth(): AuthState {
     enokiEnabled: ENOKI_ENABLED,
     canSignIn,
     signInWithGoogle,
+    signOut,
   };
 }

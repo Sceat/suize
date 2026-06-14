@@ -2,7 +2,7 @@
 // here instead of touching process.env directly, so the env contract lives in
 // one place (mirrored by .env.example).
 
-import { fullnodeUrl, resolveNetwork, WALRUS_DEFAULTS, DEPLOY_SUB_PERIOD_MS } from "@suize/shared";
+import { fullnodeUrl, resolveNetwork, WALRUS_DEFAULTS, DEPLOY_SUB_PERIOD_MS, DEPLOY_SUB_PRICE_USDC } from "@suize/shared";
 
 const csv = (v: string | undefined): string[] =>
   (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -25,6 +25,10 @@ const suiRpcUrls: string[] = (() => {
 // Defaults cover ALL apps:
 //   - Crash:  https://crash.suize.io  + http://localhost:5173
 //   - Wallet: https://wallet.suize.io + http://localhost:5180
+//   - Pay:    https://pay.suize.io (the STANDALONE hosted pay page, apps/pay —
+//             identity via the wallet-origin SSO bridge; calls the x402 V2
+//             facilitator /terms·/build·/settle). Dev pay app: http://localhost:5173
+//             (the SAME entry as crash dev — they share the port, never run both).
 //   - Deploy: https://deploy.suize.io + http://localhost:5183
 //   - Landing/redirect: https://suize.io
 // Override via ALLOWED_ORIGINS (comma-separated) in prod/k8s — and keep
@@ -32,6 +36,7 @@ const suiRpcUrls: string[] = (() => {
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://crash.suize.io",
   "https://wallet.suize.io",
+  "https://pay.suize.io",
   "https://deploy.suize.io",
   "https://suize.io",
   "http://localhost:5173",
@@ -67,6 +72,22 @@ export const config = {
   sponsorDailyMax: Number(process.env.SPONSOR_DAILY_MAX ?? 20_000),       // sponsored txs / day / replica
   sponsorDailyPerAddressMax: Number(process.env.SPONSOR_DAILY_PER_ADDRESS_MAX ?? 500), // sponsored txs / day / address
   deployDailyMax: Number(process.env.DEPLOY_DAILY_MAX ?? 200),            // deploys / day / replica (each pays real SUI gas)
+
+  // --- facilitator: the x402 V2 fee-tier merchant registry ---
+  // SUIZE_MERCHANTS is a JSON map of the ONLY addresses that get a 2% (+ $0.01
+  // floor) rake declared in their 402 outputs: { "0x<addr>": { "feeBps": 200 }, … }.
+  // Any payTo NOT in this map is FREE tier (a single full-amount output, no rake).
+  // Unset/empty = every merchant is free tier. Parsed once at boot (in
+  // src/facilitator/fees.ts); a malformed entry is skipped loudly, never fatal.
+  suizeMerchants: process.env.SUIZE_MERCHANTS,
+
+  // --- facilitator: the hosted pay page (apps/pay) ---
+  // Base URL POST /checkout (and the deploy 402 challenge) assembles pay-links
+  // against (SPEC §7.3 — pure string assembly, no store). The page is the
+  // STANDALONE pay origin (pay.suize.io, live since 2026-06-11); the query is
+  // appended directly: <base>?payTo=…. Override for dev/preview
+  // (PAY_PAGE_URL=http://localhost:5173). Trailing slashes stripped.
+  payPageUrl: (process.env.PAY_PAGE_URL ?? "https://pay.suize.io").replace(/\/+$/, ""),
 
   // --- handle (self-custody SuiNS) module ---
   // Handle issuance is now FULLY ON-CHAIN — no Redis. The module is ENABLED only
@@ -108,17 +129,23 @@ export const config = {
   cfApiToken: process.env.CF_API_TOKEN,                     // secret — Cloudflare API token with Custom Hostnames edit scope
   cfZoneId: process.env.CF_ZONE_ID ?? "6c2dc349020a8e235085cfe39c501e01", // suize.site zone (not secret; override via env). CF-for-SaaS custom-hostname provisioning.
 
-  // --- renewal relayer (the deterministic subscription↔storage cron) ---
-  // The relayer walks the on-chain RenewalRegistry every tick: a DUE subscription
-  // gets ONE service-wallet PTB (charge_subscription + extend_blob × 2 — charged
-  // IFF storage extends); a charged-but-near-expiry site gets an extend-only PTB.
-  // Enabled only when the deploy wallet is set AND the charge gate is live.
-  renewalTickMs: Number(process.env.RENEWAL_TICK_MS ?? 60_000),          // loop interval (ms)
+  // --- Walrus storage auto-renewal (the deterministic subscription↔storage cron) ---
+  // The subs module charges (push, user-signed); this cron's only job is to keep a
+  // PAID site's Walrus storage extended so it never lapses. Two triggers: the
+  // on-settle hook (fires per sponsored renewal) + this safety cron (every
+  // extendTickMs, repairs any near-expiry paid site). Enabled only when the deploy
+  // wallet is set AND the subs module is published.
+  extendTickMs: Number(process.env.EXTEND_TICK_MS ?? 6 * 60 * 60_000),   // safety-cron interval (ms; default 6h)
   renewalEpochs: Number(process.env.RENEWAL_EPOCHS ?? 35),               // epochs added per extend (clamped to the ~53-ahead Walrus max)
-  renewalSafetyEpochs: Number(process.env.RENEWAL_SAFETY_EPOCHS ?? 5),   // extend-only cushion: blobs ending within this many epochs get repaired
+  renewalSafetyEpochs: Number(process.env.RENEWAL_SAFETY_EPOCHS ?? 5),   // extend cushion: blobs ending within this many epochs get repaired
   // The Deploy subscription period (ms). Defaults to the shared 30-day constant;
   // the env override exists so a DEMO can run e.g. 2-minute periods.
   deploySubPeriodMs: Number(process.env.DEPLOY_SUB_PERIOD_MS ?? DEPLOY_SUB_PERIOD_MS),
+  // The Deploy subscription per-period price (atomic USDC, 6dp). PRODUCTION value is
+  // the shared $19.99 number-wall constant; the env override (DEPLOY_SUB_PRICE_USDC)
+  // exists ONLY so a TESTNET proof can ride a reduced price (a fresh zkLogin payer
+  // rarely holds $19.99 of testnet USDC) — it is NEVER set in prod.
+  deploySubPriceUsdc: Number(process.env.DEPLOY_SUB_PRICE_USDC ?? DEPLOY_SUB_PRICE_USDC),
   // The WAL coin type the extend_blob payment is drawn from (testnet default;
   // override on mainnet). The Walrus PACKAGE itself is resolved at runtime from
   // the System object's `package_id` field (survives Walrus upgrades).
@@ -127,4 +154,21 @@ export const config = {
   // The shared Walrus System object (testnet default; override on mainnet).
   walrusSystemObject: process.env.WALRUS_SYSTEM_OBJECT ??
     "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af",
+
+  // --- brain (the wallet AI) — the FENCED inference module (CLAUDE.md LOCKED #5,
+  // amended 2026-06-14). It holds the Anthropic key and runs Claude to power the
+  // PAY wallet's conversation, but returns ONLY narration + PROPOSED actions —
+  // it never signs, settles, sponsors, or touches a key (the wallet is the sole
+  // signer; the number wall stands). The brain WS frame 503s when the key is unset.
+  // The key is SERVER-ONLY — never a VITE_/frontend var, never in a bundle. ---
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY, // secret — env only
+  // Haiku ONLY (owner 2026-06-14: no paid wallet tier; no model routing). `effort`
+  // 400s on Haiku 4.5 and is never sent.
+  brainModel: process.env.BRAIN_MODEL ?? "claude-haiku-4-5",
+  // STRICT per-user daily token cap (input+output, keyed by the verified
+  // ws.data.address). Demo-tight on purpose: when a user crosses it the brain
+  // replies with the work-in-progress notice and makes NO model call.
+  brainDailyTokenMax: Number(process.env.BRAIN_DAILY_TOKEN_MAX ?? 60_000),
+  // Hard ceiling on one turn's output so a single prompt can't burn the budget.
+  brainMaxOutputTokens: Number(process.env.BRAIN_MAX_OUTPUT_TOKENS ?? 1_024),
 } as const;

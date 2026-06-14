@@ -1,33 +1,30 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  useSignPersonalMessage,
-  useSignTransaction,
-  useSuiClient,
-} from '@mysten/dapp-kit'
+import { useSignPersonalMessage, useSignTransaction, useSuiClient } from '@mysten/dapp-kit'
 import type { DomainChallengeResponse, SiteInfo } from '@suize/shared'
 import {
-  DEPLOY_SUB_PERIOD_CAP,
+  DEPLOY_EXTEND_PRICE_USDC,
   DEPLOY_SUB_PERIOD_MS,
   DEPLOY_SUB_PRICE_USDC,
   PACKAGE_IDS,
+  resolveTreasury,
   buildDeployLinkAuthMessage,
-  buildDeployRenewalLinkAuthMessage,
-  buildDeployRenewalUnlinkAuthMessage,
   buildDeployUnlinkAuthMessage,
 } from '@suize/shared'
+import { suizeSubs, type SubStatus } from '@suize/pay/subs'
+import type { PaymentRequired } from '@suize/pay'
 import {
-  build_deploy_subscribe,
-  execute_sponsored,
-  get_nonce,
+  DeployApiError,
+  extend_site,
+  fetch_site,
   link_domain_issue,
   link_domain_verify,
-  link_renewal,
+  settle_challenge,
   unlink_domain,
-  unlink_renewal,
 } from '../api'
 import { fetch_site_onchain } from '../chain'
-import { RailAccountField, useRailAccount } from '../rail'
+import { openSubscribePopup, walletManageUrl } from '../subscribe-popup'
+import { SUI_NETWORK } from '../config'
 import { useSuizeHandle } from '../suins'
 import { fmt_date, fmt_id, fmt_usdc, site_size, site_files } from '../format'
 import {
@@ -269,23 +266,22 @@ const AddDomainForm = ({
     onError: e => onError(describe_error(e).title),
   })
 
-  // VERIFY & LINK — explicit, user-initiated, SIGNED. Fetch a fresh single-use
-  // nonce → sign buildDeployLinkAuthMessage(domain, siteId, nonce) with the
-  // zkLogin signer → POST verify=1 with { nonce, signature }. The backend re-reads
-  // DNS (txtOk/cnameOk), recovers the signer == Site.owner, and links on-chain +
-  // provisions SSL once both records pass. Each click signs fresh (nonce is burned
-  // server-side per verify) — that is expected, surfaced in the hint copy.
+  // VERIFY & LINK — explicit, user-initiated, SIGNED. Stamp a fresh client `ts` →
+  // sign buildDeployLinkAuthMessage(domain, siteId, ts) with the zkLogin signer →
+  // POST verify=1 with { ts, signature }. The backend re-reads DNS (txtOk/cnameOk),
+  // recovers the signer == Site.owner + checks `ts` is fresh, and links on-chain +
+  // provisions SSL once both records pass. STATELESS — no server nonce fetch.
   const verify = useMutation({
     mutationFn: async () => {
       const d = domain.trim().toLowerCase()
-      const { nonce } = await get_nonce()
+      const ts = Date.now()
       const message = new TextEncoder().encode(
-        buildDeployLinkAuthMessage(d, siteId, nonce),
+        buildDeployLinkAuthMessage(d, siteId, ts),
       )
       setVerifyPhase('signing')
       const { signature } = await signPersonalMessage({ message })
       setVerifyPhase('verifying')
-      return link_domain_verify(siteId, d, nonce, signature)
+      return link_domain_verify(siteId, d, ts, signature)
     },
     onSuccess: res => apply(res, true),
     // Settled (success OR error/cancel) → drop back to idle so the button resets.
@@ -352,278 +348,241 @@ const AddDomainForm = ({
 }
 
 // ============================================================================
-// STORAGE AUTO-RENEWAL — the Deploy subscription (LOCKED #10): $19.99/mo on the
-// rail auto-renews this site's Walrus storage + unlocks custom domains. Flow:
-//   subscribe: POST /deploy/subscribe { account, sender } → sign the SPONSORED
-//   bytes LOCALLY as a TRANSACTION (zkLogin, useSignTransaction) → POST /execute
-//   → read SubscriptionCreated off the executed tx (sub_key) → sign
-//   buildDeployRenewalLinkAuthMessage as a PERSONAL MESSAGE (the domain-link
-//   pattern) → POST /deploy/renewal.
-// State lives in localStorage ({accountId, subKey, digest} after linking) — a
-// cheap honest mirror; the on-chain RenewalRegistry is the real record. A sub
-// that settled but failed to LINK persists separately so a retry finishes the
-// link WITHOUT creating (and paying) a second subscription.
-// ON-CHAIN LAW: create_subscription stamps last_charged_ms = NOW, so the FIRST
-// renewal charge lands one full period (30 days) AFTER subscribing; renewals
-// then recur silently — the per-period cap + cancel are the leash.
+// STORAGE — the Deploy storage lifecycle (LOCKED #10). A site's Walrus blobs have
+// a finite paid storage window; this panel surfaces the live expiry and the two
+// ways to keep it alive:
+//   • SUBSCRIBE ($19.99/mo, per-ACCOUNT) — ONE plan owned by the site owner unlocks
+//     custom domains for ALL their sites and auto-renews ALL their storage so nothing
+//     expires (capped at 100 GB total). The wallet's visible /confirm-subscribe popup
+//     builds + signs + submits the subs::subscription::create tx ITSELF (display =
+//     build; the create ref is still the site id — wire-unchanged), and the backend's
+//     extender fans out across the owner's sites each period (the on-settle hook + the
+//     safety cron). Active state is read straight off the chain via @suize/pay/subs
+//     `activeFor(owner)` — no Suize store, no per-site sub.
+//   • EXTEND ONCE ($0.50) — a one-off paid extend via the x402 V2 gate (the SAME
+//     gasless settle as a deploy: POST /sites/:id/extend with no payment → 402 →
+//     settle the challenge → retry with X-PAYMENT). The agent re-402 path is
+//     documented in the Agents view.
+// ON-CHAIN LAW (subs module): create stamps paid_until_ms = now + period, so the
+// FIRST renewal lands one full period after subscribing; renewals then recur
+// silently — the cancel (in the wallet) is the kill switch.
 // ============================================================================
 
-type RenewalLink = { accountId: string; subKey: number; digest: string }
-type PendingSub = { accountId: string; subKey: number }
-
-const renewal_key = (siteId: string) => `suize-deploy.renewal.${siteId}`
-const pending_sub_key = (siteId: string) => `suize-deploy.renewal-pending.${siteId}`
-
-const load_json = <T,>(key: string): T | null => {
-  try {
-    const raw = window.localStorage.getItem(key)
-    return raw ? (JSON.parse(raw) as T) : null
-  } catch {
-    return null
-  }
-}
-
-const store_json = (key: string, value: unknown): void => {
-  try {
-    if (value == null) window.localStorage.removeItem(key)
-    else window.localStorage.setItem(key, JSON.stringify(value))
-  } catch {
-    /* storage blocked — in-memory state still covers this session */
-  }
-}
-
-const SUBSCRIPTION_CREATED_TYPE = `${PACKAGE_IDS.ACCOUNT.PACKAGE}::account::SubscriptionCreated`
-
 const SUB_PERIOD_DAYS = Math.round(DEPLOY_SUB_PERIOD_MS / 86_400_000)
+/** $19.99 as the decimal SubscribeTerms amount. */
+const SUB_PRICE_DECIMAL = (DEPLOY_SUB_PRICE_USDC / 1e6).toFixed(2)
 
-const RenewalPanel = ({
-  siteId,
+const DAY_MS = 86_400_000
+
+/** The expiry pill state for a storage window: amber within 14d, red within 3d. */
+const expiryTone = (expiresAtMs: number | null | undefined): 'ok' | 'amber' | 'red' | 'unknown' => {
+  if (expiresAtMs == null) return 'unknown'
+  const left = expiresAtMs - Date.now()
+  if (left <= 3 * DAY_MS) return 'red'
+  if (left <= 14 * DAY_MS) return 'amber'
+  return 'ok'
+}
+
+const StoragePanel = ({
+  site,
+  expiresAtMs,
   owner,
   onOk,
   onError,
 }: {
-  siteId: string
+  site: SiteInfo
+  /** The site's storage expiry (from the backend's /sites/:id read), or null. */
+  expiresAtMs: number | null
   /** The viewer's connected address (== Site.owner — the panel is owner-gated). */
   owner: string
   onOk: (msg: string) => void
   onError: (msg: string) => void
 }) => {
+  const qc = useQueryClient()
   const client = useSuiClient()
-  const rail = useRailAccount(owner)
   const { mutateAsync: signTransaction } = useSignTransaction()
-  const { mutateAsync: signPersonalMessage } = useSignPersonalMessage()
-  const [link, setLink] = useState<RenewalLink | null>(() =>
-    load_json<RenewalLink>(renewal_key(siteId)),
-  )
-  const [pending, setPending] = useState<PendingSub | null>(() =>
-    load_json<PendingSub>(pending_sub_key(siteId)),
-  )
-  const [phase, setPhase] = useState<
-    'idle' | 'building' | 'signing' | 'settling' | 'linking'
-  >('idle')
 
-  const subscribe = useMutation({
-    mutationFn: async (): Promise<RenewalLink> => {
-      // Resume a created-but-unlinked subscription first — NEVER subscribe (and
-      // charge a second monthly leash) twice for one site.
-      let sub = load_json<PendingSub>(pending_sub_key(siteId))
-      if (!sub) {
-        if (!rail.valid) {
-          throw new Error(
-            'A funded rail Account id is required to subscribe.',
-          )
-        }
-        setPhase('building')
-        const built = await build_deploy_subscribe({
-          account: rail.account,
-          sender: owner,
-        })
-        setPhase('signing')
-        // Sponsored TX bytes — signed VERBATIM by the local zkLogin session.
-        const { signature } = await signTransaction({ transaction: built.bytes })
-        setPhase('settling')
-        const executed = await execute_sponsored({
-          digest: built.digest,
-          signature,
-        })
-        // The sub_key comes from the SubscriptionCreated event on the executed tx.
-        const full = await client.waitForTransaction({
-          digest: executed.digest,
-          options: { showEvents: true },
-        })
-        const ev = (full.events ?? []).find(
-          e => e.type === SUBSCRIPTION_CREATED_TYPE,
-        )
-        const json = (ev?.parsedJson ?? {}) as {
-          account_id?: string
-          sub_key?: string | number
-        }
-        if (json.sub_key == null) {
-          throw new Error(
-            'Subscription settled but its SubscriptionCreated event was not found — retry to finish linking.',
-          )
-        }
-        sub = { accountId: rail.account, subKey: Number(json.sub_key) }
-        store_json(pending_sub_key(siteId), sub)
-        setPending(sub)
-      }
-
-      // Link the subscription to THIS site's renewal — the domain-link signing
-      // pattern (fresh nonce + op-bound personal message).
-      setPhase('linking')
-      const { nonce } = await get_nonce()
-      const message = new TextEncoder().encode(
-        buildDeployRenewalLinkAuthMessage(siteId, sub.accountId, sub.subKey, nonce),
-      )
-      const { signature } = await signPersonalMessage({ message })
-      const res = await link_renewal({
-        siteId,
-        accountId: sub.accountId,
-        subKey: sub.subKey,
-        nonce,
-        signature,
-      })
-      store_json(pending_sub_key(siteId), null)
-      return { accountId: res.accountId, subKey: res.subKey, digest: res.digest }
-    },
-    onSuccess: l => {
-      store_json(renewal_key(siteId), l)
-      setLink(l)
-      setPending(null)
-      onOk('Storage auto-renewal is on')
-    },
-    onError: e => onError(describe_error(e).title),
-    onSettled: () => setPhase('idle'),
+  // The Deploy merchant = the Suize treasury, RESOLVED LIVE from `treasury@suize` (the
+  // single source of truth; no hardcoded address). Subscribe/read are gated on it.
+  const treasuryQ = useQuery({
+    queryKey: ['suize-treasury', SUI_NETWORK],
+    queryFn: () => resolveTreasury(client),
+    staleTime: Infinity,
   })
+  const merchant = treasuryQ.data ?? null
 
-  const cancel = useMutation({
+  // Active subscription for THIS ACCOUNT, read straight off the chain (per-address —
+  // one plan owned by the site owner covers every site they own). We read the owner's
+  // active plans and surface the first; the create ref stays the siteId (wire-unchanged).
+  const subQ = useQuery({
+    queryKey: ['sub', owner, merchant],
+    enabled: Boolean(merchant) && Boolean(owner),
+    queryFn: async (): Promise<SubStatus | null> =>
+      (
+        await suizeSubs({
+          merchant: merchant as string,
+          network: SUI_NETWORK,
+          subsPackage: PACKAGE_IDS.SUBS.PACKAGE,
+        }).activeFor(owner)
+      )[0] ?? null,
+    staleTime: 30_000,
+    retry: false,
+  })
+  const sub = subQ.data ?? null
+
+  // SUBSCRIBE — open the wallet's visible /confirm-subscribe popup with the terms.
+  // The popup builds + signs + submits the create tx itself (display = build).
+  const subscribe = useMutation({
     mutationFn: async () => {
-      if (!link) throw new Error('No active renewal to cancel.')
-      const { nonce } = await get_nonce()
-      const message = new TextEncoder().encode(
-        buildDeployRenewalUnlinkAuthMessage(link.accountId, link.subKey, nonce),
-      )
-      const { signature } = await signPersonalMessage({ message })
-      return unlink_renewal({
-        accountId: link.accountId,
-        subKey: link.subKey,
-        nonce,
-        signature,
+      if (!merchant) throw new Error('Treasury not resolved yet — try again in a moment.')
+      const res = await openSubscribePopup({
+        merchant,
+        amount: SUB_PRICE_DECIMAL,
+        periodMs: DEPLOY_SUB_PERIOD_MS,
+        ref: site.siteId, // the on-chain join: ref = the site id (the extender decodes it)
+        label: site.name || 'Suize Deploy site',
       })
+      if (!res.ok) {
+        if (res.cancelled) throw new Error('Subscription cancelled.')
+        throw new Error(res.error || 'Could not set up the subscription.')
+      }
+      return res.digest
     },
     onSuccess: () => {
-      store_json(renewal_key(siteId), null)
-      setLink(null)
-      onOk('Auto-renewal cancelled')
+      onOk('Storage auto-renewal is on')
+      // The chain takes a beat to index; refetch shortly to flip the panel.
+      setTimeout(() => void qc.invalidateQueries({ queryKey: ['sub', site.siteId] }), 2_000)
     },
     onError: e => onError(describe_error(e).title),
   })
 
-  if (link) {
-    return (
-      <div className="dx-panel">
-        <h2 className="dx-panel__title">Storage auto-renewal</h2>
-        <p className="dx-hint">
-          <b className="dx-linked-mark">
-            <IconCheck size={13} /> Auto-renewal linked
-          </b>{' '}
-          — Suize renews this site's Walrus storage on your subscription.
-          Renewals recur silently once approved; the first charge lands one full
-          period ({SUB_PERIOD_DAYS} days) after you subscribed.
-        </p>
-        <div className="dx-rows">
-          <div className="dx-row">
-            <span className="dx-row__k">Plan</span>
-            <span className="dx-row__v tnum">
-              {fmt_usdc(DEPLOY_SUB_PRICE_USDC)} / {SUB_PERIOD_DAYS} days
-              (on-chain per-period cap {fmt_usdc(DEPLOY_SUB_PERIOD_CAP)})
-            </span>
-          </div>
-          <div className="dx-row">
-            <span className="dx-row__k">Rail account</span>
-            <span className="dx-row__v" title={link.accountId}>
-              {fmt_id(link.accountId)}
-            </span>
-          </div>
-          <div className="dx-row">
-            <span className="dx-row__k">Subscription</span>
-            <span className="dx-row__v tnum">#{link.subKey}</span>
-          </div>
-          <div className="dx-row">
-            <span className="dx-row__k">Link digest</span>
-            <span className="dx-row__v" title={link.digest}>
-              {fmt_id(link.digest)}{' '}
-              <CopyButton value={link.digest} label="Copy digest" />
-            </span>
-          </div>
-        </div>
-        <div className="dx-form-actions">
-          <button
-            type="button"
-            className="dx-btn is-danger"
-            disabled={cancel.isPending}
-            onClick={() => {
-              if (
-                window.confirm(
-                  'Cancel auto-renewal? Suize stops renewing this site\'s Walrus storage; the site stays live until its current storage period ends. The subscription itself stays on your rail Account — cancel it there to remove the leash entirely.',
-                )
-              )
-                cancel.mutate()
-            }}
-          >
-            {cancel.isPending ? 'Cancelling…' : 'Cancel auto-renewal'}
-          </button>
-        </div>
-        {cancel.isError && (
-          <p className="dx-error">{describe_error(cancel.error).title}</p>
-        )}
-      </div>
-    )
-  }
+  // EXTEND ONCE ($0.50) — the x402 V2 in-app flow: POST /sites/:id/extend with no
+  // payment → 402 → settle the challenge (build gasless → sign locally → X-PAYMENT)
+  // → retry. The payer must be the site owner (enforced on-chain-verified).
+  const extend = useMutation({
+    mutationFn: async (): Promise<string> => {
+      // Probe to discover the 402 challenge (an empty X-PAYMENT triggers the 402).
+      try {
+        const r = await extend_site(site.siteId, '')
+        return r.digest // un-gated path (charge gate off)
+      } catch (e) {
+        if (!(e instanceof DeployApiError) || e.status !== 402) throw e
+        const challenge = e.body as PaymentRequired | undefined
+        if (!challenge?.accepts?.length) throw e
+        const { header } = await settle_challenge(challenge, owner, bytes =>
+          signTransaction({ transaction: bytes }),
+        )
+        const r = await extend_site(site.siteId, header)
+        return r.digest
+      }
+    },
+    onSuccess: () => {
+      onOk('Storage extended')
+      void qc.invalidateQueries({ queryKey: ['site', site.siteId] })
+      void qc.invalidateQueries({ queryKey: ['site-storage', site.siteId] })
+    },
+    onError: e => onError(describe_error(e).title),
+  })
+
+  const tone = expiryTone(expiresAtMs)
 
   return (
     <div className="dx-panel">
-      <h2 className="dx-panel__title">Storage auto-renewal</h2>
-      <p className="dx-hint">
-        Subscribe for <b>{fmt_usdc(DEPLOY_SUB_PRICE_USDC)}/mo</b> — auto-renews
-        this site's Walrus storage so it never expires + unlocks custom domains;
-        cancel anytime. The subscription is an on-chain leash: each period can
-        debit at most {fmt_usdc(DEPLOY_SUB_PERIOD_CAP)}, and the FIRST renewal
-        charge happens one full period ({SUB_PERIOD_DAYS} days) after
-        subscribing — that's on-chain law, not policy.
-      </p>
-      {pending ? (
-        <p className="dx-hint" title={pending.accountId}>
-          Your subscription (<b className="tnum">#{pending.subKey}</b> on
-          Account {fmt_id(pending.accountId)}) is settled on-chain but not yet
-          linked to this site — finish the link below (a signature, no new
-          charge).
-        </p>
-      ) : (
-        <RailAccountField rail={rail} idPrefix="renewal" owner={owner} />
-      )}
-      <div className="dx-form-actions">
-        <button
-          type="button"
-          className="dx-btn is-accent"
-          disabled={subscribe.isPending || (!pending && !rail.valid)}
-          onClick={() => subscribe.mutate()}
-        >
-          {phase === 'building'
-            ? 'Building subscription…'
-            : phase === 'signing'
-              ? 'Approve in wallet…'
-              : phase === 'settling'
-                ? 'Settling…'
-                : phase === 'linking'
-                  ? 'Linking renewal…'
-                  : pending
-                    ? 'Finish linking'
-                    : `Subscribe — ${fmt_usdc(DEPLOY_SUB_PRICE_USDC)}/mo`}
-        </button>
+      <h2 className="dx-panel__title">Storage</h2>
+
+      {/* Expiry line — amber <14d, red <3d. */}
+      <div className="dx-rows" style={{ marginBottom: 14 }}>
+        <div className="dx-row">
+          <span className="dx-row__k">Walrus storage</span>
+          <span
+            className={`dx-row__v${tone === 'red' ? ' dx-error' : ''}`}
+            style={tone === 'amber' ? { color: 'var(--warn, #b8860b)' } : undefined}
+          >
+            {expiresAtMs == null
+              ? 'Storage window unknown (the backend reads it live — try again shortly).'
+              : `Expires ${fmt_date(expiresAtMs)}${
+                  tone === 'red' ? ' — expiring very soon' : tone === 'amber' ? ' — expiring soon' : ''
+                }`}
+          </span>
+        </div>
       </div>
-      {subscribe.isError && (
-        <p className="dx-error">{describe_error(subscribe.error).title}</p>
+
+      {sub?.active ? (
+        <>
+          <p className="dx-hint">
+            <b className="dx-linked-mark">
+              <IconCheck size={13} /> Auto-renewal on
+            </b>{' '}
+            — your plan auto-renews the Walrus storage of all your sites and unlocks
+            custom domains. Renewals recur silently; paid through{' '}
+            <b>{fmt_date(sub.paidUntilMs)}</b>.
+          </p>
+          <div className="dx-rows">
+            <div className="dx-row">
+              <span className="dx-row__k">Plan</span>
+              <span className="dx-row__v tnum">
+                {fmt_usdc(DEPLOY_SUB_PRICE_USDC)} / {SUB_PERIOD_DAYS} days
+              </span>
+            </div>
+            <div className="dx-row">
+              <span className="dx-row__k">Subscription</span>
+              <span className="dx-row__v" title={sub.subscriptionId}>
+                {fmt_id(sub.subscriptionId)}
+              </span>
+            </div>
+          </div>
+          <div className="dx-form-actions">
+            {/* STUB(deploy): cancel-on-chain (subs::subscription::cancel) is not a
+                /confirm-subscribe popup mode yet — the user cancels in the wallet's
+                own subscriptions surface. Deep-link added when the wallet ships a
+                manage-subs route. */}
+            <a
+              className="dx-btn is-danger"
+              href={walletManageUrl()}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Cancel in wallet
+            </a>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="dx-hint">
+            Keep your sites permanent. One subscription —{' '}
+            <b>{fmt_usdc(DEPLOY_SUB_PRICE_USDC)}/mo</b> — covers your whole account:
+            Suize auto-renews the Walrus storage of all your sites so they never expire
+            and unlocks custom domains for every one; cancel anytime. The first renewal
+            charge lands one full period ({SUB_PERIOD_DAYS} days) after subscribing —
+            that's on-chain law, not policy.
+          </p>
+          <div className="dx-form-actions">
+            <button
+              type="button"
+              className="dx-btn is-accent"
+              disabled={subscribe.isPending}
+              onClick={() => subscribe.mutate()}
+            >
+              {subscribe.isPending
+                ? 'Approve in wallet…'
+                : `Subscribe — ${fmt_usdc(DEPLOY_SUB_PRICE_USDC)}/mo`}
+            </button>
+            <button
+              type="button"
+              className="dx-btn"
+              disabled={extend.isPending}
+              onClick={() => extend.mutate()}
+              title="One-off storage extension — no subscription"
+            >
+              {extend.isPending ? 'Extending…' : `Extend once — $${DEPLOY_EXTEND_PRICE_USDC}`}
+            </button>
+          </div>
+        </>
+      )}
+      {(subscribe.isError || extend.isError) && (
+        <p className="dx-error">
+          {describe_error(subscribe.error ?? extend.error).title}
+        </p>
       )}
     </div>
   )
@@ -645,19 +604,19 @@ const DomainsPanel = ({
   // Which domain row is mid-sign, so only its button reads "Signing…".
   const [signing, setSigning] = useState<string | null>(null)
   const m = useMutation({
-    // UNLINK is CRYPTOGRAPHICALLY SIGNED — fetch a fresh nonce → sign
-    // buildDeployUnlinkAuthMessage(domain, nonce) with the zkLogin signer → DELETE
-    // with { nonce, signature }. The backend recovers signer == Site.owner. Only
-    // the owner can produce a valid signature, so the backend is the authority.
+    // UNLINK is CRYPTOGRAPHICALLY SIGNED — stamp a fresh client `ts` → sign
+    // buildDeployUnlinkAuthMessage(domain, ts) with the zkLogin signer → DELETE with
+    // { ts, signature }. The backend recovers signer == Site.owner + checks `ts` is
+    // fresh. Only the owner can produce a valid signature. STATELESS — no nonce fetch.
     mutationFn: async (d: string) => {
-      const { nonce } = await get_nonce()
+      const ts = Date.now()
       const message = new TextEncoder().encode(
-        buildDeployUnlinkAuthMessage(d, nonce),
+        buildDeployUnlinkAuthMessage(d, ts),
       )
       setSigning(d)
       const { signature } = await signPersonalMessage({ message })
       setSigning(null)
-      return unlink_domain(d, nonce, signature)
+      return unlink_domain(d, ts, signature)
     },
     onSuccess: (_res, d) => {
       onUnlinked(`Unlinked ${d}`)
@@ -742,6 +701,16 @@ export const SiteDetail = ({
     queryFn: () => fetch_site_onchain(client, siteId),
     retry: false,
   })
+  // The on-chain read has no storage lifecycle; the backend's /sites/:id computes
+  // the live Walrus storage end-epoch + expiresAtMs. A separate, non-blocking query
+  // (the detail page works without it; the Storage card just shows "unknown").
+  const storageQ = useQuery({
+    queryKey: ['site-storage', siteId],
+    queryFn: () => fetch_site(siteId),
+    staleTime: 60_000,
+    retry: false,
+  })
+  const expiresAtMs = storageQ.data?.expiresAtMs ?? null
 
   // Owner gate: case-insensitive match of the viewer against the site's on-chain
   // owner address. Logged-out (viewerAddress null) ⇒ never owner. Presentation
@@ -831,11 +800,13 @@ export const SiteDetail = ({
             onError={onError}
           />
 
-          {/* Storage auto-renewal — owner-only (same gate as the domain writes:
-              presentation only; the backend verifies every signature). */}
+          {/* Storage — expiry + subscribe (wallet popup) / extend-once (x402).
+              Owner-only (same gate as the domain writes: presentation only; every
+              write is signed and the payer must equal the site owner on-chain). */}
           {isOwner && viewerAddress && (
-            <RenewalPanel
-              siteId={siteId}
+            <StoragePanel
+              site={q.data}
+              expiresAtMs={expiresAtMs}
               owner={viewerAddress}
               onOk={onLinked}
               onError={onError}

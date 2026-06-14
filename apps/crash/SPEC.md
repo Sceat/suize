@@ -36,19 +36,19 @@ Crash carries two distinct fees that must never be presented as one number:
 | Rake | Rate | Whose revenue | Where it lives | Status |
 | --- | --- | --- | --- | --- |
 | **Crash product rake** | **3% (300 bps)** | Crash's own house edge | `crash_sui::router::bet` skims it inline | **LIVE on testnet** (play-money) |
-| **Suize rail fee** | **2% (200 bps)** | the rail (Suize treasury) | `account::charge` / `charge_subscription` / `pay` | **DESIGNED, NOT WIRED** |
+| **Suize rail fee** | **2% (1¢ min)** | the rail (Suize treasury) | the x402 rail (`CLAUDE.md`) | **DESIGNED, NOT WIRED** |
 
 - The **Crash 3%** is Crash-as-a-merchant's own revenue, skimmed atomically inside
   `router::bet` before `predict::mint` pulls the post-trade cost. On testnet it is
   **play money** — real revenue only on a hypothetical mainnet Predict redeploy.
-- The **Suize 2%** is the rail fee taken **only when an agent is charged by Crash through
-  Suize** (an `account::charge` / `pay` call). `router::bet` makes **no** spend/charge
-  call into `account.move`, so this leg is **wired nowhere in v1** — Crash funds bets
-  from a DeepBook `PredictManager` balance, not a Suize `Account`.
-- **The two never compound in v1** and cannot: a **mainnet** Suize `Account` cannot pay a
-  **testnet** bet in one PTB (cross-network gap). If mainnet Predict ever ships they would
-  *compound, not unify* (e.g. $100 → 2% rail → $98 into Crash → 3% → $95.06), but that is
-  roadmap, not built.
+- The **Suize 2%** is the rail fee taken **only when an agent pays Crash through the Suize
+  rail** (an x402 settlement — see `CLAUDE.md` for the rail). `router::bet` makes **no**
+  payment into the Suize rail, so this leg is **wired nowhere in v1** — Crash funds bets
+  from a DeepBook `PredictManager` balance, not through Suize.
+- **The two never compound in v1** and cannot: the Suize rail is **mainnet**, Crash is
+  **testnet** — a mainnet payment cannot fund a testnet bet in one PTB (cross-network gap).
+  If mainnet Predict ever ships they would *compound, not unify* (e.g. $100 → 2% rail →
+  $98 into Crash → 3% → $95.06), but that is roadmap, not built.
 - **Calibrated honesty:** Crash demonstrates the router + on-chain rake + Enoki sponsor
   stack end-to-end. It is **not** a live two-rake Suize integration. Say "PoC of the rake
   + sponsor stack," never "Crash pays the Suize rail."
@@ -67,7 +67,10 @@ shapes live in [`packages/move-crash/README.md`](../../packages/move-crash/READM
   `withdraw_all`, `supply`, `redeem_lp`. The canonical list is
   `PACKAGE_IDS.CRASH.TARGETS` in `@suize/shared` (which also includes the framework
   helper `0x2::coin::zero` for the zero-coin bet path after a cash-out leaves the
-  manager funded but the wallet coinless).
+  manager funded but the wallet coinless). **`coin::zero` normalization fix:** the
+  allowlist entry is stored in the canonical long `0x000…002::coin::zero` form — a short
+  `0x2::…` target never matches Enoki's allowlist check, so the zero-coin bet path is
+  only sponsorable because the target is normalized to the full-length address.
 - **Rake is on-chain + non-bypassable on the sponsored path only.** `router::bet` skims
   **3% of the pre-trade quoted cost** (`predict::get_trade_amounts`) to a treasury stored
   inside a shared `Config` (mutable only via the deployer-held `AdminCap`), routed via
@@ -139,8 +142,9 @@ manager creation is its own tx and the id is read from `objectChanges`;
 
 ## Gasless seam — the sponsor, not the rail
 
-Crash's gasless path runs through the **same Enoki sponsor** the rest of Suize uses, NOT
-through `account.move`:
+Crash's gasless path runs through the **same Enoki sponsor** the rest of Suize uses (the
+sponsor allowlist covers `router::*` for Crash, plus the wallet + `subs` targets — see
+`services/backend/SPEC.md`), and is separate from the x402 payment rail (`CLAUDE.md`):
 
 - `src/App.tsx`'s `signAndExecute` branches on `sponsored`: zkLogin → `src/sponsor.ts`
   over the backend's **authenticated WebSocket** (`src/ws.ts` — opened on sign-in,

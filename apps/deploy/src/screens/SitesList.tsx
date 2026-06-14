@@ -11,7 +11,6 @@ import {
   LoadingState,
   describe_error,
   IconGlobe,
-  IconPlus,
   IconSeal,
 } from '../ui'
 
@@ -200,7 +199,6 @@ export const SitesList = ({
   connecting,
   onSignIn,
   onOpen,
-  onDeploy,
   onAgents,
 }: {
   // The signed-in address, or null when anonymous. Drives the CENTER content.
@@ -210,7 +208,6 @@ export const SitesList = ({
   connecting: boolean
   onSignIn: () => void
   onOpen: (id: string) => void
-  onDeploy: () => void
   onAgents: () => void
 }) => {
   const loggedIn = owner != null
@@ -248,15 +245,8 @@ export const SitesList = ({
           </div>
           {loggedIn && (
             <div className="dx-form-actions" style={{ marginTop: 0 }}>
-              <button type="button" className="dx-btn" onClick={onAgents}>
+              <button type="button" className="dx-btn is-accent" onClick={onAgents}>
                 Deploy from your agent
-              </button>
-              <button
-                type="button"
-                className="dx-btn is-accent"
-                onClick={onDeploy}
-              >
-                <IconPlus /> New site
               </button>
             </div>
           )}
@@ -268,7 +258,7 @@ export const SitesList = ({
         {!loggedIn && (
           <EmptyState
             kicker="Your sites"
-            body="Signing in scopes this list to your address — every site you deploy shows up here. Browse what's live right now in the Recently deployed log."
+            body="Signing in scopes this list to your address — every site your agent deploys for you shows up here. Browse what's live right now in the Recently deployed log."
             action={
               canSignIn ? (
                 <div
@@ -307,21 +297,14 @@ export const SitesList = ({
             {q.isSuccess && sites.length === 0 && (
               <EmptyState
                 kicker="Your sites"
-                title="You haven't deployed anything yet"
-                body="Sites you deploy while signed in show up here. Deploy a built static folder to launch your first one."
+                title="No sites yet"
+                body="Sites are deployed by your agent — point it at the Deploy API and everything it ships for you shows up here."
                 action={
                   <div
                     className="dx-form-actions"
                     style={{ justifyContent: 'center' }}
                   >
-                    <button
-                      type="button"
-                      className="dx-btn is-accent"
-                      onClick={onDeploy}
-                    >
-                      <IconPlus /> Deploy a site
-                    </button>
-                    <button type="button" className="dx-btn" onClick={onAgents}>
+                    <button type="button" className="dx-btn is-accent" onClick={onAgents}>
                       Deploy from your agent
                     </button>
                   </div>

@@ -1,8 +1,7 @@
 /**
- * REDESIGN LAB — the BUSINESS ANALYTICS CHAT, extracted so both business
- * variants mount the same brain: Atrium docks it as the sticky right column,
- * Minimal floats it behind the dock pill. Read-side narration only — the
- * number wall holds even in a demo.
+ * The BUSINESS ANALYTICS CHAT — read-side narration only (the number wall
+ * holds). PRODUCTION starts honest-empty (no fabricated revenue talk, chips
+ * hidden); the DEV `demo` seam seeds the sample exchange + the chart artifact.
  */
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp } from '../system';
@@ -21,8 +20,8 @@ const SEED: BizMsg[] = [
   { who: 'ai', text: BUSINESS.thread[1].text, bars: true },
 ];
 
-export function BizChat({ className }: { className: string }) {
-  const [msgs, setMsgs] = useState<BizMsg[]>(SEED);
+export function BizChat({ demo = false }: { demo?: boolean }) {
+  const [msgs, setMsgs] = useState<BizMsg[]>(demo ? SEED : []);
   const [typing, setTyping] = useState(false);
   const [draft, setDraft] = useState('');
   const threadRef = useRef<HTMLDivElement>(null);
@@ -51,18 +50,20 @@ export function BizChat({ className }: { className: string }) {
     const t = draft.trim();
     if (!t) return;
     setDraft('');
-    ask(t, { who: 'ai', text: BUSINESS.scriptedReply });
+    // demo plays the analyst; production answers honestly (no revenue to narrate yet)
+    ask(t, { who: 'ai', text: demo ? BUSINESS.scriptedReply : BUSINESS.prodReply });
   }
 
   const maxBar = Math.max(...BUSINESS.week.bars);
 
   return (
-    <aside className={className}>
+    <aside className="rd-bizchat rd-glass">
       <div className="rd-bizchat__head">
         <Spark />
         {BUSINESS.chatTitle}
       </div>
       <div className="rd-bizchat__thread" ref={threadRef}>
+        {!demo && msgs.length === 0 ? <p className="rd-empty-line">{BUSINESS.chatEmpty}</p> : null}
         {msgs.map((m, i) => (
           <Row key={i} who={m.who}>
             {m.text}
@@ -101,13 +102,15 @@ export function BizChat({ className }: { className: string }) {
         ))}
         {typing ? <TypingRow /> : null}
       </div>
-      <div className="rd-bizchat__chips">
-        {BUSINESS.chips.map((c, i) => (
-          <button key={c} type="button" className="rd-chip" onClick={() => onChip(i)}>
-            {c}
-          </button>
-        ))}
-      </div>
+      {demo ? (
+        <div className="rd-bizchat__chips">
+          {BUSINESS.chips.map((c, i) => (
+            <button key={c} type="button" className="rd-chip" onClick={() => onChip(i)}>
+              {c}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <form className="rd-bizchat__composer" onSubmit={onSend}>
         <input
           value={draft}

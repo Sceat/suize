@@ -1,0 +1,45 @@
+# Suize — your AI wallet
+
+> A wallet you talk to. Sign in with Google, fund a sub-account for your AI, and
+> it books, buys, and pays for you — within limits you set, with a receipt for
+> everything it does. You can also pay anyone yourself, in one tap.
+
+How it works:
+
+- Sign in with Google — fully non-custodial, your keys never leave your machine.
+  Suize can never spend on its own.
+- Fund a sub-account for your AI: that balance is the hard ceiling on what it can
+  ever spend, enforced on-chain. Top it up, or sweep all of it back to yourself
+  anytime — without the AI's cooperation.
+- Every payment is gasless: you and your AI never need a gas token, ever.
+
+Ways to pay:
+
+- Let your AI pay. It pays businesses from its funded sub-account on your behalf,
+  and you choose how hands-on to be:
+  - confirm every payment before it goes out,
+  - auto-approve anything under a limit you set,
+  - or let it run hands-off.
+  A new subscription can always be set to ask you first, whatever the mode.
+- Pay someone yourself. Open a Suize pay-link — a business's payment request —
+  and it's a one-tap pay page: who you're paying and the exact amount are spelled
+  out, you sign in with Google or connect a wallet, and tap once. You always pay
+  exactly the amount shown.
+- Subscriptions are push, not pull. You approve a subscription once; every
+  renewal after that is paid by you, on your own signature — nobody ever reaches
+  into your account. Your wallet renews silently while it's open; otherwise it
+  reminds you. Cancel is deleting it, on-chain.
+
+Every action is remembered, and every payment settles on Sui as an on-chain
+balance change you can read back. One tap stops your AI and returns its balance
+to you.
+
+For agents: this app is the human's side of Suize. If you are an agent looking
+to pay or get paid on Sui, read the rail contract: https://suize.io/llms.txt
+
+## Links
+
+- App: https://wallet.suize.io
+- Suize home: https://suize.io
+- The rail (agent contract): https://suize.io/llms.txt
+- This file: https://wallet.suize.io/llms.txt

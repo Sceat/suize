@@ -202,37 +202,51 @@ export const scrollTop = () => {
   else window.scrollTo(0, 0)
 }
 
+// THE ROUTER — real PATH routing (History API), no hash. URLs are clean
+// (`suize.io/business`, `/pricing`) so social/crawler scrapers see the path and
+// can serve a per-route OG card (a hash fragment is never sent to the server, so
+// it could never have a distinct card). Deep links work because vercel.json
+// serves index.html (or business.html) for every path.
 export const useRoute = () => {
-  const get = () => {
-    const h = window.location.hash.replace(/^#/, '') || '/'
-    return h.startsWith('/') ? h : '/' + h
-  }
+  const get = () => window.location.pathname || '/'
   const [route, setRoute] = useState(get)
   useEffect(() => {
-    const onHash = () => {
+    const sync = () => {
       setRoute(get())
       scrollTop()
     }
-    // Any click on an in-app hash link (nav items, CTAs, closers, the logo)
-    // scrolls to top — fires before navigation, so the destination always opens
-    // at the top, even when the route doesn't change (a CTA to the current page).
+    // Intercept in-app link clicks → pushState (SPA nav, no full reload). Only
+    // plain left-clicks on same-origin path links; everything else (new-tab,
+    // modified click, external, download, an explicit handler that already
+    // preventDefault'd via navigate()) falls through to the browser.
     const onClick = e => {
-      const a = e.target.closest && e.target.closest('a[href^="#/"]')
-      if (a) scrollTop()
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+        return
+      const a = e.target.closest && e.target.closest('a[href^="/"]')
+      if (!a) return
+      const href = a.getAttribute('href')
+      if (!href || href.startsWith('//') || a.target === '_blank' || a.hasAttribute('download')) return
+      // A real file (a trailing .ext like /llms.txt, /og.png) is NOT a route —
+      // let the browser fetch it instead of SPA-swallowing it.
+      if (/\.[a-z0-9]+$/i.test(href.split(/[?#]/)[0])) return
+      e.preventDefault()
+      if (href !== window.location.pathname) window.history.pushState({}, '', href)
+      sync()
     }
-    window.addEventListener('hashchange', onHash)
+    window.addEventListener('popstate', sync)
     document.addEventListener('click', onClick)
     return () => {
-      window.removeEventListener('hashchange', onHash)
+      window.removeEventListener('popstate', sync)
       document.removeEventListener('click', onClick)
     }
   }, [])
   return route
 }
 
-// navigate() also scrolls to top, so clicking a link to the CURRENT page (e.g.
-// the logo while already home) still lands you up top even with no hash change.
+// navigate() pushes a real path + notifies the router; scrolls to top so clicking
+// a link to the CURRENT page (e.g. the logo while already home) still lands up top.
 export const navigate = path => {
-  window.location.hash = path
+  if (path !== window.location.pathname) window.history.pushState({}, '', path)
+  window.dispatchEvent(new PopStateEvent('popstate'))
   scrollTop()
 }

@@ -16,11 +16,20 @@ out/
 *.tsbuildinfo
 
 # ── Env / secrets ────────────────────────────────────────────────────
+# EVERY .env flavor is ignored by default; whitelisted: the committed templates
+# (.env.example) and the frontend apps' prod build config (PUBLIC Vite-inlined
+# values that ship in the JS bundle — each file header documents "safe to
+# commit"). The whitelist is apps/-scoped ON PURPOSE: a future backend
+# .env.production (real secrets) stays ignored.
 .env
-.env.local
-.env.*.local
-.env.development.local
-.env.production.local
+.env.*
+!.env.example
+# Whitelist the EXACT existing app prod configs (publishable VITE_ values ONLY —
+# never a secret). Pinned per-file (not apps/*) so a future app's .env.production
+# can't be silently committed — add it here deliberately.
+!apps/crash/.env.production
+!apps/deploy/.env.production
+!apps/wallet/.env.production
 *.pem
 *.key
 
@@ -72,6 +81,9 @@ screenshots/
 !public/**/*.jpeg
 !**/og-image*.png
 !**/favicon*.png
+# OG share cards are versioned brand assets, not scratch (overrides *.png above).
+!**/public/og.png
+!**/public/*-og.png
 
 # ── Vite ─────────────────────────────────────────────────────────────
 .vite/

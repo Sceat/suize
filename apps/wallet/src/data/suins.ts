@@ -11,14 +11,15 @@
  * is a single pure async resolve so it stays trivially testable and reusable. It is
  * the ONE thing here that is NOT WS — it's a direct on-chain SuiNS lookup, untouched.
  *
- * Handle calls (over the WS, correlated request/response; bodies from
- * @suize/shared/protocol):
- *   handleAvailableRequest { name }  -> WsHandleAvailableResponse { available, reason? }
- *   handleMeRequest {}               -> WsHandleMeResponse        { handle, suggestedName? }
- *   handleClaimRequest { name }      -> WsHandleClaimResponse     { handle, txDigest, setDefaultBytes?, setDefaultDigest? }
- * Handles are `<name>@suize` (= `<name>.suize.sui` leaf subnames). Source of truth is
- * fully ON-CHAIN now (no Redis): availability is `getNameRecord`, ownership is the
- * SuiNS reverse record. Issuance is self-custody (Path B): the backend mints + sponsors
+ * Handle DETECTION + AVAILABILITY are ON-CHAIN ONLY (owner law 2026-06-11 — "we
+ * only ask on chain, nothing else"): the gate is `resolveHandleOnChain` (the SuiNS
+ * reverse record via `resolveNameServiceNames`), availability is
+ * `checkHandleAvailable` (`resolveNameServiceAddress` on `<label>.suize.sui`,
+ * failing CLOSED). No localStorage cache, no backend `/me`. The ONLY WS handle
+ * call left is ISSUANCE:
+ *   handleClaimRequest { name } -> WsHandleClaimResponse { handle, txDigest, setDefaultBytes?, setDefaultDigest? }
+ * Handles are `<name>@suize` (= `<name>.suize.sui` leaf subnames). Issuance is
+ * self-custody (Path B): the backend mints + sponsors
  * the leaf — gasless to the user — THEN returns a SECOND sponsored tx (`set_reverse_lookup`,
  * sender = the verified user) that the WALLET signs with its zkLogin signer and executes,
  * which is what actually sets the reverse record so `/me` resolves on any device. A leaf
@@ -32,16 +33,9 @@ import { NETWORK } from '../lib/env';
 import type {
   WsExecuteResponse as ExecuteResponse,
   WsHandleAvailableResponse as HandleAvailableResponse,
-  WsHandleMeResponse as HandleMeResponse,
   WsSponsorResponse as SponsorResponse,
 } from '@suize/shared/protocol';
-import {
-  wsExecute,
-  wsHandleAvailable,
-  wsHandleClaim,
-  wsHandleMe,
-  wsSponsor,
-} from './ws';
+import { wsExecute, wsHandleClaim, wsSponsor } from './ws';
 
 /**
  * The SuiClient type the Send sheet threads in. This is exactly what dapp-kit's
@@ -77,6 +71,44 @@ export function isHexAddress(input: string): boolean {
   return HEX_ADDRESS.test(input.trim());
 }
 
+/** A valid SuiNS name in dotted form: one or more `[a-z0-9-]` labels + `.sui`. */
+const SUINS_NAME = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.sui$/;
+
+/**
+ * Normalize every accepted recipient-name form to the dotted `.sui` name the
+ * SuiNS RPC actually resolves — they are all valid SuiNS names/subnames and must
+ * send the same (owner law, 2026-06-13). Returns null when `input` isn't a name
+ * we accept (the caller then treats it as not-a-recipient / email / phone).
+ *
+ *   hello@suize  → hello.suize.sui   (a Suize handle = label@parent, parent is ONE label)
+ *   @name        → name.sui          (SuiNS @-form; @x.y → x.y.sui)
+ *   name.sui     → name.sui          (already a dotted SuiNS name)
+ *   x.y.sui      → x.y.sui           (a subname / subdomain)
+ *
+ * `a@b.tld` (a DOTTED parent) is an email, not a handle → null (so email copy wins).
+ */
+export function normalizeSuiName(input: string): string | null {
+  let v = input.trim().toLowerCase();
+  if (!v) return null;
+  if (v.startsWith('@')) {
+    // leading-@ explicitly means "a SuiNS name": @name → name.sui, @x.y → x.y.sui
+    v = v.slice(1);
+    if (!v.endsWith('.sui')) v = `${v}.sui`;
+  } else if (v.includes('@')) {
+    // label@parent → label.parent.sui — but ONLY when parent is a single label
+    // (the Suize-handle shape `hello@suize`). A dotted parent is an email address.
+    const at = v.indexOf('@');
+    const label = v.slice(0, at);
+    const parent = v.slice(at + 1);
+    if (!label || !parent || parent.includes('.') || parent.includes('@')) return null;
+    v = `${label}.${parent}.sui`;
+  } else if (!v.endsWith('.sui')) {
+    // a bare label or dotted name without the `.sui` TLD is ambiguous — reject.
+    return null;
+  }
+  return SUINS_NAME.test(v) ? v : null;
+}
+
 /**
  * Resolve a Send recipient.
  *
@@ -97,63 +129,57 @@ export async function resolveRecipient(
     return { kind: 'hex', address: value };
   }
 
-  if (value.length === 0) {
+  // Every accepted name form (@name · name.sui · x.y.sui · hello@suize) is
+  // normalized to the dotted `.sui` name the RPC understands; anything else is
+  // not a resolvable recipient.
+  const name = normalizeSuiName(value);
+  if (!name) {
     return { kind: 'name', address: null };
   }
 
   try {
-    const address = await client.resolveNameServiceAddress({ name: value });
+    const address = await client.resolveNameServiceAddress({ name });
     return { kind: 'name', address: address ?? null };
   } catch {
-    // A malformed name (or a transient RPC error) reads as "not found" rather than
-    // throwing into the debounced caller; the UI shows the `not found` state.
+    // A transient RPC error reads as "not found" rather than throwing into the
+    // debounced caller; the UI shows the `not found` state.
     return { kind: 'name', address: null };
   }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Confirmed-handle cache (same-device, owner-scoped).
+// Handle detection — ON-CHAIN ONLY (owner law, 2026-06-11).
 // ───────────────────────────────────────────────────────────────────────────
 //
-// WHY: the `/me` gate resolves a handle from the SuiNS REVERSE record
-// (`resolveNameServiceNames`). A leaf subname's reverse record can lag or fail to
-// index, so `/me` can return null EVEN AFTER a successful claim — leaving the
-// masthead stuck on "…@suize". The claim itself, though, returns the
-// backend-MINTED "<name>@suize" (honest — it's the real on-chain mint, not
-// fabricated). We cache THAT, keyed by the owner's (stable) zkLogin address, so:
-//   • same-device users see their real handle INSTANTLY + across reloads, and
-//   • a later empty `/me` can never blank out a known-good cached handle.
-// The `/me` reverse lookup stays the cross-device fallback; a NON-null `/me` also
-// writes the cache. Keyed by owner so different Google accounts never collide and
-// nothing needs clearing on sign-out.
-//
-// SEAM: mirrors accountStore — swap the body for a WS RPC later, signature stays.
+// The localStorage handle cache and the backend `/me` gate are GONE: "we only
+// ask on chain, nothing else." The SuiNS reverse record is the single source of
+// truth — `resolveNameServiceNames(address)` answers on ANY device with zero
+// local state and zero backend dependency. A claim's second leg
+// (`set_reverse_lookup`, user-signed) is what makes this true cross-device,
+// which is why it is mandatory.
 
-const HANDLE_KEY = (owner: string) => `suize:handle:${owner.toLowerCase()}`;
-
-/** Read the confirmed handle cached for `owner` on THIS device, or null. */
-export function getCachedHandle(owner: string): string | null {
-  if (!owner) return null;
-  try {
-    const v = localStorage.getItem(HANDLE_KEY(owner));
-    return v && v.length > 0 ? v : null;
-  } catch {
-    return null;
-  }
-}
+const SUIZE_SUFFIX = '.suize.sui';
 
 /**
- * Cache the confirmed "<name>@suize" handle for `owner`. Call ONLY with a handle the
- * backend actually returned (a successful claim, or a non-null `/me`) — never fabricate.
+ * Resolve the owner's "<name>@suize" handle from the CHAIN (the SuiNS reverse
+ * record) — the onboarding gate. Scans the address's names for a `*.suize.sui`
+ * leaf (a non-Suize SuiNS default must not satisfy the gate) and returns the
+ * display form, or null when the owner genuinely has no Suize handle.
+ * THROWS on RPC failure — callers must treat that as "unknown", never as
+ * "no handle" (the gate retries; it must not dump an existing user into the
+ * name-picker on a flaky read).
  */
-export function setCachedHandle(owner: string, handle: string): void {
-  if (!owner || !handle) return;
-  try {
-    localStorage.setItem(HANDLE_KEY(owner), handle);
-  } catch {
-    // Storage full / disabled (private mode) — the in-memory identity state still
-    // carries the handle for this session; we just won't persist across a reload.
-  }
+export async function resolveHandleOnChain(
+  owner: string,
+  client: SuiClient,
+): Promise<string | null> {
+  const { data } = await client.resolveNameServiceNames({
+    address: owner,
+    limit: 50,
+  });
+  const suize = (data ?? []).find((n) => n.endsWith(SUIZE_SUFFIX));
+  if (!suize) return null;
+  return `${suize.slice(0, -SUIZE_SUFFIX.length)}@suize`;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -179,29 +205,36 @@ export interface ClaimedHandle {
   setDefault: { bytes: string; digest: string } | null;
 }
 
-/**
- * Check whether a bare label is available. `name` is the BARE label (lowercase
- * [a-z0-9-], 3–20); the backend adds the `@suize` suffix. `reason` is meaningful
- * only when `available === false` (taken / too-short / bad-charset / blocklisted /
- * reserved) and drives StepName's `taken` state. The caller debounces (~450ms).
- * Rides the single WS as a correlated `handleAvailableRequest`.
- */
-export async function checkHandleAvailable(name: string): Promise<HandleAvailableResponse> {
-  const clean = name.trim().toLowerCase();
-  return wsHandleAvailable(clean);
-}
+/** The bare-label rule (mirrors the backend issuer): lowercase a-z0-9-, 3–20, no edge hyphens. */
+const LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{1,18})[a-z0-9]$/;
 
 /**
- * Resolve whether the AUTHENTICATED owner already has a handle (the onboarding gate).
- * `handle === null` => no handle => onboarding. `suggestedName` (optional) seeds the
- * name step (e.g. the Google email local-part). Used by useIdentity.
- *
- * Over the WS the subject is `ws.data.address` (verified at the handshake), so the
- * request carries NO address — identity is never re-asserted by a message. Mirrors
- * aresrpg's "the socket IS the session" stance.
+ * Check whether a bare label is available — ON-CHAIN (owner law 2026-06-11: chain
+ * only, nothing else). `<label>.suize.sui` resolving to an address = TAKEN; a
+ * definitive null = available. An RPC failure FAILS CLOSED (`available: false`,
+ * reason 'unreachable') — a taken name must never read as free because a read
+ * failed (that exact fail-open bug showed the owner his own handle as
+ * "available"). Format rules are enforced here so bad labels never hit the RPC.
+ * The caller debounces (~450ms).
  */
-export async function getHandleForAddress(): Promise<HandleMeResponse> {
-  return wsHandleMe();
+export async function checkHandleAvailable(
+  name: string,
+  client: SuiClient,
+): Promise<HandleAvailableResponse> {
+  const clean = name.trim().toLowerCase();
+  if (!LABEL_RE.test(clean)) {
+    return { available: false, reason: 'invalid' };
+  }
+  try {
+    const address = await client.resolveNameServiceAddress({
+      name: `${clean}${SUIZE_SUFFIX}`,
+    });
+    return address
+      ? { available: false, reason: 'taken' }
+      : { available: true };
+  } catch {
+    return { available: false, reason: 'unreachable' };
+  }
 }
 
 /**

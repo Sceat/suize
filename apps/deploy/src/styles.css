@@ -88,6 +88,10 @@
   --bull-edge: rgba(14, 112, 72, 0.34);
   --bear-fill: rgba(207, 58, 48, 0.07);
   --bear-edge: rgba(181, 52, 43, 0.34);
+  /* WARN / top-up = amber — the only "low but not dead" semantic (admin panel). */
+  --warn-ink: #a8730a;
+  --warn-fill: rgba(202, 138, 4, 0.08);
+  --warn-edge: rgba(168, 115, 10, 0.36);
 
   /* ---- FONTS — the broadsheet triad (Google Fonts in index.html) ---- */
   --sans: 'Space Grotesk', system-ui, -apple-system, sans-serif;
@@ -159,6 +163,9 @@
   --bull-edge: rgba(52, 211, 153, 0.42);
   --bear-fill: rgba(255, 111, 99, 0.12);
   --bear-edge: rgba(255, 111, 99, 0.42);
+  --warn-ink: #fbbf24;
+  --warn-fill: rgba(251, 191, 36, 0.13);
+  --warn-edge: rgba(251, 191, 36, 0.42);
 
   /* texture flips: grain reads a touch stronger on dark stock, and the press
      dot-grid switches to a faint LIGHT ink so it engraves the navy instead of
@@ -1451,6 +1458,18 @@ a {
   text-decoration: underline;
 }
 
+/* inline prose link — the "Suize" brand mention, clearly a link inside a sentence */
+.dx-ilink {
+  color: var(--blue-deep);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  font-weight: 500;
+}
+.dx-ilink:hover {
+  text-decoration-thickness: 2px;
+}
+
 /* domain list rows */
 .dx-domain {
   display: flex;
@@ -1914,6 +1933,125 @@ a {
   color: var(--ink-2);
 }
 
+/* ==========================================================================
+   IDENTITY MENU — the masthead handle becomes the account menu (ported from
+   the wallet): tap the handle → a small dropdown to copy the address or sign
+   out. Sign-out is an explicit row, never the handle's own click (the footgun
+   we removed). Anchored to the masthead's right edge so it opens INTO the page.
+   ========================================================================== */
+.dx-id {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+.dx-id__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 9px;
+  border-radius: 3px;
+  color: var(--ink-3);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color 0.18s ease,
+    background 0.18s ease;
+}
+.dx-id__btn:hover {
+  color: var(--ink);
+  background: var(--blue-wash);
+}
+.dx-id__btn[aria-expanded='true'] {
+  color: var(--ink);
+  background: var(--blue-wash);
+}
+.dx-id__btn svg {
+  flex: 0 0 auto;
+  transition: transform 0.2s ease;
+}
+.dx-id__btn[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+/* the transparent full-viewport click-catcher that closes the menu on tap */
+.dx-id__catch {
+  position: fixed;
+  inset: 0;
+  z-index: 31;
+}
+.dx-id__menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 32;
+  min-width: 216px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 6px;
+  background: rgba(var(--frost-rgb), 0.92);
+  border: 1px solid var(--hair);
+  backdrop-filter: saturate(150%) blur(14px);
+  -webkit-backdrop-filter: saturate(150%) blur(14px);
+  box-shadow: 0 24px 60px -30px rgba(10, 27, 46, 0.45);
+  animation: dx-id-rise 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes dx-id-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.dx-id__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition:
+    color 0.16s ease,
+    background 0.16s ease;
+}
+.dx-id__row:hover {
+  background: var(--blue-wash);
+  color: var(--ink);
+}
+.dx-id__row svg {
+  flex: 0 0 auto;
+}
+.dx-id__addr {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: -0.01em;
+}
+.dx-id__rule {
+  height: 1px;
+  margin: 2px 4px;
+  background: var(--rule-fade);
+}
+.dx-id__out {
+  color: var(--ink-3);
+}
+.dx-id__out:hover {
+  background: var(--bear-fill);
+  color: var(--bear-ink);
+}
+
 /* the dapp-kit ConnectButton, quieted to match the chrome */
 .dx-connect [data-dapp-kit] button {
   all: unset;
@@ -2057,6 +2195,97 @@ a {
   color: var(--bull-ink);
   border-color: var(--bull-edge);
   background: var(--bull-fill);
+}
+.dx-tag.is-warn {
+  color: var(--warn-ink);
+  border-color: var(--warn-edge);
+  background: var(--warn-fill);
+}
+
+/* ---- Admin · service-wallet balances (read-only) ---------------------------
+   Two big balance cards (SUI gas + WAL storage). A low balance flips the card to
+   the amber "top up" treatment (left rail + warn tag); healthy reads green. */
+.dx-balgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+.dx-bal {
+  position: relative;
+  padding: 20px 22px;
+  border: 1px solid var(--hair);
+  border-radius: 14px;
+  background: var(--paper-2);
+  overflow: hidden;
+}
+.dx-bal::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--bull-edge);
+}
+.dx-bal.is-low {
+  border-color: var(--warn-edge);
+  background: var(--warn-fill);
+}
+.dx-bal.is-low::before {
+  background: var(--warn-ink);
+}
+.dx-bal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dx-bal__label {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.dx-bal__amount {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 12px 0 4px;
+}
+.dx-bal__num {
+  font-family: var(--mono, var(--sans));
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.dx-bal__sym {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.dx-bal__hint {
+  margin: 6px 0 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+.dx-bal__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--blue);
+  text-decoration: none;
+}
+.dx-bal__link:hover {
+  text-decoration: underline;
 }
 
 @media (max-width: 560px) {

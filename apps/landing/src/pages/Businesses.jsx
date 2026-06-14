@@ -27,7 +27,7 @@ import '../businesses.css'
 //                              on the receipt / non-custodial). NO Deploy reference.
 //   Station 3.5 · TrustBeat     — "Trusted by thousands" — a weighty heading over a
 //                              seamless wordmark marquee (moved here from the home)
-//   Station 4 · CloseBeat        — the 402-shaped honesty + the FOMO close
+//   Station 4 · CloseBeat        — the claim-ladder honesty + the FOMO close
 //
 // ENVIRONMENT: the whole page lives in the BUSINESS ROOM (data-room='business'
 // → theme.css --biz-* tokens). A .bz-room wrapper paints a deep corporate-blue

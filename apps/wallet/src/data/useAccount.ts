@@ -1,50 +1,43 @@
 /**
- * The PAY data layer — the v1 wallet built on `suize::account`. REPLACES `useHome`
- * (the legacy three-account cage) for the new face.
+ * The PAY data layer — the v1 wallet on the STANDALONE `subs::subscription` module
+ * + a plain wallet-USDC balance. REPLACES the retired `suize::account` cage (the
+ * funded shared Account + its deposit/withdraw/spend verbs are GONE — there is no
+ * on-chain "sub-account" balance anymore).
  *
  * READS (real, on-chain):
- *   • "Your money"  — the owner's wallet USDC balance via `getBalance({ owner, USDC })`.
- *   • "Agent money" — the shared `Account<USDC>` balance via `balance_value` devInspect
- *     (with a getObject content fallback). Zero until the Account is funded.
- *   • Subscriptions — reconstructed from the account module's SubscriptionCreated minus
- *     SubscriptionCancelled events for THIS account.
- *   • Activity timeline — the account module's events (Spent / Charged / Deposited /
- *     Withdrawn / SubscriptionCreated / Cancelled / AccountCreated), reverse-chron, each
- *     row carrying its tx digest for the "verify ↗" link. This IS the verifiable trace.
+ *   • "Your money"  — the owner's wallet USDC balance via `getBalance`.
+ *   • Subscriptions — live `Subscription<USDC>` Party objects the owner holds,
+ *     via `getOwnedObjects` (StructType-filtered — proven for Party objects).
+ *   • Activity      — the subs lifecycle events (SubscriptionCreated/Renewed/
+ *     Cancelled for THIS owner) MERGED with sent payments (queryTransactionBlocks
+ *     FromAddress, the negative-USDC `balanceChanges` rows). Reverse-chron, each
+ *     row carrying its tx digest for the "verify ↗" link. This IS the trace.
  *
- * WRITES (real sponsored PTBs, the EXACT legacy/Crash transport — build tx-KIND bytes,
- * wsSponsor, sign the sponsored bytes VERBATIM with the zkLogin session, wsExecute):
- *   ensureAccount / deposit / spend / withdraw / createSubscription / cancelSubscription.
- *
- * PUBLISH GATE (honest): `account` is not yet published, so `PACKAGE_IDS.ACCOUNT.PACKAGE`
- * is `0x0`. The READ paths run against whatever is configured (they resolve nothing →
- * honest empty states). The WRITE paths throw a CALM, explicit error before publish
- * (`ACCOUNT_PUBLISHED === false`) — never a fake success. Set the id in `@suize/shared`
- * and every flow lights up.
+ * WRITES:
+ *   • sendWallet — a GASLESS single-output P2P transfer (vanilla-x402 Address-
+ *     Balance `send_funds` via @suize/x402; the payer's OWN session signs the
+ *     gasless bytes, the chain covers gas; no fee, no sponsor). FREE.
+ *   • cancelSubscription — `subs::subscription::cancel`, ridden over the WS sponsor
+ *     path (`sponsored.ts`). Create + silent renew live in `useSubscriptions`.
  *
  * The hook signature is STABLE: `useAccount(ownerAddress?, handle?) -> PayApi`.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSignTransaction, useSuiClient } from '@mysten/dapp-kit';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Transaction } from '@mysten/sui/transactions';
-import { toBase64 } from '@mysten/sui/utils';
-import { ACCOUNT_PUBLISHED, PACKAGE_IDS } from '@suize/shared';
+import { fromBase64 } from '@mysten/sui/utils';
+import { SUBS_PUBLISHED } from '@suize/shared';
+import { buildGaslessOutputs, assertUnsignedBytesSafe, combineForMultisig } from '@suize/x402';
+import type { MultiSigPublicKey } from '@mysten/sui/multisig';
+import { resolveTreasury } from '@suize/shared';
+import { NETWORK } from '../lib/env';
 import { USDC } from './coins';
 import { priceOf, usePrices } from './prices';
-import { requestSponsorship, executeSponsored } from './suins';
-import { getAccountId, setAccountId } from './payStore';
-import {
-  ACCOUNT_COIN,
-  accountIdFromEvents,
-  buildCancelSubscription,
-  buildCreateAccount,
-  buildCreateSubscription,
-  buildDeposit,
-  buildSpend,
-  buildWithdraw,
-} from './account';
+import { runSponsored, type SignTransaction } from './sponsored';
+import { buildCancel, listSubscriptions, type OwnedObjectsClient } from './subs';
+import { grpc } from './grpc';
 import type {
   Activity,
   ActivityFlow,
@@ -55,18 +48,29 @@ import type {
   Subscription,
   UsdcBalance,
 } from './payTypes';
+import { PACKAGE_IDS } from '@suize/shared';
 
-const ACCOUNT_PKG = PACKAGE_IDS.ACCOUNT.PACKAGE;
-const BALANCE_VALUE_TARGET = `${ACCOUNT_PKG}::account::balance_value`;
+const SUBS_PKG = PACKAGE_IDS.SUBS.PACKAGE;
 
 /** USDC has 6 decimals. raw → ui = raw / 1e6. */
 const USDC_SCALE = 10 ** USDC.decimals;
 
-/** The all-zero address — a safe devInspect sender when no owner is signed in. */
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000000';
-
 /** An empty USDC balance — the honest zero state. */
 const ZERO_BALANCE: UsdcBalance = { raw: '0', ui: 0, usd: 0 };
+
+/** How far back the activity feed scans (events + sent + received payments). */
+const EVENTS_SCAN_CAP = 600;
+const SENT_SCAN_CAP = 80;
+const RECEIVED_SCAN_CAP = 80;
+
+/** Does this address receive the Suize rail fee? Presence of a fee output is what
+ *  separates a PAYMENT (paid/charged) from a plain transfer (sent/received). Matched
+ *  against the live-resolved `treasury@suize` ONLY. '' (not yet resolved) → no match,
+ *  so everything reads as a plain transfer until it resolves: the honest fallback. */
+const makeIsTreasury =
+  (treasuryLc: string) =>
+  (addr: string): boolean =>
+    treasuryLc !== '' && addr.toLowerCase() === treasuryLc;
 
 /** Build a UsdcBalance from a raw string + the live USDC price. */
 function usdcBalance(raw: string, usdcPrice: number): UsdcBalance {
@@ -74,35 +78,13 @@ function usdcBalance(raw: string, usdcPrice: number): UsdcBalance {
   return { raw, ui, usd: ui * usdcPrice };
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// Known payees → human labels (best-effort; the verifiable detail is the address).
-// Deploy-by-Suize's merchant address would live here once pinned; until then the
-// label falls back to the memo (spends) or a shortened payee (charges/subs).
-// ───────────────────────────────────────────────────────────────────────────
-const KNOWN_PAYEES: Record<string, string> = {
-  // [DEPLOY_MERCHANT_ADDRESS]: 'Deploy by Suize',
-};
-
 function shortAddr(a: string): string {
   if (!a || a.length < 12) return a;
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
-/** Decode a Move `vector<u8>` memo (array of byte numbers, or a base64/hex string) to text. */
-function decodeMemo(memo: unknown): string {
-  try {
-    if (Array.isArray(memo)) {
-      return new TextDecoder().decode(Uint8Array.from(memo as number[]));
-    }
-    if (typeof memo === 'string') return memo;
-  } catch {
-    /* fall through */
-  }
-  return '';
-}
-
 // ───────────────────────────────────────────────────────────────────────────
-// Event → timeline/subscription reconstruction (the verifiable trace).
+// Activity reconstruction (the verifiable trace) — subs events + sent payments.
 // ───────────────────────────────────────────────────────────────────────────
 
 interface RawEvent {
@@ -112,419 +94,631 @@ interface RawEvent {
   timestampMs?: string | null;
 }
 
-/** The `account_id` field carried by every account event (filters events to OUR account). */
-function eventAccountId(json: unknown): string | null {
-  if (json && typeof json === 'object') {
-    const v = (json as Record<string, unknown>).account_id;
-    if (typeof v === 'string') return v;
-  }
-  return null;
-}
-
-/** Map a raw account event to a timeline `Activity` row (null for unrecognized types). */
-function toActivity(ev: RawEvent): Activity | null {
+/** Map a raw subs event to a timeline `Activity` row (null for unrecognized). */
+function subsEventToActivity(ev: RawEvent): Activity | null {
   const json = (ev.parsedJson ?? {}) as Record<string, unknown>;
   const ts = ev.timestampMs ? Number(ev.timestampMs) : 0;
   const id = `${ev.id.txDigest}:${ev.id.eventSeq}`;
   const txDigest = ev.id.txDigest;
   const t = ev.type;
 
-  const num = (k: string): string | null => {
-    const v = json[k];
+  const rawAmount = (): string | null => {
+    const v = json.amount;
     return typeof v === 'string' ? v : typeof v === 'number' ? String(v) : null;
   };
-  const money = (raw: string | null): { amountRaw: string | null; amountUi: number | null } =>
-    raw == null ? { amountRaw: null, amountUi: null } : { amountRaw: raw, amountUi: Number(raw) / USDC_SCALE };
+  const merchant = typeof json.merchant === 'string' ? json.merchant : '';
+  const label = merchant ? shortAddr(merchant) : '';
 
-  const payee = typeof json.payee === 'string' ? json.payee : '';
-  const payeeLabel = payee ? KNOWN_PAYEES[payee] ?? shortAddr(payee) : '';
-
-  const make = (kind: ActivityKind, title: string, detail: string | undefined, raw: string | null, flow: ActivityFlow): Activity => ({
+  const make = (
+    kind: ActivityKind,
+    title: string,
+    detail: string | undefined,
+    raw: string | null,
+    flow: ActivityFlow,
+  ): Activity => ({
     id,
     ts,
     kind,
     title,
     detail,
-    ...money(raw),
+    counterparty: merchant || undefined,
+    amountRaw: raw,
+    amountUi: raw == null ? null : Number(raw) / USDC_SCALE,
     flow,
     txDigest,
   });
 
-  if (t.endsWith('::account::Spent')) {
-    const memo = decodeMemo(json.memo);
-    const detail = memo ? `${payeeLabel} · ${memo}` : payeeLabel || undefined;
-    return make('spend', 'Paid', detail, num('gross'), 'out');
+  if (t.endsWith('::subscription::SubscriptionCreated')) {
+    return make('sub-created', 'Subscribed', label || undefined, rawAmount(), 'out');
   }
-  if (t.endsWith('::account::Charged')) {
-    return make('charge', 'Subscription charged', payeeLabel || undefined, num('gross'), 'out');
+  if (t.endsWith('::subscription::SubscriptionRenewed')) {
+    return make('sub-renewed', 'Renewed', label || undefined, rawAmount(), 'out');
   }
-  if (t.endsWith('::account::Deposited')) {
-    return make('deposit', 'Topped up', 'Wallet → Agent money', num('amount'), 'in');
-  }
-  if (t.endsWith('::account::Withdrawn')) {
-    return make('withdraw', 'Withdrew', 'Agent money → Wallet', num('amount'), 'in');
-  }
-  if (t.endsWith('::account::SubscriptionCreated')) {
-    return make('sub-created', 'New subscription', payeeLabel || undefined, num('period_cap'), 'none');
-  }
-  if (t.endsWith('::account::SubscriptionCancelled')) {
-    return make('sub-cancelled', 'Subscription cancelled', undefined, null, 'none');
-  }
-  if (t.endsWith('::account::AccountCreated')) {
-    return make('created', 'Agent wallet created', 'Non-custodial · your keys', null, 'none');
+  if (t.endsWith('::subscription::SubscriptionCancelled')) {
+    return make('sub-cancelled', 'Subscription cancelled', label || undefined, null, 'none');
   }
   return null;
 }
 
+/** A queryTransactionBlocks node, narrowed to what the sent-payment row needs. */
+interface TxNode {
+  digest: string;
+  timestampMs?: string | null;
+  balanceChanges?: Array<{
+    coinType: string;
+    owner?: { AddressOwner?: string } | string;
+    amount: string;
+  }> | null;
+}
+
+/** One USDC balance-change row, narrowed to {address, amount}. */
+function usdcDelta(c: NonNullable<TxNode['balanceChanges']>[number]): { addr: string; amt: bigint } | null {
+  if (c.coinType !== USDC.type) return null;
+  const addr = typeof c.owner === 'string' ? c.owner : c.owner?.AddressOwner ?? '';
+  return { addr, amt: BigInt(c.amount) };
+}
+
 /**
- * Reconstruct the LIVE subscriptions from the event stream: every SubscriptionCreated,
- * minus any later SubscriptionCancelled with the same sub_key. The remaining set is the
- * active subscriptions (the on-chain `subscription_info` is the per-row confirm; here we
- * read the durable event log so a fresh load needs no per-key devInspect fan-out).
- */
-function reconstructSubscriptions(events: RawEvent[]): Subscription[] {
-  const created = new Map<string, Subscription>();
-  const cancelled = new Set<string>();
-
-  // events come newest-first from the query; walk oldest-first for clean create/cancel order.
-  for (let i = events.length - 1; i >= 0; i--) {
-    const ev = events[i];
-    const json = (ev.parsedJson ?? {}) as Record<string, unknown>;
-    const key = typeof json.sub_key === 'string' ? json.sub_key : typeof json.sub_key === 'number' ? String(json.sub_key) : null;
-    if (!key) continue;
-
-    if (ev.type.endsWith('::account::SubscriptionCreated')) {
-      const payee = typeof json.payee === 'string' ? json.payee : '';
-      const capRaw = typeof json.period_cap === 'string' ? json.period_cap : typeof json.period_cap === 'number' ? String(json.period_cap) : '0';
-      const periodMs = typeof json.period_ms === 'string' ? Number(json.period_ms) : typeof json.period_ms === 'number' ? json.period_ms : 0;
-      created.set(key, {
-        subKey: key,
-        payee,
-        periodCapRaw: capRaw,
-        periodCapUi: Number(capRaw) / USDC_SCALE,
-        periodMs,
-        lastChargedMs: ev.timestampMs ? Number(ev.timestampMs) : 0,
-        label: payee ? KNOWN_PAYEES[payee] ?? shortAddr(payee) : 'Subscription',
-      });
-    } else if (ev.type.endsWith('::account::SubscriptionCancelled')) {
-      cancelled.add(key);
-    } else if (ev.type.endsWith('::account::Charged')) {
-      // advance lastChargedMs on a charge so the "next charge" coverage line is accurate.
-      const sub = created.get(key);
-      if (sub && ev.timestampMs) sub.lastChargedMs = Number(ev.timestampMs);
+ * Map an OUTBOUND tx (owner net-negative USDC) to a `sent` (plain transfer) or `paid`
+ * (rail payment) row. The split is the treasury fee output: if the Suize treasury was
+ * credited USDC in this tx, it's a PAYMENT (`paid`), else a plain `sent`. A subs
+ * create/renew also debits USDC, so the caller SKIPS digests already covered by a
+ * subs event. "To whom" is the largest POSITIVE non-owner, NON-treasury USDC credit
+ * (the merchant, never the fee output); when the treasury is the ONLY credit
+ * (a first-party charge, merchant == treasury) it stands as the counterparty. The
+ * amount is the owner's full outflow — what you paid, fee included. */
+function sentTxToActivity(node: TxNode, owner: string, treasuryLc: string): Activity | null {
+  const ownerLc = owner.toLowerCase();
+  const isTreasury = makeIsTreasury(treasuryLc);
+  let delta = 0n;
+  let merchant: { addr: string; amt: bigint } | null = null;
+  let treasuryCredit: { addr: string; amt: bigint } | null = null;
+  let feePaid = false;
+  for (const raw of node.balanceChanges ?? []) {
+    const c = usdcDelta(raw);
+    if (!c) continue;
+    if (c.addr.toLowerCase() === ownerLc) {
+      delta += c.amt;
+      continue;
+    }
+    if (c.amt <= 0n) continue;
+    if (isTreasury(c.addr)) {
+      feePaid = true;
+      treasuryCredit = c;
+    } else if (!merchant || c.amt > merchant.amt) {
+      merchant = c;
     }
   }
-
-  return [...created.values()]
-    .filter((s) => !cancelled.has(s.subKey))
-    .sort((a, b) => Number(b.subKey) - Number(a.subKey));
+  if (delta >= 0n) return null; // not a net USDC outflow from the owner
+  const out = (-delta).toString();
+  // merchant wins; only when there's no non-treasury credit does the treasury stand in.
+  const counterparty = (merchant ?? treasuryCredit)?.addr;
+  return {
+    id: node.digest,
+    ts: node.timestampMs ? Number(node.timestampMs) : 0,
+    kind: feePaid ? 'paid' : 'sent',
+    title: feePaid ? 'Paid' : 'Sent',
+    // immediate fallback "to whom" (short addr) — upgraded to a @suize handle once
+    // the reverse-name lookup resolves (see `namesQuery`).
+    detail: counterparty ? shortAddr(counterparty) : undefined,
+    counterparty,
+    amountRaw: out,
+    amountUi: Number(out) / USDC_SCALE,
+    flow: 'out',
+    txDigest: node.digest,
+  };
 }
+
+/**
+ * Map an INBOUND tx (owner net-POSITIVE USDC) to a `received` (someone sent you money)
+ * or `charged` (someone PAID YOU on the rail) row — the merchant leg the business side
+ * lives on. The split is again the treasury fee output: a rail payment credits the
+ * treasury, a plain transfer doesn't. "From whom" is the payer (the largest-magnitude
+ * NEGATIVE non-owner USDC delta). The amount is the owner's net inflow — what actually
+ * landed in your balance (price minus the 2% on a rail charge). */
+function receivedTxToActivity(node: TxNode, owner: string, treasuryLc: string): Activity | null {
+  const ownerLc = owner.toLowerCase();
+  const isTreasury = makeIsTreasury(treasuryLc);
+  let delta = 0n;
+  let payer: { addr: string; amt: bigint } | null = null;
+  let feePaid = false;
+  for (const raw of node.balanceChanges ?? []) {
+    const c = usdcDelta(raw);
+    if (!c) continue;
+    if (c.addr.toLowerCase() === ownerLc) {
+      delta += c.amt;
+      continue;
+    }
+    if (c.amt > 0n && isTreasury(c.addr)) feePaid = true;
+    // the payer is the most-negative non-owner leg (someone's funds went out to us).
+    if (c.amt < 0n && (!payer || c.amt < payer.amt)) payer = c;
+  }
+  if (delta <= 0n) return null; // not a net USDC inflow to the owner
+  const inc = delta.toString();
+  const counterparty = payer?.addr;
+  return {
+    id: node.digest,
+    ts: node.timestampMs ? Number(node.timestampMs) : 0,
+    kind: feePaid ? 'charged' : 'received',
+    title: feePaid ? 'Payment' : 'Received',
+    detail: counterparty ? shortAddr(counterparty) : undefined,
+    counterparty,
+    amountRaw: inc,
+    amountUi: Number(inc) / USDC_SCALE,
+    flow: 'in',
+    txDigest: node.digest,
+  };
+}
+
+/**
+ * Pick the best human display name for a recipient from its SuiNS reverse records:
+ * a `*.suize.sui` leaf renders as the native `<name>@suize` handle; any other SuiNS
+ * name shows as-is; no name → null (the caller keeps the short address). */
+function formatRecipientName(names: string[]): string | null {
+  const suize = names.find((n) => n.endsWith('.suize.sui'));
+  if (suize) return `${suize.slice(0, -'.suize.sui'.length)}@suize`;
+  return names.find((n) => n.endsWith('.sui')) ?? null;
+}
+
+/** How many distinct counterparties we reverse-resolve per load (1 RPC each, the
+ *  rest keep their short address — bounds the lookup fan-out on a busy ledger). */
+const NAME_RESOLVE_CAP = 30;
 
 // ───────────────────────────────────────────────────────────────────────────
 // The hook.
 // ───────────────────────────────────────────────────────────────────────────
 
+/**
+ * An OPTIMISTIC wallet send — applied to the UI the instant the user confirms,
+ * reconciled against the chain. `snapshotRaw` is the real wallet balance (raw) at
+ * send time; the send is "balance-reflected" once the refetched real balance has
+ * dropped to/below `snapshotRaw - amountRaw` (so we stop subtracting and never
+ * double-count). `digest` arrives after execute; the row shows "confirming…" until
+ * the real sent-tx feed surfaces that digest, then the real row takes over.
+ */
+interface OptimisticSend {
+  key: string;
+  amountRaw: bigint;
+  amountUi: number;
+  label: string;
+  ts: number;
+  snapshotRaw: string;
+  digest: string | null;
+}
+
+/** Safety net: an optimistic row never outlives the chain truth by more than this —
+ *  if it neither reconciles nor fails, it's dropped and the real balance is shown. */
+const OPTIMISTIC_TTL_MS = 30_000;
+
 export function useAccount(ownerAddress?: string | null, handle?: string): PayApi {
   const client = useSuiClient();
-  const { mutateAsync: signTransaction } = useSignTransaction();
+  const { mutateAsync: signTransactionRaw } = useSignTransaction();
   const owner = ownerAddress ?? '';
   const prices = usePrices();
   const usdcPrice = priceOf(USDC.type, prices);
 
   const [pending, setPending] = useState<PayPending>(null);
-  // The shared Account<USDC> id once known (cached per owner; recovered from events).
-  const [accountId, setAccId] = useState<string | null>(() => (owner ? getAccountId(owner) : null));
-  // Bump to force a re-read after a write lands.
   const [version, setVersion] = useState(0);
   const bump = useCallback(() => setVersion((v) => v + 1), []);
 
-  // Re-seed the cached id when the owner changes.
-  useEffect(() => {
-    setAccId(owner ? getAccountId(owner) : null);
-  }, [owner]);
+  // Optimistic sends — instant UI, reconciled against the chain (see below).
+  const [optimistic, setOptimistic] = useState<OptimisticSend[]>([]);
+  // latest real wallet balance (raw), readable from sendWallet without a dep churn.
+  const balanceRef = useRef<string | null>(null);
 
-  type BuildClient = NonNullable<Parameters<Transaction['build']>[0]>['client'];
-
-  // ── Sponsored execution (build KIND bytes → wsSponsor → sign verbatim → wsExecute). ──
-  const runSponsored = useCallback(
-    async (tx: Transaction): Promise<string> => {
-      if (!owner) throw new Error('Not signed in.');
-      const kindBytes = await tx.build({ client: client as unknown as BuildClient, onlyTransactionKind: true });
-      const { bytes, digest } = await requestSponsorship({ kindBytesB64: toBase64(kindBytes), sender: owner });
-      const { signature } = await signTransaction({ transaction: bytes });
-      const executed = await executeSponsored({ digest, signature });
-      return executed.digest;
-    },
-    [owner, client, signTransaction],
-  );
-
-  /** Execute a sponsored tx and return its emitted events (to read created object ids). */
-  const runWithEvents = useCallback(
-    async (tx: Transaction) => {
-      const digest = await runSponsored(tx);
-      const res = await client.waitForTransaction({ digest, options: { showEvents: true } });
-      return { digest, events: res.events ?? [] };
-    },
-    [runSponsored, client],
-  );
+  // dapp-kit's signer thunk, typed for the sponsored helper (base64-in/sig-out).
+  const signTransaction = signTransactionRaw as unknown as SignTransaction;
 
   // ── "Your money" — the owner's wallet USDC balance. ──
   const walletQuery = useQuery({
     queryKey: ['pay-wallet-usdc', owner, version],
     enabled: owner.length > 0,
     staleTime: 8_000,
+    // keep prior data on a `version`-bump refetch (no empty flash → no jitter)
+    placeholderData: keepPreviousData,
     queryFn: async (): Promise<string> => {
       const bal = await client.getBalance({ owner, coinType: USDC.type });
       return bal.totalBalance;
     },
   });
 
-  // ── Recover the Account id from chain if not cached: scan AccountCreated events by
-  // this owner (the create tx's sender). One light query; result is cached. ──
-  const recoveryQuery = useQuery({
-    queryKey: ['pay-account-recover', owner, ACCOUNT_PKG],
-    enabled: owner.length > 0 && accountId == null && ACCOUNT_PUBLISHED,
-    staleTime: 60_000,
-    queryFn: async (): Promise<string | null> => {
-      const page = await client.queryEvents({
-        query: { MoveEventType: `${ACCOUNT_PKG}::account::AccountCreated` },
-        order: 'descending',
-        limit: 50,
-      });
-      for (const ev of page.data) {
-        const json = (ev.parsedJson ?? {}) as Record<string, unknown>;
-        if (json.owner === owner && typeof json.account_id === 'string') return json.account_id;
-      }
-      return null;
-    },
-  });
-
-  useEffect(() => {
-    const found = recoveryQuery.data;
-    if (found && owner) {
-      setAccountId(owner, found);
-      setAccId(found);
-    }
-  }, [recoveryQuery.data, owner]);
-
-  // ── "Agent money" — the Account<USDC> balance via balance_value devInspect. ──
-  const agentQuery = useQuery({
-    queryKey: ['pay-agent-balance', accountId, version, ACCOUNT_PKG],
-    enabled: Boolean(accountId) && ACCOUNT_PUBLISHED,
+  // ── Subscriptions — live Party objects the owner holds. ──
+  const subsQuery = useQuery({
+    queryKey: ['pay-subscriptions', owner, version, SUBS_PKG],
+    enabled: owner.length > 0 && SUBS_PUBLISHED,
     staleTime: 8_000,
-    queryFn: async (): Promise<string> => {
-      const tx = new Transaction();
-      tx.moveCall({
-        target: BALANCE_VALUE_TARGET,
-        arguments: [tx.object(accountId as string)],
-        typeArguments: [ACCOUNT_COIN.type],
-      });
-      const kindBytes = await tx.build({ client: client as unknown as BuildClient, onlyTransactionKind: true });
-      const res = await client.devInspectTransactionBlock({
-        sender: owner || ZERO_ADDRESS,
-        transactionBlock: kindBytes,
-      });
-      const ret = res.results?.[0]?.returnValues?.[0];
-      if (!ret) return '0';
-      const [bytes] = ret; // u64 = 8 LE bytes
-      let v = 0n;
-      for (let i = bytes.length - 1; i >= 0; i--) v = (v << 8n) | BigInt(bytes[i]);
-      return v.toString();
-    },
+    // keep prior data on a `version`-bump refetch (no empty flash → no jitter)
+    placeholderData: keepPreviousData,
+    queryFn: (): Promise<Subscription[]> =>
+      listSubscriptions(client as unknown as OwnedObjectsClient, owner),
   });
 
-  // ── The account module's event stream for THIS account — the timeline + subs. ──
+  // ── The subs event stream for THIS owner (the timeline's recurring rows). ──
   const eventsQuery = useQuery({
-    queryKey: ['pay-account-events', accountId, version, ACCOUNT_PKG],
-    enabled: Boolean(accountId) && ACCOUNT_PUBLISHED,
+    queryKey: ['pay-subs-events', owner, version, SUBS_PKG],
+    enabled: owner.length > 0 && SUBS_PUBLISHED,
     staleTime: 8_000,
+    // keep prior data on a `version`-bump refetch (no empty flash → no jitter)
+    placeholderData: keepPreviousData,
     queryFn: async (): Promise<RawEvent[]> => {
-      const page = await client.queryEvents({
-        query: { MoveEventModule: { package: ACCOUNT_PKG, module: 'account' } },
-        order: 'descending',
-        limit: 100,
-      });
-      // Keep only events for OUR account (the module emits for every account).
-      return (page.data as unknown as RawEvent[]).filter((ev) => eventAccountId(ev.parsedJson) === accountId);
+      const mine: RawEvent[] = [];
+      const structs = ['SubscriptionCreated', 'SubscriptionRenewed', 'SubscriptionCancelled'];
+      const ownerLc = owner.toLowerCase();
+      for (const struct of structs) {
+        let cursor: { txDigest: string; eventSeq: string } | null | undefined = undefined;
+        let scanned = 0;
+        while (scanned < EVENTS_SCAN_CAP) {
+          const page = await client.queryEvents({
+            query: { MoveEventType: `${SUBS_PKG}::subscription::${struct}` },
+            order: 'descending',
+            limit: 50,
+            cursor: cursor ?? undefined,
+          });
+          for (const ev of page.data as unknown as RawEvent[]) {
+            const j = (ev.parsedJson ?? {}) as Record<string, unknown>;
+            if (typeof j.owner === 'string' && j.owner.toLowerCase() === ownerLc) mine.push(ev);
+          }
+          scanned += page.data.length;
+          if (!page.hasNextPage || !page.nextCursor) break;
+          cursor = page.nextCursor;
+        }
+      }
+      return mine;
     },
   });
 
-  const activity = useMemo<Activity[]>(() => {
-    const raw = eventsQuery.data ?? [];
-    return raw.map(toActivity).filter((a): a is Activity => a != null);
-  }, [eventsQuery.data]);
+  // ── The treasury — RESOLVED live from `treasury@suize`, the ONE source of truth
+  //    (no hardcoded address, no CLI). '' until it resolves → rows read as plain
+  //    transfers meanwhile. Display-only: decides Payment-vs-transfer, never a money
+  //    path. The labelling re-tags (no refetch) the instant it resolves. ──
+  const treasuryQuery = useQuery({
+    queryKey: ['suize-treasury', NETWORK],
+    staleTime: Infinity, // the treasury is effectively fixed — resolve once per session
+    queryFn: async (): Promise<string> => (await resolveTreasury(client)) ?? '',
+  });
+  const treasuryLc = treasuryQuery.data ?? '';
 
-  const subscriptions = useMemo<Subscription[]>(
-    () => reconstructSubscriptions(eventsQuery.data ?? []),
-    [eventsQuery.data],
+  // ── Sent payments — the owner's recent txs (NET USDC outflow). Raw nodes; the
+  //    sent-vs-paid labelling happens in the merge memo, against `treasuryLc`. ──
+  const sentQuery = useQuery({
+    queryKey: ['pay-sent', owner, version],
+    enabled: owner.length > 0,
+    staleTime: 8_000,
+    // keep prior data on a `version`-bump refetch (no empty flash → no jitter)
+    placeholderData: keepPreviousData,
+    queryFn: async (): Promise<TxNode[]> => {
+      const res = await client.queryTransactionBlocks({
+        filter: { FromAddress: owner },
+        options: { showBalanceChanges: true },
+        order: 'descending',
+        limit: SENT_SCAN_CAP,
+      });
+      return res.data as unknown as TxNode[];
+    },
+  });
+
+  // ── Received payments — the owner's recent txs (NET USDC inflow): a plain transfer
+  //    in, or a rail charge you got paid. Raw nodes; labelled in the merge memo. ──
+  const receivedQuery = useQuery({
+    queryKey: ['pay-received', owner, version],
+    enabled: owner.length > 0,
+    staleTime: 8_000,
+    // keep prior data on a `version`-bump refetch (no empty flash → no jitter)
+    placeholderData: keepPreviousData,
+    queryFn: async (): Promise<TxNode[]> => {
+      const res = await client.queryTransactionBlocks({
+        filter: { ToAddress: owner },
+        options: { showBalanceChanges: true },
+        order: 'descending',
+        limit: RECEIVED_SCAN_CAP,
+      });
+      return res.data as unknown as TxNode[];
+    },
+  });
+
+  // the real sent-tx digests — the reconciliation clock for optimistic rows.
+  const sentDigests = useMemo(
+    () => new Set((sentQuery.data ?? []).map((n) => n.digest)),
+    [sentQuery.data],
   );
+
+  // ── The merged, de-duped activity timeline. ──
+  // Subs events are authoritative; a sent/received row for the SAME digest as a subs
+  // event is a duplicate (the create/renew debit) → drop it. An outbound row wins over
+  // an inbound one for a shared digest (a tx is net one way). Labelling reacts to the
+  // resolved treasury, so rows re-tag (no refetch) the instant it resolves.
+  const activity = useMemo<Activity[]>(() => {
+    const subsRows = (eventsQuery.data ?? [])
+      .map(subsEventToActivity)
+      .filter((a): a is Activity => a != null);
+    const seen = new Set(subsRows.map((r) => r.txDigest));
+    const map = (nodes: TxNode[], build: (n: TxNode) => Activity | null): Activity[] => {
+      const out: Activity[] = [];
+      for (const node of nodes) {
+        if (seen.has(node.digest)) continue;
+        const row = build(node);
+        if (row) {
+          seen.add(node.digest);
+          out.push(row);
+        }
+      }
+      return out;
+    };
+    const sentRows = map(sentQuery.data ?? [], (n) => sentTxToActivity(n, owner, treasuryLc));
+    const receivedRows = map(receivedQuery.data ?? [], (n) => receivedTxToActivity(n, owner, treasuryLc));
+    // optimistic rows the real feed hasn't surfaced yet → render "confirming…".
+    const optimisticRows: Activity[] = optimistic
+      .filter((o) => !(o.digest && sentDigests.has(o.digest)))
+      .map((o) => ({
+        id: `optimistic:${o.key}`,
+        ts: o.ts,
+        kind: 'sent',
+        title: 'Sent',
+        detail: o.label,
+        amountRaw: o.amountRaw.toString(),
+        amountUi: o.amountUi,
+        flow: 'out',
+        txDigest: o.digest ?? '',
+        pending: true,
+      }));
+    return [...optimisticRows, ...subsRows, ...sentRows, ...receivedRows].sort((a, b) => b.ts - a.ts);
+  }, [eventsQuery.data, sentQuery.data, receivedQuery.data, owner, treasuryLc, optimistic, sentDigests]);
+
+  // ── "To whom" — reverse-resolve the distinct counterparties to @suize handles. ──
+  // Each row already carries a short-address fallback; this upgrades the ones that
+  // hold a SuiNS reverse record to a real handle. One RPC per unique address (capped),
+  // cached long since names rarely change. The query key is the address list, so it
+  // only re-runs when a new counterparty appears.
+  const counterpartyAddrs = useMemo(() => {
+    const seen = new Set<string>();
+    for (const a of activity) if (a.counterparty) seen.add(a.counterparty);
+    return [...seen].slice(0, NAME_RESOLVE_CAP);
+  }, [activity]);
+
+  const namesQuery = useQuery({
+    queryKey: ['pay-names', counterpartyAddrs],
+    enabled: counterpartyAddrs.length > 0,
+    staleTime: 5 * 60_000,
+    queryFn: async (): Promise<Record<string, string>> => {
+      const map: Record<string, string> = {};
+      await Promise.all(
+        counterpartyAddrs.map(async (addr) => {
+          try {
+            const { data } = await client.resolveNameServiceNames({ address: addr, limit: 5 });
+            const name = formatRecipientName(data ?? []);
+            if (name) map[addr.toLowerCase()] = name;
+          } catch {
+            /* a flaky reverse lookup just leaves the short-address fallback in place */
+          }
+        }),
+      );
+      return map;
+    },
+  });
+
+  // Overlay the resolved handles onto each row's `detail` (the short address stays
+  // when a counterparty has no reverse record — never a blank "to whom").
+  const names = namesQuery.data;
+  const resolvedActivity = useMemo<Activity[]>(() => {
+    if (!names) return activity;
+    return activity.map((a) => {
+      if (!a.counterparty) return a;
+      const human = names[a.counterparty.toLowerCase()];
+      return human ? { ...a, detail: human } : a;
+    });
+  }, [activity, names]);
+
+  // RECONCILE: a send is "balance-reflected" once the refetched real balance has
+  // dropped to/below snapshot − amount (so we stop subtracting; never double-count).
+  const optimisticOutflow = useMemo(() => {
+    const realRaw = walletQuery.data;
+    return optimistic.reduce((sum, o) => {
+      const reflected = realRaw != null && BigInt(realRaw) <= BigInt(o.snapshotRaw) - o.amountRaw;
+      return reflected ? sum : sum + o.amountRaw;
+    }, 0n);
+  }, [optimistic, walletQuery.data]);
+
+  // Drop entries once FULLY reconciled (balance reflected AND the digest is in the
+  // real sent feed) — the real row + real balance then carry the truth, no flicker.
+  useEffect(() => {
+    if (optimistic.length === 0) return;
+    const realRaw = walletQuery.data;
+    const next = optimistic.filter((o) => {
+      const reflected = realRaw != null && BigInt(realRaw) <= BigInt(o.snapshotRaw) - o.amountRaw;
+      const inFeed = o.digest != null && sentDigests.has(o.digest);
+      return !(reflected && inFeed);
+    });
+    if (next.length !== optimistic.length) setOptimistic(next);
+  }, [optimistic, walletQuery.data, sentDigests]);
+
+  const subscriptions = useMemo<Subscription[]>(() => subsQuery.data ?? [], [subsQuery.data]);
+
+  // keep the latest real balance readable from sendWallet (the optimistic snapshot)
+  // without making sendWallet's identity churn on every balance refetch.
+  balanceRef.current = walletQuery.data ?? null;
 
   // ── The snapshot. ──
   const state = useMemo<PayState>(() => {
     const resolvedHandle = handle ?? '';
-    const wallet = walletQuery.data != null ? usdcBalance(walletQuery.data, usdcPrice) : ZERO_BALANCE;
-    const agent = agentQuery.data != null ? usdcBalance(agentQuery.data, usdcPrice) : ZERO_BALANCE;
+    // displayed balance = real − the still-unreflected optimistic outflow (clamped
+    // at 0). Once the chain reflects a send, its amount drops out of the outflow,
+    // so the real balance carries through with no double-subtraction.
+    let wallet = ZERO_BALANCE;
+    if (walletQuery.data != null) {
+      const raw = BigInt(walletQuery.data) - optimisticOutflow;
+      wallet = usdcBalance((raw < 0n ? 0n : raw).toString(), usdcPrice);
+    }
     const loading = owner.length > 0 && walletQuery.isLoading;
     return {
       address: owner,
       handle: resolvedHandle,
       name: resolvedHandle.split('@')[0] ?? '',
       wallet,
-      agent,
-      accountId,
       loading,
       subscriptions,
-      activity,
+      activity: resolvedActivity,
     };
-  }, [owner, handle, walletQuery.data, walletQuery.isLoading, agentQuery.data, usdcPrice, accountId, subscriptions, activity]);
+  }, [owner, handle, walletQuery.data, walletQuery.isLoading, usdcPrice, subscriptions, resolvedActivity, optimisticOutflow]);
 
-  // ── ensureAccount — idempotent create + SHARE Account<USDC>. ──
-  const guardWrite = useCallback(() => {
-    if (!owner) throw new Error('Not signed in.');
-    if (!ACCOUNT_PUBLISHED) {
-      throw new Error(
-        'The Suize account contract is not live on testnet yet. Reading works; live payments turn on the moment account.move is published.',
-      );
-    }
-  }, [owner]);
-
-  const ensureAccount = useCallback(async (): Promise<string> => {
-    const existing = accountId ?? getAccountId(owner);
-    if (existing) return existing;
-    guardWrite();
-    const { events } = await runWithEvents(buildCreateAccount());
-    const id = accountIdFromEvents(events);
-    if (!id) throw new Error('Account creation failed: no account id in events.');
-    setAccountId(owner, id);
-    setAccId(id);
-    bump();
-    return id;
-  }, [accountId, owner, guardWrite, runWithEvents, bump]);
-
-  // ── deposit (auto-creates the Account first). ──
-  const deposit = useCallback(
-    async (amountRaw: bigint): Promise<string> => {
-      guardWrite();
-      setPending('deposit');
-      try {
-        const id = await ensureAccount();
-        const coins = await client.getCoins({ owner, coinType: USDC.type });
-        const tx = buildDeposit({
-          accountId: id,
-          amountRaw,
-          sourceCoinIds: coins.data.map((c) => c.coinObjectId),
-        });
-        const digest = await runSponsored(tx);
+  // ── The gasless send core (single source) — build the Address-Balance
+  // `send_funds` PTB (gasless via @suize/x402), prove it is safe + gasless
+  // (assertUnsignedBytesSafe), sign the EXACT bytes locally, then execute over the
+  // gRPC client. `combine` wraps a member signature into a 1-of-2 multisig signature
+  // when the SENDER is the agent sub-account (the MAIN member signs alone); for a
+  // plain wallet send it is undefined and the lone owner signature stands. No fee,
+  // no sponsor — the chain covers gas.
+  const sendGasless = useCallback(
+    async (args: {
+      sender: string;
+      to: string;
+      amountRaw: bigint;
+      combine?: (sig: string) => string;
+    }): Promise<string> => {
+      const outputs = [{ to: args.to, amount: args.amountRaw.toString() }];
+      const g = grpc();
+      const { bytes } = await buildGaslessOutputs({
+        client: g,
+        sender: args.sender,
+        asset: USDC.type,
+        outputs,
+      });
+      // The pre-sign guard (mandatory): never sign bytes that aren't gasless + exact.
+      await assertUnsignedBytesSafe({ client: g, bytesB64: bytes, sender: args.sender, asset: USDC.type, outputs });
+      // dapp-kit's Enoki wallet does `setSenderIfNotSet` — the sender is already set
+      // (owner OR multisig), so it signs these EXACT bytes with the MAIN session key.
+      const { signature } = await signTransaction({ transaction: bytes });
+      const exec = await g.executeTransaction({
+        transaction: fromBase64(bytes),
+        signatures: [args.combine ? args.combine(signature) : signature],
+        include: { effects: true },
+      });
+      const tx = exec.$kind === 'Transaction' ? exec.Transaction : exec.FailedTransaction;
+      const digest = tx?.digest ?? (await Transaction.from(fromBase64(bytes)).getDigest());
+      // The gRPC EXECUTE node returns before the JSON-RPC READ node (balance) and
+      // the indexer (the sent-tx activity feed) reflect the tx — so a bump() alone
+      // refetches PRE-send state and the UI looks unchanged. Bump immediately
+      // (optimistic), then refresh AGAIN in the BACKGROUND once the read node sees
+      // the digest (fresh balance) plus once more after a beat for the indexer-
+      // backed activity row — without making the caller's "Sent" wait on reads.
+      bump();
+      void (async () => {
+        try {
+          await client.waitForTransaction({ digest });
+        } catch {
+          /* read node will catch up; the delayed bump is the backstop */
+        }
         bump();
-        return digest;
-      } finally {
-        setPending(null);
-      }
+        setTimeout(() => bump(), 2_500);
+      })();
+      return digest;
     },
-    [guardWrite, ensureAccount, client, owner, runSponsored, bump],
+    [client, signTransaction, bump],
   );
 
-  // ── spend (OWNER-ONLY, free). ──
-  const spend = useCallback(
-    async (args: { amountRaw: bigint; payee: string; memo: string }): Promise<string> => {
-      guardWrite();
-      const id = accountId ?? getAccountId(owner);
-      if (!id) throw new Error('No agent money yet — top up first.');
-      setPending('spend');
-      try {
-        const digest = await runSponsored(buildSpend({ accountId: id, ...args }));
-        bump();
-        return digest;
-      } finally {
-        setPending(null);
-      }
-    },
-    [guardWrite, accountId, owner, runSponsored, bump],
-  );
-
-  // ── withdraw (OWNER-ONLY, back to the wallet). ──
-  const withdraw = useCallback(
-    async (amountRaw: bigint): Promise<string> => {
-      guardWrite();
-      const id = accountId ?? getAccountId(owner);
-      if (!id) throw new Error('No agent money to withdraw.');
-      setPending('withdraw');
-      try {
-        const digest = await runSponsored(buildWithdraw({ accountId: id, amountRaw, owner }));
-        bump();
-        return digest;
-      } finally {
-        setPending(null);
-      }
-    },
-    [guardWrite, accountId, owner, runSponsored, bump],
-  );
-
-  // ── createSubscription (OWNER-ONLY; auto-creates the Account first). ──
-  const createSubscription = useCallback(
-    async (args: { payee: string; periodCapRaw: bigint; periodMs: number; label?: string }): Promise<string> => {
-      guardWrite();
-      setPending('subscribe');
-      try {
-        const id = await ensureAccount();
-        const digest = await runSponsored(
-          buildCreateSubscription({
-            accountId: id,
-            payee: args.payee,
-            periodCapRaw: args.periodCapRaw,
-            periodMs: args.periodMs,
-          }),
-        );
-        bump();
-        return digest;
-      } finally {
-        setPending(null);
-      }
-    },
-    [guardWrite, ensureAccount, runSponsored, bump],
-  );
-
-  // ── cancelSubscription (OWNER-ONLY). ──
-  const cancelSubscription = useCallback(
-    async (subKey: string): Promise<string> => {
-      guardWrite();
-      const id = accountId ?? getAccountId(owner);
-      if (!id) throw new Error('No subscriptions to cancel.');
-      setPending('subscribe');
-      try {
-        const digest = await runSponsored(buildCancelSubscription({ accountId: id, subKey: BigInt(subKey) }));
-        bump();
-        return digest;
-      } finally {
-        setPending(null);
-      }
-    },
-    [guardWrite, accountId, owner, runSponsored, bump],
-  );
-
-  // ── sendWallet — a plain sponsored P2P transfer of the user's OWN wallet USDC.
-  // NOT an Account verb: no publish gate, no fee, never touches account.move.
+  // ── sendWallet — a GASLESS single-output P2P USDC transfer (vanilla x402). ──
+  // OPTIMISTIC: drop the amount from the displayed balance + prepend a
+  // "confirming…" activity row the instant the user confirms; reconcile against
+  // the chain (balance math + the cleanup effect below); roll back on failure.
   const sendWallet = useCallback(
-    async (args: { amountRaw: bigint; to: string }): Promise<string> => {
+    async (args: { amountRaw: bigint; to: string; label?: string }): Promise<string> => {
+      if (!owner) throw new Error('Not signed in.');
+      setPending('send');
+      const key = crypto.randomUUID();
+      const entry: OptimisticSend = {
+        key,
+        amountRaw: args.amountRaw,
+        amountUi: Number(args.amountRaw) / 1e6,
+        label: args.label || `${args.to.slice(0, 6)}…${args.to.slice(-4)}`,
+        ts: Date.now(),
+        snapshotRaw: balanceRef.current ?? '0',
+        digest: null,
+      };
+      setOptimistic((prev) => [entry, ...prev]);
+      // safety net: never let an unreconciled optimistic row outlive chain truth.
+      const ttl = setTimeout(
+        () => setOptimistic((prev) => prev.filter((e) => e.key !== key)),
+        OPTIMISTIC_TTL_MS,
+      );
+      try {
+        const digest = await sendGasless({ sender: owner, to: args.to, amountRaw: args.amountRaw });
+        setOptimistic((prev) => prev.map((e) => (e.key === key ? { ...e, digest } : e)));
+        return digest;
+      } catch (e) {
+        clearTimeout(ttl);
+        setOptimistic((prev) => prev.filter((e) => e.key !== key)); // rollback
+        throw e;
+      } finally {
+        setPending(null);
+      }
+    },
+    [owner, sendGasless],
+  );
+
+  // ── spendFromSubaccount — a GASLESS send FROM the agent's 1-of-2 multisig
+  // sub-account, signed by the MAIN member ALONE then combined (threshold 1). This
+  // is the AI's spend primitive AND the user's one-tap Withdraw (sender = the
+  // sub-account, recipient = the merchant / the user's own wallet). ──
+  const spendFromSubaccount = useCallback(
+    async (args: { multisig: MultiSigPublicKey; to: string; amountRaw: bigint }): Promise<string> => {
       if (!owner) throw new Error('Not signed in.');
       setPending('send');
       try {
-        const coins = await client.getCoins({ owner, coinType: USDC.type });
-        if (coins.data.length === 0) throw new Error('No USDC in your wallet yet.');
-        const tx = new Transaction();
-        const [first, ...rest] = coins.data.map((c) => c.coinObjectId);
-        const primary = tx.object(first);
-        if (rest.length > 0) tx.mergeCoins(primary, rest.map((id) => tx.object(id)));
-        const [out] = tx.splitCoins(primary, [args.amountRaw]);
-        tx.transferObjects([out], args.to);
-        const digest = await runSponsored(tx);
+        return await sendGasless({
+          sender: args.multisig.toSuiAddress(),
+          to: args.to,
+          amountRaw: args.amountRaw,
+          combine: (sig) => combineForMultisig(args.multisig, sig),
+        });
+      } catch (e) {
+        // "unknown public key" = the signing identity isn't one of the sub-account's
+        // 1-of-2 members. Dump the committee vs the signer (the definitive diagnostic:
+        // does the owner's address appear in the committee?) and surface an honest,
+        // non-cryptic error. This fires ONLY on real failure — no risk of false-trip.
+        const msg = (e as Error)?.message ?? '';
+        if (/unknown public key/i.test(msg)) {
+          try {
+            const committee = args.multisig
+              .getPublicKeys()
+              .map((m) => m.publicKey.toSuiAddress())
+              .join(', ');
+            console.error(
+              `[withdraw] signer not in the sub-account committee.\n  signer (owner): ${owner}\n  committee:      ${committee}\n  sub-account:    ${args.multisig.toSuiAddress()}`,
+            );
+          } catch {
+            /* best-effort diagnostic */
+          }
+          throw new Error(
+            "Couldn't authorize this from your agent's sub-account — the signing key isn't one of its two members. Re-arm the agent; if it still fails, the console has the committee-vs-signer dump.",
+          );
+        }
+        throw e;
+      } finally {
+        setPending(null);
+      }
+    },
+    [owner, sendGasless],
+  );
+
+  // ── cancelSubscription — `subs::subscription::cancel` (sponsored). ──
+  const cancelSubscription = useCallback(
+    async (subId: string): Promise<string> => {
+      if (!owner) throw new Error('Not signed in.');
+      if (!SUBS_PUBLISHED) throw new Error('Subscriptions aren’t live here yet.');
+      setPending('cancel');
+      try {
+        const digest = await runSponsored({
+          tx: buildCancel({ subId }),
+          owner,
+          client: client as unknown as Parameters<typeof runSponsored>[0]['client'],
+          signTransaction,
+        });
         bump();
         return digest;
       } finally {
         setPending(null);
       }
     },
-    [owner, client, runSponsored, bump],
+    [owner, client, signTransaction, bump],
   );
 
   // keep a ref so `refresh` is stable without re-creating callbacks.
@@ -535,13 +729,9 @@ export function useAccount(ownerAddress?: string | null, handle?: string): PayAp
   return {
     state,
     pending,
-    ensureAccount,
-    deposit,
-    spend,
-    withdraw,
-    createSubscription,
-    cancelSubscription,
     sendWallet,
+    spendFromSubaccount,
+    cancelSubscription,
     refresh,
   };
 }

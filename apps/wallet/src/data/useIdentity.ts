@@ -4,27 +4,27 @@
  * Drives the post-login fork: a returning user (handle exists) goes straight to
  * Home; a first-time user (no handle) gets the minimal onboarding.
  *
- * REAL: asks the backend over the single WS (`handleMeRequest` → WsHandleMeResponse).
- * `hasHandle = (handle != null)` — a null handle is THE onboarding gate. The backend
- * (Redis) is the source of truth; it also does the SuiNS reverse-record backstop
- * server-side, so the frontend just trusts the response. `suggestedName` is seeded
- * from the response when present (e.g. the Google email local-part), else ''.
+ * ON-CHAIN ONLY (owner law, 2026-06-11 — "we only ask on chain, nothing else"):
+ * the gate is the SuiNS REVERSE record, read client-side via
+ * `resolveHandleOnChain(address, client)`. No localStorage cache (origin-scoped
+ * caches told a fresh browser the owner was a new user) and no backend `/me`
+ * (a disabled/erroring backend told an existing owner to pick a name again).
+ * The chain answers identically on every device, every origin, every time.
  *
- * The WS RPC requires the socket to be AUTHENTICATED (`connected`), so the fetch is
- * gated on the WS status — we don't ask until the Enoki handshake has bound the
- * address to `ws.data` (otherwise the request would reject "not ready" and wrongly
- * route a returning user into onboarding). While the socket is still connecting we
- * stay in `loading` (App.tsx holds on `identity.loading`).
+ * FAILURE DISCIPLINE: a flaky RPC read must NEVER dump an existing user into
+ * the name-picker. Reads retry (3 attempts, backoff); only a *definitive*
+ * "no `*.suize.sui` name for this address" routes to onboarding. After
+ * exhausted retries we still fail to onboarding (the recoverable path — the
+ * availability check + the claim both fail closed server/chain-side), but that
+ * is the last resort, not the first response.
  *
- * The `{ loading, hasHandle, suggestedName }` contract is final — no screen changes.
- * On a transient backend error (the socket is up but the RPC failed) we fail SAFE to
- * "no handle" (-> onboarding), the recoverable path (re-claim/skip) rather than a
- * forever-spinner.
+ * The `{ loading, hasHandle, handle, suggestedName }` contract is unchanged.
+ * `suggestedName` is now always '' — it came from the deleted backend `/me`.
  */
 
 import { useEffect, useState } from 'react';
-import { getCachedHandle, getHandleForAddress, setCachedHandle } from './suins';
-import { use_ws } from './ws';
+import { useSuiClient } from '@mysten/dapp-kit';
+import { resolveHandleOnChain } from './suins';
 
 export interface Identity {
   /** true while we resolve whether a handle exists (brief). */
@@ -37,80 +37,61 @@ export interface Identity {
   suggestedName: string;
 }
 
-export function useIdentity(ownerAddress: string | null): Identity {
+const ATTEMPTS = 3;
+const BACKOFF_MS = 800;
+
+/**
+ * @param ownerAddress the signed-in zkLogin address (null until signed in).
+ * @param refetchKey   bump to force a fresh chain read — the post-claim caller
+ *   (App.tsx) increments this so the reverse record set by the claim is read
+ *   back from chain and confirms the optimistic handle it is already showing.
+ */
+export function useIdentity(ownerAddress: string | null, refetchKey = 0): Identity {
+  const client = useSuiClient();
   const [loading, setLoading] = useState(true);
   const [hasHandle, setHasHandle] = useState(false);
   const [handle, setHandle] = useState('');
-  const [suggestedName, setSuggestedName] = useState('');
-
-  // The WS must be authenticated before we can ask "do I have a handle?" — track
-  // its status so the effect re-fires the moment the handshake completes.
-  const wsStatus = use_ws((s) => s.status);
 
   useEffect(() => {
     if (!ownerAddress) {
       setLoading(true);
       setHasHandle(false);
       setHandle('');
-      setSuggestedName('');
-      return;
-    }
-
-    // Wait for the Enoki handshake to bind the address to ws.data. Stay loading
-    // (not failing to onboarding) until the socket is connected.
-    if (wsStatus !== 'connected') {
-      setLoading(true);
       return;
     }
 
     let cancelled = false;
     setLoading(true);
 
-    // CACHE-FIRST: a handle confirmed by a prior successful claim (or a prior non-null
-    // `/me`) on THIS device wins immediately — the masthead shows the real handle
-    // without waiting on the reverse lookup, and a later empty `/me` can never blank it.
-    const cached = getCachedHandle(ownerAddress);
-    if (cached) {
-      setHandle(cached);
-      setHasHandle(true);
-    }
-
-    getHandleForAddress()
-      .then((resp) => {
-        if (cancelled) return;
-        if (resp.handle != null) {
-          // `/me` resolved (the reverse record indexed) — trust it + refresh the cache
-          // so a later device sees it too.
-          setHasHandle(true);
-          setHandle(resp.handle);
-          setCachedHandle(ownerAddress, resp.handle);
-        } else if (!cached) {
-          // No reverse record AND no cached claim → genuinely no handle (onboarding).
-          // When `cached` is set we DON'T touch hasHandle/handle: the broken reverse
-          // lookup must never override a known-good cached handle.
-          setHasHandle(false);
-          setHandle('');
+    (async () => {
+      for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+        try {
+          const found = await resolveHandleOnChain(ownerAddress, client);
+          if (cancelled) return;
+          setHasHandle(found != null);
+          setHandle(found ?? '');
+          setLoading(false);
+          return;
+        } catch {
+          // transient RPC failure — retry before concluding anything
+          if (cancelled) return;
+          if (attempt < ATTEMPTS) {
+            await new Promise((r) => setTimeout(r, BACKOFF_MS * attempt));
+          }
         }
-        setSuggestedName(resp.suggestedName ?? '');
-      })
-      .catch(() => {
-        // Fail safe to onboarding (recoverable) rather than a forever-spinner — UNLESS
-        // a cached handle proves this owner already claimed (then keep showing it).
-        if (cancelled) return;
-        if (!cached) {
-          setHasHandle(false);
-          setHandle('');
-        }
-        setSuggestedName('');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      }
+      // retries exhausted — fail to onboarding (recoverable; claim fails closed)
+      if (!cancelled) {
+        setHasHandle(false);
+        setHandle('');
+        setLoading(false);
+      }
+    })();
 
     return () => {
       cancelled = true;
     };
-  }, [ownerAddress, wsStatus]);
+  }, [ownerAddress, client, refetchKey]);
 
-  return { loading, hasHandle, handle, suggestedName };
+  return { loading, hasHandle, handle, suggestedName: '' };
 }

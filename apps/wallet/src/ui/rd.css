@@ -1,17 +1,14 @@
 /* ==========================================================================
-   SUIZE WALLET · REDESIGN LAB — "The Companion"
+   SUIZE WALLET — the production design system ("The Companion").
    --------------------------------------------------------------------------
-   DEV-only design proposal (`?preview=redesign`). Scoped ENTIRELY under `.rd`
-   so nothing leaks into the live journal screens. The token values are the
-   LANDING's locked family spec, ported verbatim (apps/landing/src/theme.css):
-   light broadsheet default · dark cinema alternate · the corporate business
-   room via [data-rd-room='business'].
+   Scoped entirely under `.rd`. Token values are the LANDING's locked family
+   spec ported verbatim (apps/landing/src/theme.css): light broadsheet default
+   · lifted dark cinema · the corporate business room via [data-rd-room].
 
    LAWS enforced here: no left accent rails · elevation by hairline/light ·
-   ONE blue, ~3 spends per screen · money is mono+tabular ink · green/red true
+   ONE blue, ~3 spends per screen · money = mono tabular · green/red true
    status only · glass only as a floating surface · house ease (0.16,1,0.3,1)
-   · radii tokened (the rounded-glass era: cards 12-22px, controls 8-12px,
-   pills ONLY where the thing IS a pill — the iOS switch, chat bubbles, chips).
+   · borderless theme glyphs · single-line ledger rows.
    ========================================================================== */
 
 .rd {
@@ -46,6 +43,9 @@
   --rd-hair-blue: rgba(30, 127, 214, 0.3);
   --rd-grad-hot: linear-gradient(118deg, var(--rd-blue-deep) 0%, var(--rd-blue) 34%, var(--rd-blue-bright) 70%, var(--rd-blue-ice) 100%);
   --rd-grad-accent: linear-gradient(135deg, var(--rd-blue-deep) 0%, var(--rd-blue) 60%, var(--rd-blue-bright) 100%);
+  /* identity gradient — warm red→orange, the counterpart to the blue number gradient:
+     handles (name@suize) wear this everywhere; numbers (addresses, money) wear blue. */
+  --rd-grad-handle: linear-gradient(118deg, #ff8a3d 0%, #ff5340 48%, #ff2f63 100%);
 
   /* ---- STATUS (true semantics ONLY) ---- */
   --rd-bull: #0e7048;
@@ -102,11 +102,17 @@
 }
 
 /* ==========================================================================
-   THE AMBIENT FIELD — the liquid-glass backdrop. Big, soft, slow color washes
+   THE AMBIENT FIELD — the liquid-glass backdrop. Big,
+soft,
+slow color washes
    (the family blue + the violet + a breath of ice) drifting under everything,
-   so frosted surfaces have something to refract. Pure CSS, two composited
-   layers, 26–34s drifts — never a focus-stealer, never "blue snow".
-   Reads the room's --rd-blue, so the business room re-tints it automatically.
+so frosted surfaces have something to refract. Pure CSS,
+two composited
+   layers,
+26–34s drifts — never a focus-stealer,
+never "blue snow".
+   Reads the room's --rd-blue,
+so the business room re-tints it automatically.
    ========================================================================== */
 .rd-amb {
   position: absolute;
@@ -163,12 +169,13 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .rd-amb::before,
-  .rd-amb::after {
+.rd-amb::after {
     animation: none;
   }
 }
 
-/* ---- DARK — the cinema alternate, LIFTED (owner: "less dark") ---- */
+/* ---- DARK — the cinema alternate,
+LIFTED (owner: "less dark") ---- */
 :root[data-theme='dark'] .rd {
   --rd-ink-0: #0e1118;
   --rd-base: #13161e;
@@ -205,7 +212,8 @@
   opacity: 0.034;
 }
 
-/* ---- BUSINESS ROOM — light-corporate (cool paper, more serious) ---- */
+/* ---- BUSINESS ROOM — light-corporate (cool paper,
+more serious) ---- */
 .rd[data-rd-room='business'] {
   --rd-ink-0: #e3ebf7;
   --rd-base: #eef3fb;
@@ -229,7 +237,9 @@
   --rd-grad-hot: linear-gradient(120deg, #15468f 0%, #1c5cb8 45%, #2f7fe0 100%);
   --rd-grad-accent: linear-gradient(120deg, #15468f 0%, #1c5cb8 45%, #2f7fe0 100%);
 }
-/* ---- BUSINESS ROOM, dark — deep-water corporate, lifted to match ---- */
+/* ---- BUSINESS ROOM,
+dark — deep-water corporate,
+lifted to match ---- */
 :root[data-theme='dark'] .rd[data-rd-room='business'] {
   --rd-ink-0: #0c1726;
   --rd-base: #101e33;
@@ -269,61 +279,73 @@
 
 /* ==========================================================================
    THE HARNESS HEADER — the review switcher. Deliberately quiet meta-chrome:
-   a hairline strip above the views, never part of the design itself.
+   a hairline strip above the views,
+never part of the design itself.
    ========================================================================== */
-.rd-lab {
+/* ---- the IDENTITY MENU — the handle is the account menu (copy · sign out) ---- */
+.rd-id {
   position: relative;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 46px;
-  padding: 0 18px;
-  border-bottom: 1px solid var(--rd-hair);
-  background: color-mix(in srgb, var(--rd-base) 78%, transparent);
-  -webkit-backdrop-filter: blur(14px) saturate(1.4);
-  backdrop-filter: blur(14px) saturate(1.4);
-  flex: 0 0 auto;
+  display: inline-flex;
+  min-width: 0;
 }
-.rd-lab__tag {
-  font-family: var(--rd-mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+.rd-id__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
   color: var(--rd-fg-3);
-  white-space: nowrap;
-}
-.rd-lab__tabs {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0 auto;
-}
-.rd-lab__tab {
-  padding: 7px 14px;
   border-radius: var(--rd-r-8);
-  font-family: var(--rd-sans);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--rd-fg-3);
-  transition: color 0.18s ease, background 0.18s ease;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  transition: background 0.16s ease;
 }
-.rd-lab__tab:hover {
-  color: var(--rd-fg);
-}
-.rd-lab__tab.is-active {
-  color: var(--rd-fg);
+.rd-id__btn:hover {
   background: var(--rd-quiet);
 }
-.rd-lab__key {
-  margin-left: 7px;
-  font-family: var(--rd-mono);
-  font-size: 9px;
-  color: var(--rd-fg-4);
+.rd-id__catch {
+  position: fixed;
+  inset: 0;
+  z-index: 14;
 }
-/* the theme glyph — BORDERLESS, always (owner law 2026-06-10) */
-.rd-lab__theme {
+.rd-id__menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  /* the identity sits at the masthead's RIGHT edge on BOTH faces — anchor the
+     menu to its right edge so it opens INTO the page, never past the viewport */
+  right: 0;
+  z-index: 15;
+  min-width: 230px;
+  border-radius: var(--rd-r-12);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: rd-rise 0.25s var(--rd-ease) both;
+}
+.rd-id__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: var(--rd-r-8);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rd-fg-2);
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.rd-id__row:hover {
+  background: var(--rd-quiet);
+  color: var(--rd-fg);
+}
+.rd-id__out:hover {
+  color: var(--rd-bear);
+}
+
+/* the theme glyph — BORDERLESS,
+always (owner law 2026-06-10) */
+.rd-thememark {
   display: grid;
   place-items: center;
   width: 30px;
@@ -334,40 +356,12 @@
   background: transparent;
   transition: color 0.18s ease, background 0.18s ease;
 }
-.rd-lab__theme:hover {
+.rd-thememark:hover {
   color: var(--rd-fg);
   background: var(--rd-quiet);
 }
 
-/* the per-page VARIANT pills — small segmented choices, right of the tabs */
-.rd-lab__variants {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border-radius: var(--rd-r-8);
-  background: var(--rd-quiet);
-}
-.rd-lab__pill {
-  padding: 5px 11px;
-  border-radius: var(--rd-r-8);
-  font-family: var(--rd-sans);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  color: var(--rd-fg-3);
-  transition: color 0.16s ease, background 0.16s ease;
-}
-.rd-lab__pill:hover {
-  color: var(--rd-fg);
-}
-.rd-lab__pill.is-active {
-  color: var(--rd-fg);
-  background: var(--rd-raised);
-  box-shadow: var(--rd-card-shadow);
-}
-
-/* the view container below the harness strip */
+/* the view container below the masthead */
 .rd-stage {
   position: relative;
   z-index: 1;
@@ -380,7 +374,8 @@
    SHARED PRIMITIVES
    ========================================================================== */
 
-/* the SUIZE wordmark (Hashgraph, ink→blue clip) */
+/* the SUIZE wordmark (Hashgraph,
+ink→blue clip) */
 .rd-wordmark {
   font-family: var(--rd-wordmark);
   font-size: 19px;
@@ -428,7 +423,8 @@
     inset 0 1px 0 0 rgba(236, 239, 243, 0.08);
 }
 
-/* the primary CTA — frosted glass, rounded (the reversed-law era) */
+/* the primary CTA — frosted glass,
+rounded (the reversed-law era) */
 .rd-cta {
   display: inline-flex;
   align-items: center;
@@ -483,12 +479,31 @@
   border-color: var(--rd-fg-3);
 }
 
-/* money — mono, tabular, ink */
+/* money — mono,
+tabular,
+ink */
 .rd-money {
   font-family: var(--rd-mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
   color: var(--rd-fg);
+}
+
+/* identity vs number gradients (owner law): handles wear warm red→orange, numbers
+   (hex addresses, money) wear blue. Inline text spans, clipped to the glyphs. */
+.rd-grad-handle,
+.rd-grad-num {
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.rd-grad-handle {
+  background-image: var(--rd-grad-handle);
+}
+.rd-grad-num {
+  background-image: var(--rd-grad-hot);
+  font-variant-numeric: tabular-nums;
 }
 
 /* a fading rule */
@@ -539,8 +554,11 @@
 }
 
 /* ==========================================================================
-   THE CHAT LANGUAGE — bubbles, typing, dividers, chips (the hero artifact,
-   grown into an app surface).
+   THE CHAT LANGUAGE — bubbles,
+typing,
+dividers,
+chips (the hero artifact,
+grown into an app surface).
    ========================================================================== */
 .rd-row {
   display: flex;
@@ -629,7 +647,8 @@
   white-space: nowrap;
 }
 
-/* the "Paid · logged" record chip (inside a bubble, its own line) */
+/* the "Paid · logged" record chip (inside a bubble,
+its own line) */
 .rd-paid {
   display: flex;
   width: fit-content;
@@ -768,95 +787,7 @@
   display: flex;
 }
 
-/* ==========================================================================
-   THE WALLET VIEW — history rail · thread · books slide-over.
-   ========================================================================== */
-.rd-wallet {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 252px minmax(0, 1fr);
-}
-
-/* ---- the history rail ---- */
-.rd-rail {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  border-right: 1px solid var(--rd-hair);
-  background: color-mix(in srgb, var(--rd-surface) 60%, transparent);
-}
-.rd-rail__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 16px 16px 10px;
-}
-.rd-rail__new {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 12px;
-  border-radius: var(--rd-r-8);
-  border: 1px solid var(--rd-hair);
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--rd-fg-2);
-  transition: color 0.18s ease, border-color 0.18s ease;
-}
-.rd-rail__new:hover {
-  color: var(--rd-blue);
-  border-color: var(--rd-hair-blue);
-}
-.rd-rail__list {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding: 4px 8px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.rd-rail__group {
-  padding: 12px 8px 5px;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--rd-fg-4);
-}
-.rd-rail__item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 9px 10px;
-  border-radius: var(--rd-r-8);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--rd-fg-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: color 0.16s ease, background 0.16s ease;
-}
-.rd-rail__item:hover {
-  color: var(--rd-fg);
-  background: var(--rd-quiet);
-}
-.rd-rail__item.is-active {
-  color: var(--rd-fg);
-  background: var(--rd-quiet);
-  font-weight: 600;
-}
-
 /* ---- the wallet main column ---- */
-.rd-main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  position: relative;
-}
 
 /* the masthead — wordmark+handle left · balance + switch + books right */
 .rd-mast {
@@ -934,88 +865,6 @@
   70% { background-color: var(--rd-flash); }
   100% { background-color: transparent; color: var(--rd-fg); }
 }
-.rd-mast__agent {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--rd-fg-2);
-  white-space: nowrap;
-}
-
-/* the thread surface */
-.rd-thread {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-}
-.rd-thread__inner {
-  width: min(720px, 100%);
-  margin: 0 auto;
-  padding: clamp(20px, 3.5vh, 36px) clamp(16px, 3vw, 24px) 18px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  gap: 12px;
-  flex: 1 1 auto;
-}
-
-/* empty-state (a new chat) — a serif welcome + chips */
-.rd-empty {
-  margin: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 22px;
-  text-align: center;
-  padding: 24px 16px;
-}
-.rd-empty__title {
-  font-family: var(--rd-serif);
-  font-size: clamp(24px, 3.4vw, 34px);
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  line-height: 1.12;
-  color: var(--rd-fg);
-  margin: 0;
-}
-.rd-empty__sub {
-  font-size: 13.5px;
-  color: var(--rd-fg-3);
-  margin: -10px 0 0;
-}
-
-/* the composer — a floating glass input docked at the foot */
-.rd-composer {
-  flex: 0 0 auto;
-  padding: 10px clamp(16px, 3vw, 24px) 16px;
-}
-.rd-composer__box {
-  width: min(720px, 100%);
-  margin: 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 6px 6px 18px;
-  border-radius: var(--rd-r-16);
-}
-.rd-composer__input {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-family: var(--rd-sans);
-  font-size: 14px;
-  color: var(--rd-fg);
-  padding: 10px 0;
-}
-.rd-composer__input::placeholder {
-  color: var(--rd-fg-4);
-}
 .rd-composer__send {
   display: grid;
   place-items: center;
@@ -1038,13 +887,6 @@
   opacity: 0.4;
   pointer-events: none;
 }
-.rd-composer__note {
-  width: min(720px, 100%);
-  margin: 8px auto 0;
-  text-align: center;
-  font-size: 10.5px;
-  color: var(--rd-fg-4);
-}
 
 /* ---- THE BOOKS — the slide-over panel ---- */
 .rd-scrim {
@@ -1063,39 +905,6 @@
   opacity: 1;
   pointer-events: auto;
 }
-.rd-books {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 9;
-  width: min(400px, 94vw);
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--rd-hair);
-  background: var(--rd-base);
-  transform: translateX(102%);
-  transition: transform 0.34s var(--rd-ease);
-  overflow: hidden;
-}
-.rd-books.is-open {
-  transform: translateX(0);
-}
-.rd-books__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px 12px;
-  border-bottom: 1px solid var(--rd-hair);
-  flex: 0 0 auto;
-}
-.rd-books__title {
-  font-family: var(--rd-serif);
-  font-size: 21px;
-  font-weight: 500;
-  color: var(--rd-fg);
-  margin: 0;
-}
 .rd-books__close {
   display: grid;
   place-items: center;
@@ -1108,14 +917,6 @@
 .rd-books__close:hover {
   color: var(--rd-fg);
   background: var(--rd-quiet);
-}
-.rd-books__scroll {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding: 18px 20px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
 }
 
 /* the two pots */
@@ -1164,24 +965,6 @@
 }
 
 /* section heads inside the books */
-.rd-sec {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.rd-sec__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-.rd-sec__title {
-  font-family: var(--rd-serif);
-  font-size: 17px;
-  font-weight: 500;
-  color: var(--rd-fg);
-  margin: 0;
-}
 .rd-sec__meta {
   font-size: 10.5px;
   color: var(--rd-fg-4);
@@ -1214,6 +997,17 @@
   flex: 0 0 auto;
   font-size: 10.5px;
   color: var(--rd-fg-4);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* the exact stamp carries a hover tooltip (the to-the-second truth) — hint it */
+.rd-line__when[title] {
+  cursor: help;
+}
+/* the coverage warning — TRUE status red: the next charge can't be covered */
+.rd-line__when.is-warn {
+  color: var(--rd-bear);
+  font-weight: 600;
 }
 .rd-line__dots {
   flex: 1 1 auto;
@@ -1248,6 +1042,28 @@
 .rd-line__verify:hover {
   color: var(--rd-blue);
 }
+/* an optimistic activity row mid-confirmation — calmly dimmed, with a small spinner
+   where the verify ↗ goes; reconciled into the real row once the chain confirms. */
+.rd-line.is-pending {
+  opacity: 0.62;
+}
+.rd-line.is-pending .rd-line__when {
+  color: var(--rd-blue);
+}
+.rd-line__spin {
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1.5px solid var(--rd-hair-strong);
+  border-top-color: var(--rd-blue);
+  animation: rd-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rd-line__spin {
+    animation: none;
+  }
+}
 .rd-line__cancel {
   flex: 0 0 auto;
   font-size: 10.5px;
@@ -1271,133 +1087,10 @@
   font-weight: 600;
 }
 
-/* mobile drawer trigger buttons live in the masthead */
-.rd-mast__menu {
-  display: none;
-}
-
-/* ==========================================================================
-   THE ONBOARDING — one centered glass pane, three beats.
-   ========================================================================== */
-.rd-onb {
-  flex: 1 1 auto;
-  display: grid;
-  place-items: center;
-  padding: clamp(20px, 5vh, 56px) clamp(16px, 4vw, 32px);
-  overflow-y: auto;
-}
-.rd-onb__pane {
-  width: min(480px, 100%);
-  border-radius: var(--rd-r-22);
-  padding: clamp(26px, 4vw, 38px) clamp(22px, 3.6vw, 34px) clamp(22px, 3vw, 30px);
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  animation: rd-rise 0.7s var(--rd-ease) both;
-}
+/* the shared rise-in (sheets · menus) */
 @keyframes rd-rise {
   from { opacity: 0; transform: translateY(14px) scale(0.99); }
   to { opacity: 1; transform: translateY(0) scale(1); }
-}
-.rd-onb__brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.rd-onb__eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--rd-fg-3);
-}
-.rd-onb__h1 {
-  font-family: var(--rd-serif);
-  font-size: clamp(30px, 5vw, 40px);
-  font-weight: 500;
-  line-height: 1.08;
-  letter-spacing: -0.02em;
-  color: var(--rd-fg);
-  margin: 0;
-}
-.rd-onb__hot {
-  background: var(--rd-grad-hot);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
-.rd-onb__sub {
-  font-size: 14.5px;
-  line-height: 1.55;
-  color: var(--rd-fg-2);
-  margin: -6px 0 0;
-}
-.rd-onb__cta {
-  width: 100%;
-}
-.rd-onb__custody {
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--rd-fg-4);
-  margin: 0;
-  text-align: center;
-}
-
-/* the name beat — chat-styled inside the same pane */
-.rd-onb__threadlet {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.rd-namebox {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 4px 14px;
-  border-radius: var(--rd-r-12);
-  border: 1px solid var(--rd-hair-strong);
-  background: var(--rd-raised);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-.rd-namebox:focus-within {
-  border-color: var(--rd-blue);
-  box-shadow: 0 0 0 3px var(--rd-wash);
-}
-.rd-namebox input {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-family: var(--rd-mono);
-  font-size: 15px;
-  color: var(--rd-fg);
-  padding: 10px 0;
-}
-.rd-namebox input::placeholder {
-  color: var(--rd-fg-4);
-}
-.rd-namebox__suffix {
-  font-family: var(--rd-mono);
-  font-size: 15px;
-  color: var(--rd-fg-4);
-  flex: 0 0 auto;
-}
-.rd-onb__free {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--rd-mono);
-  font-size: 11px;
-  color: var(--rd-bull);
-  min-height: 16px;
-}
-.rd-onb__free.is-idle {
-  color: var(--rd-fg-4);
 }
 
 /* google G mark (inline svg sized here) */
@@ -1418,88 +1111,13 @@
   flex-direction: column;
   min-height: 0;
 }
-.rd-biz__scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-}
-.rd-biz__wrap {
-  width: min(1200px, 100%);
-  margin: 0 auto;
-  padding: clamp(20px, 3.5vh, 36px) clamp(16px, 3vw, 28px) 40px;
-}
 
 /* the revenue band — THE big number + split + stats */
-.rd-biz__band {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: clamp(20px, 4vw, 48px);
-  flex-wrap: wrap;
-  padding-bottom: clamp(18px, 3vh, 28px);
-}
-.rd-biz__monthlabel {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.rd-biz__big {
-  font-family: var(--rd-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: clamp(40px, 6vw, 64px);
-  font-weight: 600;
-  letter-spacing: -0.03em;
-  line-height: 1.02;
-  margin: 10px 0 0;
-  background: var(--rd-grad-hot);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
 .rd-biz__delta {
   font-family: var(--rd-mono);
   font-size: 11.5px;
   color: var(--rd-fg-3);
   margin-top: 8px;
-}
-.rd-biz__split {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  min-width: min(320px, 100%);
-}
-.rd-biz__split .rd-line__body {
-  font-weight: 500;
-}
-.rd-biz__split .rd-line--hot .rd-line__body,
-.rd-biz__split .rd-line--hot .rd-line__amt {
-  color: var(--rd-blue);
-}
-.rd-biz__stats {
-  display: flex;
-  gap: clamp(16px, 2.5vw, 32px);
-  flex-wrap: wrap;
-  padding: 14px 0;
-}
-.rd-biz__stat {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.rd-biz__stat b {
-  font-family: var(--rd-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--rd-fg);
-}
-.rd-biz__stat span {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--rd-fg-4);
 }
 
 /* the working grid: ledger | chat */
@@ -1545,17 +1163,8 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  min-height: 480px;
-  max-height: min(640px, 72vh);
-  position: sticky;
-  top: 18px;
-}
-/* inside the floating dock the chat fills the panel — no sticky, no caps */
-.rd-bizchat--dock {
-  position: static;
-  max-height: none;
-  min-height: 0;
   height: 100%;
+  min-height: 0;
 }
 .rd-bizchat__head {
   display: flex;
@@ -1693,12 +1302,6 @@
   height: 100%;
   border-radius: var(--rd-r-22);
   overflow: hidden;
-}
-.rd-asst--flat {
-  border-radius: 0;
-  background: transparent;
-  border: none;
-  box-shadow: none;
 }
 .rd-asst__head {
   display: flex;
@@ -1838,9 +1441,6 @@
   background: var(--rd-raised);
   flex: 0 0 auto;
 }
-.rd-asst--flat .rd-asst__composer {
-  margin: 4px 0 0;
-}
 .rd-asst__composer input {
   flex: 1 1 auto;
   min-width: 0;
@@ -1861,85 +1461,10 @@
   border-radius: var(--rd-r-8);
 }
 /* the confirm card without glass (the flat rail) still needs a surface */
-.rd-asst--flat .rd-confirm {
-  border: 1px solid var(--rd-hair);
-  background: var(--rd-raised);
-  box-shadow: var(--rd-card-shadow);
-}
-
-/* ---- THE FLOATING DOCK — chat at its most secondary (Minimal variants) ---- */
-.rd-dock {
-  position: absolute;
-  right: 22px;
-  bottom: 22px;
-  z-index: 12;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 11px 18px;
-  border-radius: var(--rd-r-pill);
-  background: var(--rd-glass-fill);
-  border: 1px solid var(--rd-glass-edge);
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  backdrop-filter: blur(24px) saturate(1.6);
-  box-shadow: 0 14px 36px -14px var(--rd-glass-shadow);
-  font-family: var(--rd-sans);
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--rd-fg);
-  transition: transform 0.2s var(--rd-ease), box-shadow 0.2s ease;
-}
-.rd-dock:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 18px 42px -14px var(--rd-glass-shadow);
-}
-.rd-dock.is-open {
-  opacity: 0;
-  pointer-events: none;
-}
-.rd-dockpanel {
-  position: absolute;
-  right: 22px;
-  bottom: 22px;
-  z-index: 13;
-  width: min(390px, calc(100vw - 32px));
-  height: min(580px, 78%);
-  display: flex;
-  flex-direction: column;
-  opacity: 0;
-  transform: translateY(14px) scale(0.99);
-  pointer-events: none;
-  transition: opacity 0.3s var(--rd-ease), transform 0.3s var(--rd-ease);
-}
-.rd-dockpanel.is-open {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  pointer-events: auto;
-}
-.rd-dockpanel > * {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.rd-dockpanel__close {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--rd-r-8);
-  color: var(--rd-fg-3);
-  transition: color 0.16s ease, background 0.16s ease;
-}
-.rd-dockpanel__close:hover {
-  color: var(--rd-fg);
-  background: var(--rd-quiet);
-}
 
 /* ==========================================================================
-   ONBOARDING · JOURNEY — the refined real flow, full-bleed editorial beats.
+   ONBOARDING · JOURNEY — the refined real flow,
+full-bleed editorial beats.
    ========================================================================== */
 .rd-jny {
   flex: 1 1 auto;
@@ -1988,10 +1513,6 @@
   letter-spacing: -0.022em;
   color: var(--rd-fg);
   margin: 0;
-}
-.rd-jny__thin {
-  color: var(--rd-fg-2);
-  font-weight: 300;
 }
 /* the gradient line + the underline draw (the approved hello signature) */
 .rd-jny__hot {
@@ -2097,7 +1618,9 @@
 }
 
 /* the SETUP manifest — the refined loader: rows land with checks under a
-   filling hairline. Calm, honest, visual. */
+   filling hairline. Calm,
+honest,
+visual. */
 .rd-manifest {
   max-width: 620px;
   display: flex;
@@ -2140,7 +1663,7 @@
   place-items: center;
   width: 20px;
   height: 20px;
-  border-radius: var(--rd-r-6);
+  border-radius: 6px;
   flex: 0 0 auto;
   color: #fff;
   background: var(--rd-quiet);
@@ -2149,7 +1672,8 @@
 .rd-manifest__row.is-done .rd-manifest__mark {
   background: var(--rd-grad-accent);
 }
-/* the in-flight spinner — discreet, hairline-weight */
+/* the in-flight spinner — discreet,
+hairline-weight */
 .rd-manifest__spin {
   width: 12px;
   height: 12px;
@@ -2201,7 +1725,8 @@
 
 /* ==========================================================================
    WALLET · DECK — money first: pots + subscriptions + activity own the page;
-   the assistant is a persistent, RESIZABLE right column. R2: more air.
+   the assistant is a persistent,
+RESIZABLE right column. R2: more air.
    ========================================================================== */
 .rd-deck {
   flex: 1 1 auto;
@@ -2262,7 +1787,8 @@
   border-radius: 2px;
 }
 
-/* ---- the SECTION CARDS — Subscriptions vs Activity, clearly distinct ---- */
+/* ---- the SECTION CARDS — Subscriptions vs Activity,
+clearly distinct ---- */
 .rd-secard {
   --sec: var(--rd-blue);
   --sec-deep: var(--rd-blue-deep);
@@ -2360,7 +1886,8 @@
 :root[data-theme='dark'] .rd-mono-chip {
   color: var(--sec, var(--rd-blue));
 }
-/* the activity direction glyphs — out = blue, in = green (a true incoming) */
+/* the activity direction glyphs — out = blue,
+in = green (a true incoming) */
 .rd-dir {
   display: grid;
   place-items: center;
@@ -2386,18 +1913,16 @@
 :root[data-theme='dark'] .rd-dir--in {
   background: rgba(52, 211, 153, 0.1);
 }
-/* MONEY GETS COLOR (owner R2): amounts are blue mono; sub prices violet */
-.rd-line__amt--money {
-  color: var(--rd-blue-deep);
-}
+/* MONEY GETS COLOR (owner law): every amount wears the blue gradient — money + sub
+   prices alike. The +/− sign carries direction (no green/red on a plain in/out flow).
+   The gradient re-derives from the themed blue vars, so it adapts light/dark. */
+.rd-line__amt--money,
 .rd-line__amt--sub {
-  color: #5c63d6;
-}
-:root[data-theme='dark'] .rd-line__amt--money {
-  color: var(--rd-blue-bright);
-}
-:root[data-theme='dark'] .rd-line__amt--sub {
-  color: #aab0ff;
+  background-image: var(--rd-grad-hot);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 /* detected @names — accent-marked everywhere */
@@ -2506,8 +2031,6 @@
   border-radius: var(--rd-r-22);
   padding: 20px 22px 22px;
   animation: rd-rise 0.4s var(--rd-ease) both;
-  /* the decorative Qr reads --paper-2 for its quiet background — map to our ramp */
-  --paper-2: var(--rd-raised-2);
 }
 .rd-sheet__head {
   display: flex;
@@ -2659,6 +2182,7 @@
 }
 .rd-sheet__quick {
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
 }
 .rd-sheet__quick .rd-chip {
@@ -2683,6 +2207,38 @@
   gap: 12px;
   padding: 8px 0;
 }
+/* a calm error line — red is TRUE status here */
+.rd-sheet__error {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--rd-bear);
+  margin: 0;
+}
+/* honest empty-state line inside a section card */
+.rd-empty-line {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--rd-fg-3);
+  margin: 0;
+  padding: 10px 0 6px;
+}
+/* the publish-gate banner — honest, calm, top of the money column */
+.rd-gate {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid var(--rd-hair-blue);
+  border-radius: var(--rd-r-12);
+  background: var(--rd-wash);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--rd-fg-2);
+}
+.rd-gate b {
+  font-weight: 600;
+  color: var(--rd-fg);
+}
 
 /* ==========================================================================
    BUSINESS · CONSOLE — the vertical-tab merchant view.
@@ -2691,13 +2247,18 @@
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: clamp(16px, 2.5vw, 28px);
+  /* rail · content · the ALWAYS-THERE analytics chat (owner law) */
+  grid-template-columns: 180px minmax(0, 1fr) minmax(0, 372px);
+  gap: clamp(14px, 2vw, 24px);
   padding: clamp(20px, 3vh, 32px) clamp(18px, 3vw, 36px);
-  max-width: 1280px;
+  max-width: 1360px;
   width: 100%;
   margin: 0 auto;
 }
+.rd-console__chat {
+  min-height: 0;
+}
+/* the chat as a permanent full-height column (vs the old sticky mode) */
 .rd-console__rail {
   display: flex;
   flex-direction: column;
@@ -2821,228 +2382,6 @@
   max-width: 38px;
 }
 
-/* ==========================================================================
-   WALLET · MINIMAL — type-led, hairlines only, the giant number IS the page;
-   the assistant lives behind the floating dock.
-   ========================================================================== */
-.rd-min {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-}
-.rd-min__scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-}
-.rd-min__wrap {
-  width: min(880px, 100%);
-  margin: 0 auto;
-  padding: clamp(28px, 6vh, 64px) clamp(20px, 4vw, 32px) 96px;
-  display: flex;
-  flex-direction: column;
-  gap: clamp(26px, 4.5vh, 40px);
-}
-.rd-min__hero {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.rd-min__big {
-  font-family: var(--rd-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: clamp(52px, 9vw, 88px);
-  font-weight: 600;
-  letter-spacing: -0.04em;
-  line-height: 1;
-  color: var(--rd-fg);
-  margin: 0;
-  border-radius: var(--rd-r-12);
-  align-self: flex-start;
-  padding: 0 8px;
-  margin-left: -8px;
-}
-.rd-min__big.is-paid {
-  animation: rd-debit 1.5s var(--rd-ease) both;
-}
-.rd-min__under {
-  display: flex;
-  align-items: baseline;
-  gap: 18px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  color: var(--rd-fg-3);
-}
-.rd-min__under .rd-money {
-  font-size: 13px;
-}
-.rd-min__act {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--rd-fg-2);
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  transition: color 0.16s ease;
-}
-.rd-min__act:hover {
-  color: var(--rd-blue);
-}
-.rd-min__cols {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: clamp(24px, 4vw, 48px);
-  align-items: start;
-}
-
-/* ==========================================================================
-   WALLET · JOURNAL — the broadsheet: dossier markers, dotted leaders, serif
-   titles; the assistant is a quiet flat rail on the right.
-   ========================================================================== */
-.rd-jr {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.rd-jr__grid {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
-  max-width: 1280px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 0 clamp(16px, 2.5vw, 28px);
-}
-.rd-jr__main {
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding: clamp(18px, 3vh, 30px) clamp(18px, 3vw, 40px) 40px 0;
-  display: flex;
-  flex-direction: column;
-  gap: clamp(22px, 3.5vh, 34px);
-}
-.rd-jr__rail {
-  min-height: 0;
-  border-left: 1px solid var(--rd-hair);
-  padding: clamp(18px, 3vh, 30px) 0 16px clamp(16px, 2vw, 24px);
-  display: flex;
-  flex-direction: column;
-}
-.rd-jr__marker {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 12px;
-}
-.rd-jr__no {
-  font-family: var(--rd-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: var(--rd-blue);
-  font-variant-numeric: tabular-nums;
-  flex: 0 0 auto;
-}
-.rd-jr__mlabel {
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--rd-fg-3);
-  flex: 0 0 auto;
-}
-.rd-jr__mline {
-  flex: 1 1 auto;
-  height: 1px;
-  background: linear-gradient(90deg, var(--rd-hair-strong), var(--rd-hair) 50%, transparent);
-}
-.rd-jr__balances {
-  display: flex;
-  align-items: stretch;
-  gap: clamp(22px, 4vw, 44px);
-}
-.rd-jr__bal {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.rd-jr__bal + .rd-jr__bal {
-  border-left: 1px solid var(--rd-hair);
-  padding-left: clamp(22px, 4vw, 44px);
-}
-.rd-jr__balnum {
-  font-family: var(--rd-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: clamp(26px, 3.6vw, 38px);
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.05;
-  color: var(--rd-fg);
-  border-radius: var(--rd-r-8);
-  align-self: flex-start;
-  padding: 0 6px;
-  margin-left: -6px;
-}
-.rd-jr__balnum.is-paid {
-  animation: rd-debit 1.5s var(--rd-ease) both;
-}
-.rd-jr__balnote {
-  font-size: 11.5px;
-  color: var(--rd-fg-3);
-  max-width: 30ch;
-}
-.rd-jr__balacts {
-  display: flex;
-  gap: 14px;
-  margin-top: 6px;
-}
-.rd-jr__grand {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
-}
-.rd-jr__grandnum {
-  font-family: var(--rd-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  color: var(--rd-fg);
-}
-.rd-jr__title {
-  font-family: var(--rd-serif);
-  font-size: clamp(19px, 2.4vw, 24px);
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  color: var(--rd-fg);
-  margin: 0 0 4px;
-}
-
-/* ==========================================================================
-   BUSINESS · MINIMAL — stat-led; the analytics chat behind the dock.
-   ========================================================================== */
-.rd-bizmin__wrap {
-  width: min(980px, 100%);
-  margin: 0 auto;
-  padding: clamp(28px, 5vh, 56px) clamp(20px, 4vw, 32px) 96px;
-  display: flex;
-  flex-direction: column;
-  gap: clamp(24px, 4vh, 36px);
-}
-.rd-bizmin__hero {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: clamp(20px, 4vw, 48px);
-  flex-wrap: wrap;
-}
 @media (max-width: 920px) {
   .rd-biz__grid {
     grid-template-columns: 1fr;
@@ -3089,76 +2428,24 @@
     overflow: visible;
     flex: 0 0 auto;
   }
-  /* Journal: the rail folds under the ledger, same flex-stack */
-  .rd-jr__grid {
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-  }
-  .rd-jr__main {
-    overflow: visible;
+  .rd-console__chat {
     flex: 0 0 auto;
-    padding-right: 0;
-  }
-  .rd-jr__rail {
-    flex: 0 0 auto;
-    border-left: none;
-    border-top: 1px solid var(--rd-hair);
-    padding-left: 0;
     height: 520px;
-  }
-  .rd-jr__balances {
-    flex-direction: column;
-    gap: 18px;
-  }
-  .rd-jr__bal + .rd-jr__bal {
-    border-left: none;
-    padding-left: 0;
-    border-top: 1px solid var(--rd-hair);
-    padding-top: 18px;
-  }
-  /* Minimal: the two flat columns stack */
-  .rd-min__cols {
-    grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 760px) {
-  .rd-wallet {
-    grid-template-columns: 1fr;
-  }
-  .rd-rail {
-    position: absolute;
-    inset: 0 18% 0 0;
-    z-index: 9;
-    background: var(--rd-base);
-    transform: translateX(-102%);
-    transition: transform 0.32s var(--rd-ease);
-    border-right: 1px solid var(--rd-hair);
-  }
-  .rd-rail.is-open {
-    transform: translateX(0);
-  }
-  .rd-mast__menu {
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    border-radius: var(--rd-r-8);
-    border: 1px solid var(--rd-hair);
-    color: var(--rd-fg-2);
-    flex: 0 0 auto;
-  }
   .rd-mast {
     padding: 10px 14px;
   }
+  /* keep the identity trigger readable on phones (sign-out lives in it) —
+     truncate instead of hiding */
   .rd-mast__handle {
-    display: none;
+    max-width: 96px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .rd-mast__sep {
-    display: none;
-  }
-  .rd-mast__agent span:not(.rd-switch) {
     display: none;
   }
   .rd-mast__ballabel {
@@ -3167,24 +2454,11 @@
   .rd-bubble {
     max-width: 86%;
   }
-  .rd-lab {
-    gap: 10px;
-    padding: 0 12px;
-  }
-  .rd-lab__tag {
-    display: none;
-  }
-  .rd-lab__key {
-    display: none;
-  }
-  .rd-biz__band {
-    align-items: flex-start;
-    flex-direction: column;
-  }
 }
 
 /* ==========================================================================
-   REDUCED MOTION — keep fades, drop movement.
+   REDUCED MOTION — keep fades,
+drop movement.
    ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
   .rd-row,
@@ -3200,12 +2474,6 @@
   }
   .rd-mast__balnum.is-paid {
     animation: none;
-  }
-  .rd-onb__pane {
-    animation: none;
-  }
-  .rd-books {
-    transition: none;
   }
   .rd-jny__beat > *,
   .rd-jny__hot::after {
@@ -3226,12 +2494,35 @@
   .rd-manifest__bar i {
     transition: none;
   }
-  .rd-min__big.is-paid,
-  .rd-jr__balnum.is-paid,
   .rd-debit-flash {
     animation: none;
   }
-  .rd-dockpanel {
-    transition: none;
-  }
+}
+
+/* ── The SSO confirm popup (bridge/ConfirmPay) — reuses the rd-confirm card ── */
+.rd-confirm--sso {
+  width: min(360px, 92%);
+}
+.rd-confirm__detail--mono {
+  font-family: var(--rd-mono);
+}
+.rd-confirm__acts--col {
+  flex-direction: column;
+  align-items: stretch;
+}
+.rd-confirm__msg--bear {
+  color: var(--rd-bear);
+}
+/* The settled lines drive their own visibility (the base .rd-confirm__done is
+   display:none); the assistant's is-done covers the "Paid" green, is-cancelled
+   the calm grey. One source of truth — no inline display overrides. */
+.rd-confirm.is-cancelled .rd-confirm__done {
+  display: flex;
+  color: var(--rd-fg-3);
+}
+.rd-confirm__custody {
+  padding: 0 14px 13px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--rd-fg-4);
 }

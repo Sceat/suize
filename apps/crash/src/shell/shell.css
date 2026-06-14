@@ -1,0 +1,125 @@
+/* ============================================================================
+   PolySui shell — the multi-tab chrome AROUND the routed screens. Reuses the
+   Suize-family tokens already defined in styles.css (--paper / --ink / --blue /
+   --sans / --mono / --serif / --rule-fade …). House law: full-bleed, solid
+   surfaces (high contrast), accent spent sparingly, NO decorative diodes.
+   ========================================================================== */
+:root {
+  --ps-nav: 58px;
+}
+
+/* ---- top nav (fixed, full-bleed) ---- */
+.ps-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--ps-nav);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: clamp(14px, 2vw, 26px);
+  padding: 0 clamp(16px, 3vw, 34px);
+  font-family: var(--sans);
+  background: color-mix(in srgb, var(--paper) 86%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  border-bottom: 1px solid var(--hair);
+}
+.ps-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  text-decoration: none;
+}
+.ps-brand b { color: var(--blue); font-weight: 700; }
+.ps-mark {
+  width: 21px;
+  height: 21px;
+  border-radius: 6px;
+  background: radial-gradient(120% 120% at 30% 20%, var(--blue-bright), var(--blue) 55%, var(--blue-deep));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+.ps-tabs { display: flex; gap: 2px; margin-left: 6px; }
+.ps-tab {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink-3);
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  transition: color 0.18s, background 0.18s;
+  white-space: nowrap;
+}
+.ps-tab:hover { color: var(--ink); }
+.ps-tab.on { color: var(--blue-deep); background: var(--blue-wash); }
+
+.ps-acct { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.ps-handle { font-family: var(--mono); font-size: 13px; letter-spacing: -0.03em; color: var(--ink); }
+.ps-link {
+  font-family: var(--sans); font-size: 13px; color: var(--ink-3);
+  background: none; border: 0; cursor: pointer; padding: 4px 2px;
+  transition: color 0.18s;
+}
+.ps-link:hover { color: var(--ink); }
+.ps-signin {
+  font-family: var(--sans); font-size: 13px; font-weight: 600; color: #fff;
+  background: var(--blue); border: 1px solid var(--blue-deep); border-radius: 7px;
+  padding: 8px 16px; cursor: pointer; transition: background 0.18s;
+}
+.ps-signin:hover { background: var(--blue-deep); }
+.ps-signin:disabled { opacity: 0.6; cursor: default; }
+.ps-theme {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  color: var(--ink-3); background: none; border: 0; cursor: pointer; border-radius: 6px;
+  transition: color 0.18s;
+}
+.ps-theme:hover { color: var(--ink); }
+.ps-theme svg { width: 17px; height: 17px; }
+
+.ps .tnum { font-variant-numeric: tabular-nums lining-nums; letter-spacing: -0.01em; }
+
+/* ---- PLAY: drop the immersive .app below the fixed nav, retire its own logo
+   (the shell owns the wordmark). The e05 account cluster STAYS — it carries the
+   live balance + the @suize handle + sign-out + theme. ---- */
+.app { top: var(--ps-nav); }
+.e05-logo { display: none !important; }
+
+/* ---- STUB / dashboard pages (Markets · House · Portfolio · Leaderboard · Agent) ---- */
+.ps-page {
+  min-height: 100dvh;
+  padding: calc(var(--ps-nav) + clamp(44px, 9vh, 104px)) clamp(20px, 5vw, 64px) 90px;
+  max-width: 1200px;
+  margin: 0 auto;
+  font-family: var(--sans);
+  color: var(--ink);
+}
+.ps-page .kick {
+  font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-3); margin-bottom: 16px;
+}
+.ps-page h1 {
+  font-family: var(--serif); font-weight: 500;
+  font-size: clamp(36px, 5.4vw, 64px); letter-spacing: -0.02em; line-height: 1.04;
+  color: var(--ink); margin-bottom: 20px;
+}
+.ps-page .lede {
+  font-size: clamp(16px, 1.5vw, 19px); color: var(--ink-2); max-width: 58ch; line-height: 1.55;
+}
+.ps-rule { height: 1px; border: 0; background: var(--rule-fade); margin: 40px 0; }
+.ps-soon {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 12px; letter-spacing: 0.03em; color: var(--ink-3);
+  border: 1px solid var(--hair); border-radius: 8px; padding: 10px 15px;
+}
+.ps-soon b { color: var(--ink); font-weight: 600; }
+
+@media (max-width: 720px) {
+  .ps-tabs { gap: 0; margin-left: 2px; overflow-x: auto; }
+  .ps-tab { padding: 8px 9px; }
+}

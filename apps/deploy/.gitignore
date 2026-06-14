@@ -10,5 +10,7 @@ bun.lockb
 
 # Screenshots / scratch images (never commit)
 *.png
+# …except the OG share card — a versioned brand asset.
+!public/og.png
 .playwright-mcp/
 .vercel

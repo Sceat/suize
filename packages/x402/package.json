@@ -1,0 +1,35 @@
+{
+  "name": "@suize/x402",
+  "version": "0.1.0",
+  "description": "x402 V2 'exact' primitives for Sui — gasless Address-Balance payment PTBs, the wire types, and the facilitator's exact-fee enforcement. Your Sui address is your account.",
+  "private": false,
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@mysten/sui": "^2.17.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  },
+  "keywords": [
+    "x402",
+    "402",
+    "payments",
+    "agents",
+    "sui",
+    "usdc",
+    "gasless",
+    "suize"
+  ],
+  "license": "MIT"
+}

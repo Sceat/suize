@@ -172,6 +172,14 @@ const event_key = (e: {
   expiry: string
 }): string => `${e.oracle_id}|${e.is_up ? 'U' : 'D'}|${e.strike}|${e.expiry}`
 
+// ----- ODDS PREVIEW poll cadence + freshness TTL — declared TOGETHER on purpose.
+// The TTL must comfortably exceed the cadence + quote latency, or every quote
+// "expires" between polls and the bet cards strobe "Pricing…" once per cycle —
+// we shipped exactly that bug when the cadence was slowed 2s→6s and the 5s TTL
+// silently became shorter than the poll gap. Two missed polls + latency headroom.
+const ODDS_POLL_MS = 6_000
+const ODDS_STALE_MS = ODDS_POLL_MS * 2 + 3_000
+
 // ----- STAKE -> QUANTITY (the "stake = what actually LEAVES your wallet") -----
 // The stake is the dUSDC the user wants to PART WITH IN TOTAL. The router skims a
 // 3% rake on-chain ON TOP of the mint cost, so the real debit is cost + 3%. We
@@ -766,14 +774,22 @@ export function App() {
 
   const [up_cost, set_up_cost] = useState<bigint | null>(null)
   const [down_cost, set_down_cost] = useState<bigint | null>(null)
-  // Per-side LAST-SUCCESSFUL-QUOTE timestamps (epoch ms). With per-side keep-last we
-  // hold a side's last ask on a transient read miss instead of freezing the pair;
-  // but a value that has gone STALE (no fresh quote past the TTL) must NOT keep
-  // reading as live — we stamp each successful update here, and `up_fresh`/
-  // `down_fresh` below flip a stale side to the "Pricing…" render. Refs (not state) —
+  // Per-side LAST-SUCCESSFUL-QUOTE stamps: WHEN (epoch ms) + WHICH ROUND the ask
+  // was quoted on. With per-side keep-last we hold a side's last ask on a transient
+  // read miss instead of freezing the pair; but a kept value must NOT keep reading
+  // as live once it is STALE (no fresh quote past the TTL) — or once the ROUND has
+  // moved on: round-end odds (a ~1.0x favorite / 12x longshot) displayed as live on
+  // the next round's ~50/50 open is exactly the "big number snaps to a different
+  // value" bug. `up_fresh`/`down_fresh` below gate on BOTH. Refs (not state) —
   // read reactively via `now` (1s tick); writing them never needs a re-render.
-  const up_cost_at = useRef(0)
-  const down_cost_at = useRef(0)
+  const up_cost_at = useRef<{ at: number; oracle_id: string }>({
+    at: 0,
+    oracle_id: '',
+  })
+  const down_cost_at = useRef<{ at: number; oracle_id: string }>({
+    at: 0,
+    oracle_id: '',
+  })
 
   // ----- STAKE selector: $ payout-capacity the user wants to bet -----
   // stake_usd is in whole dollars (1 contract = $1 max payout). custom_open
@@ -996,12 +1012,30 @@ export function App() {
     }
   }, [oracle, load_strike])
 
-  // ----- live ODDS via devInspect get_trade_amounts (UP & DOWN), every ~2s ----
+  // ----- THE QUOTE STRIKE — the strike a tap will ACTUALLY buy at ---------------
+  // ONE source of truth for "what does this button cost": the bet card's odds and
+  // run_bet's execution must price the SAME round key. A held (non-empty) position
+  // on the current oracle pins ITS OWN line — run_bet's grow path bets at
+  // position.strike_1e9, either side folding into that round — so the card quotes
+  // that line too. Only a fresh bet (no position) prices the re-snapped ATM strike.
+  // Quoting the card at the ATM strike while holding showed ~50/50 odds for a tap
+  // that executed at the held line: once spot had drifted, a $5 DOWN wager sized at
+  // the displayed ~$0.52 ask was charged the real ~$0.91 ask → "paid $8.90, wins
+  // $0.61". Display and execution now read the same key by construction.
+  const quote_strike: bigint | null =
+    position != null &&
+    !position_empty(position) &&
+    position.oracle_id === oracle?.oracle_id
+      ? BigInt(position.strike_1e9)
+      : strike
+
+  // ----- live ODDS via devInspect get_trade_amounts (UP & DOWN) ---------------
+  // Polled every ODDS_POLL_MS at `quote_strike` (the executable key, above).
   // PER-SIDE KEEP-LAST: each side is quoted in its OWN try, so a LONGSHOT side that
   // reverts at the price band (the lopsided-market failure) no longer rejects a
   // single Promise.all and nukes the HEALTHY side's refresh. A failing side returns
-  // null → its setter keeps the last value (functional setter), and its timestamp
-  // is NOT stamped so the staleness check (below) flips it to "Pricing…" rather than
+  // null → its setter keeps the last value (functional setter), and its stamp
+  // is NOT touched so the staleness check (below) flips it to "Pricing…" rather than
   // showing a frozen ~2x. Mirrors load_cashout's per-side merge.
   const load_odds = useCallback(
     async (o: Oracle, strike_1e9: bigint) => {
@@ -1028,14 +1062,16 @@ export function App() {
         }
       }
       const [up, down] = await Promise.all([quote(true), quote(false)])
-      // Functional setters: keep the last value on a per-side miss. Stamp the
-      // freshness time ONLY on a real new quote so a stale side goes "Pricing…".
+      // Keep the last value on a per-side miss. Stamp time + ROUND identity ONLY
+      // on a real new quote: a stale side goes "Pricing…", and a quote from a
+      // previous round can never read as live on the next one (the response may
+      // land after the round advanced — `o` is the round actually quoted).
       if (up != null) {
-        up_cost_at.current = Date.now()
+        up_cost_at.current = { at: Date.now(), oracle_id: o.oracle_id }
         set_up_cost(up)
       }
       if (down != null) {
-        down_cost_at.current = Date.now()
+        down_cost_at.current = { at: Date.now(), oracle_id: o.oracle_id }
         set_down_cost(down)
       }
     },
@@ -1043,20 +1079,22 @@ export function App() {
   )
 
   useEffect(() => {
-    if (oracle && strike != null && oracle.status === 'active') {
-      load_odds(oracle, strike)
-      // ~6s cadence — slowed from 2s to cut fullnode spam: each tick is 2
+    if (oracle && quote_strike != null && oracle.status === 'active') {
+      load_odds(oracle, quote_strike)
+      // ODDS_POLL_MS cadence — slowed from 2s to cut fullnode spam: each tick is 2
       // cross-origin devInspects and the public fullnode CORS-preflights every POST,
       // so 2s meant ~4 fullnode requests every 2s just for odds. The bet-card odds
-      // stay fresh enough (the real bet re-quotes fresh at submit); lopsidedness
-      // just updates a few seconds slower. Cheap, read-only devInspects.
+      // stay fresh enough (the real bet re-quotes + re-sizes fresh at submit);
+      // lopsidedness just updates a few seconds slower. The freshness TTL is sized
+      // off this cadence (ODDS_STALE_MS, declared with it) so a kept quote never
+      // expires between healthy polls. Cheap, read-only devInspects.
       // Pause when the tab is hidden — no point quoting odds nobody's looking at.
       const id = setInterval(() => {
-        if (!document.hidden) load_odds(oracle, strike)
-      }, 6_000)
+        if (!document.hidden) load_odds(oracle, quote_strike)
+      }, ODDS_POLL_MS)
       return () => clearInterval(id)
     }
-  }, [oracle, strike, load_odds])
+  }, [oracle, quote_strike, load_odds])
 
   // ----- refresh THE balance: manager internal balance + wallet dUSDC --------
   // Both are part of the single displayed number (manager + wallet). We never
@@ -1181,9 +1219,9 @@ export function App() {
     // nudging. (We keep the last bids; the held card freezes on them.)
     if (settling_now) return
     load_cashout()
-    // ~4s cadence (was 1.5s) — the cosmetic rising-tick interpolation keeps the
-    // live cash-out value visually smooth between polls, so 4s is imperceptible
-    // while cutting per-held-bucket devInspect (+CORS preflight) spam on the fullnode.
+    // ~4s cadence (was 1.5s) — the per-side cost floor + the P&L deadband keep
+    // the held numbers calm between polls, so 4s reads fine while cutting
+    // per-held-bucket devInspect (+CORS preflight) spam on the fullnode.
     // Pause when the tab is hidden — resume on the next tick when it's visible.
     const id = setInterval(() => {
       if (!document.hidden) load_cashout()
@@ -1621,35 +1659,43 @@ export function App() {
         tgt_strike = strike
       }
       // Per-contract ask for this side — the basis for sizing `quantity` so the
-      // DEBIT (cost + 3% rake) ≈ the wager. Normally this comes from the 5s odds
-      // preview (up_cost/down_cost). But on a FAST FIRST TAP (before the preview
-      // poll has populated) the preview is null/0; sizing off the old fixed-quantity
-      // NOTIONAL would make `paid` float with the odds ($0.95 / $1.43 on a $1 wager).
-      // So when the preview is missing/zero we fetch a FRESH on-chain per-contract
-      // ask (read_trade_amounts at PREVIEW_QUANTITY = 1 contract) and size from THAT
-      // real price — never the notional. A quote failure fails the bet gracefully.
-      let cost_unit = is_up ? up_cost : down_cost
-      if (cost_unit == null || cost_unit <= 0n) {
-        try {
-          const q = await read_trade_amounts(client, {
-            oracle_id: tgt_oracle_id,
-            expiry_ms: BigInt(tgt_expiry_ms),
-            strike_1e9: tgt_strike,
-            is_up,
-            quantity: PREVIEW_QUANTITY,
-            sender: addr,
-          })
-          cost_unit = q.ask_cost
-        } catch {
-          cost_unit = null
-        }
-        if (cost_unit == null || cost_unit <= 0n) {
-          set_pending_bet(null)
-          set_error('Couldn’t price the bet — try again.')
-          return
-        }
+      // DEBIT (cost + 3% rake) ≈ the wager. ALWAYS a FRESH on-chain quote at the
+      // EXACT target round key (read_trade_amounts at PREVIEW_QUANTITY = 1
+      // contract): the chain charges `quantity` at the EXECUTION-time price, so
+      // sizing from the kept preview once debited $8.90 on a $5 wager (9.5
+      // contracts sized at a stale ~$0.52 ask, charged at the real ~$0.91). The
+      // preview (up_cost/down_cost) is DISPLAY-only; here it survives ONLY as the
+      // fallback for a transient quote-read failure, and ONLY when it passes the
+      // display gate's own criteria (same round + within TTL) — else the bet fails
+      // gracefully: a re-tap beats a silently mis-sized debit.
+      let cost_unit: bigint | null = null
+      try {
+        const q = await read_trade_amounts(client, {
+          oracle_id: tgt_oracle_id,
+          expiry_ms: BigInt(tgt_expiry_ms),
+          strike_1e9: tgt_strike,
+          is_up,
+          quantity: PREVIEW_QUANTITY,
+          sender: addr,
+        })
+        cost_unit = q.ask_cost
+      } catch {
+        const preview = is_up ? up_cost : down_cost
+        const stamp = is_up ? up_cost_at.current : down_cost_at.current
+        cost_unit =
+          preview != null &&
+          preview > 0n &&
+          stamp.oracle_id === tgt_oracle_id &&
+          Date.now() - stamp.at <= ODDS_STALE_MS
+            ? preview
+            : null
       }
-      const quantity = quantity_for_stake(stake_usd, cost_unit)
+      if (cost_unit == null || cost_unit <= 0n) {
+        set_pending_bet(null)
+        set_error('Couldn’t price the bet — try again.')
+        return
+      }
+      let quantity = quantity_for_stake(stake_usd, cost_unit)
       const cost = cost_for_quantity(cost_unit, quantity)
       // The HONEST "paid" figure = bare mint cost + the on-chain 3% router rake —
       // the exact amount that leaves the wallet. Shown as PAID + dropped from the
@@ -1686,23 +1732,22 @@ export function App() {
         } catch {
           // keep last known
         }
-        // FUND FROM A FRESH ON-CHAIN QUOTE AT THE EXACT QUANTITY. The preview
-        // `cost` above is a 5s-stale linear scale of PREVIEW_QUANTITY; on-chain
-        // `router::bet` re-quotes the cost fresh, and growing a winning side (the
-        // contract dearer as spot moves toward it) makes the real cost exceed the
-        // stale figure → an under-funded payment → withdraw_with_proof abort (code
-        // 3). So we re-quote get_trade_amounts at the REAL `quantity` (same call +
-        // `ask_cost` field the preview `up_cost`/`down_cost` come from) and size the
-        // funding off that, keeping the existing 1.08x buffer. The stale `debit`
-        // still drives the optimistic DISPLAY (pending bet) — only FUNDING uses the
-        // fresh quote. On a quote failure we fall back to the stale `need` so a
-        // transient read hiccup doesn't block the bet (the on-chain re-quote + the
-        // buffer still protect funding).
+        // FUND FROM A FRESH ON-CHAIN QUOTE AT THE EXACT QUANTITY. The unit-ask
+        // `cost` above is a linear scale of PREVIEW_QUANTITY from a moment ago;
+        // on-chain `router::bet` re-quotes the cost at execution, and growing a
+        // winning side (the contract dearer as spot moves toward it) makes the
+        // real cost exceed that figure → an under-funded payment →
+        // withdraw_with_proof abort (code 3). So we re-quote get_trade_amounts at
+        // the REAL `quantity` (same call + `ask_cost` field the preview
+        // `up_cost`/`down_cost` come from) and size the funding off that, keeping
+        // the existing 1.08x buffer. On a quote failure we fall back to the
+        // sizing-quote `need` so a transient read hiccup doesn't block the bet
+        // (the on-chain re-quote + the buffer still protect funding).
         let need_fresh = need
         // The fresh BARE mint cost for THIS exact quantity (q.ask_cost). We store
         // its grossed-up debit in the bucket so the LIVE history row matches the
         // REFRESH row (gather_settled_results uses the same indexer bare cost). On a
-        // quote-read hiccup we fall back to the stale preview `debit`. NO PRE-EMPTIVE
+        // quote-read hiccup we fall back to the sizing-quote `cost`. NO PRE-EMPTIVE
         // OOB BLOCK (owner): we DON'T read the band + abort before sending — every
         // bet goes to the chain. If the protocol actually rejects (assert_mintable_ask
         // at mint), the landed-tx / sponsor-502 handlers below map it to the friendly
@@ -1720,9 +1765,48 @@ export function App() {
           need_fresh = bet_amount_with_buffer(q.ask_cost)
           cost_fresh = q.ask_cost
         } catch {
-          // transient quote hiccup — keep the stale-buffered `need` + stale `cost`.
+          // transient quote hiccup — keep the sizing-quote `need` + `cost`.
         }
-        const debit_fresh = debit_with_rake(cost_fresh)
+        let debit_fresh = debit_with_rake(cost_fresh)
+        // WAGER GUARD — "the stake is what leaves your wallet" is a HARD promise,
+        // not a hope. `quantity` was sized from the unit ask a beat ago; if this
+        // at-quantity quote says the REAL debit overshoots the selected stake by
+        // >5% (the ask moved between the two quotes, or book depth priced the
+        // size above the unit ask), RE-SIZE the quantity down proportionally
+        // (cost ≈ linear in quantity) and re-quote once so funding + the recorded
+        // PAID stay honest. Granularity cents over the stake are fine — dollars
+        // never. On a re-quote failure the cost scales linearly with the shrink
+        // (the chain charges the smaller quantity either way).
+        const stake_units = BigInt(Math.max(1, Math.round(stake_usd))) * DUSDC_SCALE
+        const target_cost =
+          (stake_units * 10_000n) / (10_000n + ROUTER_FEE_BPS)
+        if (cost_fresh > (target_cost * 105n) / 100n) {
+          const prev_qty = quantity
+          const resized = (quantity * target_cost) / cost_fresh
+          quantity = resized < 1n ? 1n : resized
+          try {
+            const q2 = await read_trade_amounts(client, {
+              oracle_id: tgt_oracle_id,
+              expiry_ms: BigInt(tgt_expiry_ms),
+              strike_1e9: tgt_strike,
+              is_up,
+              quantity,
+              sender: addr,
+            })
+            cost_fresh = q2.ask_cost
+          } catch {
+            cost_fresh = (cost_fresh * quantity) / prev_qty
+          }
+          need_fresh = bet_amount_with_buffer(cost_fresh)
+          debit_fresh = debit_with_rake(cost_fresh)
+          // Keep the optimistic PENDING preview honest with the resized bet.
+          set_pending_bet({
+            is_up,
+            quantity,
+            debit_1e6: debit_fresh,
+            cost_1e6: cost_fresh,
+          })
+        }
         const shortfall =
           (on_chain ?? 0n) >= need_fresh ? 0n : need_fresh - (on_chain ?? 0n)
         const { total: wallet_total, coin_ids } = await fetch_dusdc_coins(
@@ -2585,17 +2669,22 @@ export function App() {
       : null
 
   // ----- STALENESS — never show a quoted-but-now-STALE odds as live -------------
-  // If a side's quote genuinely stops updating (the read keeps failing) past the
-  // TTL, we treat it as NOT freshly quoted so the "Pricing…" render re-engages
-  // instead of showing a frozen number. get_trade_amounts is permissive (only the
-  // MINT asserts the band), so both sides normally quote fine and this rarely
-  // triggers. TTL > ~2 poll cycles (5s at the 2s cadence). `now` (1s tick) drives
-  // re-evaluation. NO lopsidedness coupling — a side is never disabled for being a
-  // longshot/favorite.
-  const ODDS_STALE_MS = 5_000
-  const up_fresh = up_cost == null || now - up_cost_at.current <= ODDS_STALE_MS
+  // A kept quote reads as fresh ONLY while (a) it was quoted on the CURRENT round
+  // (identity stamp — old-round odds must never display as live on a new round)
+  // and (b) it is within ODDS_STALE_MS of landing. The TTL is sized off the poll
+  // cadence (declared together at module scope) so a healthy poll NEVER expires
+  // between ticks — staleness only engages when quotes genuinely stop (reads
+  // failing / tab hidden), flipping the side to "Pricing…" instead of a frozen
+  // number. `now` (1s tick) drives re-evaluation. NO lopsidedness coupling — a
+  // side is never disabled for being a longshot/favorite.
+  const up_fresh =
+    up_cost == null ||
+    (up_cost_at.current.oracle_id === oracle?.oracle_id &&
+      now - up_cost_at.current.at <= ODDS_STALE_MS)
   const down_fresh =
-    down_cost == null || now - down_cost_at.current <= ODDS_STALE_MS
+    down_cost == null ||
+    (down_cost_at.current.oracle_id === oracle?.oracle_id &&
+      now - down_cost_at.current.at <= ODDS_STALE_MS)
 
   // ----- PER-SIDE PAYOUT (the DIFFERING number) — pure read of existing odds ----
   // A winning binary pays $1 per contract. With the constant WAGER sized into
@@ -2755,18 +2844,26 @@ export function App() {
   // BALANCE is deliberately NOT snapshotted here: it is the user's real money and
   // must stay live through the freeze (see `disp_balance_str`). Pure
   // presentation; the snapshot never feeds a tx and state keeps reconciling.
+  // `upQuoted`/`downQuoted` pin the per-side "a real quote backs this number"
+  // flag too: quotes stop during the freeze, so the LIVE freshness gate decays to
+  // false mid-window — without the pin the cards would flip to "Pricing…" in the
+  // middle of the freeze instead of holding their round-end numbers.
   const frozen_snapshot = useRef<{
     chartPriceUsd: number | null
     upWin: number
     downWin: number
     upMult: number | null
     downMult: number | null
+    upQuoted: boolean
+    downQuoted: boolean
   }>({
     chartPriceUsd: null,
     upWin: stake_usd * 2,
     downWin: stake_usd * 2,
     upMult: null,
     downMult: null,
+    upQuoted: false,
+    downQuoted: false,
   })
 
   // ----- THE HOUSE (LP) LOGIC — headless hook; the ported e05 footer renders it.
@@ -2838,6 +2935,10 @@ export function App() {
   // stop easing) holds the head still during the window.
   const live_balance_str =
     displayed_balance != null ? fmt_money_whole(displayed_balance) : '—'
+  // The LIVE per-side "a real, fresh, same-round quote backs the number" flags —
+  // the e05 renders the big WIN number only when true ("Pricing…" otherwise).
+  const up_quoted_live = up_cost_stake != null && up_fresh
+  const down_quoted_live = down_cost_stake != null && down_fresh
   if (!frozen) {
     frozen_snapshot.current = {
       chartPriceUsd: chart_price_usd,
@@ -2845,6 +2946,8 @@ export function App() {
       downWin: down_win,
       upMult: up_mult,
       downMult: down_mult,
+      upQuoted: up_quoted_live,
+      downQuoted: down_quoted_live,
     }
   }
   const snap = frozen_snapshot.current
@@ -2853,6 +2956,8 @@ export function App() {
   const disp_down_win = frozen ? snap.downWin : down_win
   const disp_up_mult = frozen ? snap.upMult : up_mult
   const disp_down_mult = frozen ? snap.downMult : down_mult
+  const disp_up_quoted = frozen ? snap.upQuoted : up_quoted_live
+  const disp_down_quoted = frozen ? snap.downQuoted : down_quoted_live
   // BALANCE IS EXEMPT FROM THE FREEZE. The freeze pins ROUND figures (price,
   // odds, win/multiple) at their round-end value so they don't drift mid-settle —
   // but the balance is the user's real money, which can change at ANY time
@@ -2980,9 +3085,8 @@ export function App() {
         : state === 'losing'
           ? 'losing now'
           : 'about even'
-    // Conditional settle profit (qty × $1 − cost) — ALWAYS grey/"IF", never tinted.
+    // Conditional settle payout (qty × $1) — ALWAYS grey/"IF", never tinted.
     const win_units = qty
-    const profit_if_right = win_units - cost
     return {
       side: side_word,
       contractsStr: fmt_contracts(qty),
@@ -2992,8 +3096,9 @@ export function App() {
       nowSublabel: now_sublabel,
       exitValueStr: `value now ${fmt_usd_cents(value)}`,
       paidStr: `paid ${fmt_usd_cents(cost)}`,
-      profitIfRightStr: fmt_signed_cents(dusdc_to_usd(profit_if_right)),
-      totalIfSettledStr: `pays ${fmt_usd(win_units)} total`,
+      // '+' prefix: the wager already left at bet time, so the settle credit is a
+      // literal +$X cash-in — signed like every other landing amount, FOMO intact.
+      ifWinTotalStr: `+${fmt_usd_cents(win_units)}`,
       // The button carries the SIGNED LIVE NET — the real cash-out-now gain, which
       // CAN be negative (shown honestly with "take"). Plain "Cash out" pre-quote.
       cashoutCtaStr: has_quote
@@ -3069,15 +3174,17 @@ export function App() {
     up: side_vm(
       disp_up_win,
       disp_up_mult,
-      // QUOTED only when a quote exists AND it is FRESH — a stale side reads as
-      // not-quoted so the e05 shows "Pricing…", not a frozen number.
-      up_cost_stake != null && up_fresh,
+      // QUOTED only when a quote exists AND it is fresh + same-round — a stale
+      // side reads as not-quoted so the e05 shows "Pricing…", not a frozen
+      // number. Freeze-pinned alongside win/mult (disp_*_quoted) so the cards
+      // hold their round-end render through the settling window.
+      disp_up_quoted,
       Boolean(up_enabled),
     ),
     down: side_vm(
       disp_down_win,
       disp_down_mult,
-      down_cost_stake != null && down_fresh,
+      disp_down_quoted,
       Boolean(down_enabled),
     ),
     // Manager-create still shows a spinner on the UP control (the first tap path).
@@ -3220,7 +3327,10 @@ export function App() {
         set_tx_pending(false),
       )
     },
-    withdraw: () => set_withdraw_open(true),
+    // "Withdraw" is a funnel to the Suize wallet, not an on-chain move: Crash is
+    // testnet play-money, so funds management lives in the mainnet PAY wallet.
+    // Opens wallet.suize.io in a new tab (keeps the Crash session/streak alive).
+    withdraw: () => window.open(WALLET_URL, '_blank', 'noopener'),
     addFunds: () => window.open(WALLET_URL, '_blank', 'noopener'),
     signInGoogle: () => sign_in_google(),
     signOut: () => sign_out(),

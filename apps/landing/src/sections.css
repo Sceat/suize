@@ -302,45 +302,24 @@
 .dx-navlink.is-open .dx-navlink__caret {
   transform: translateY(-1px) rotate(180deg);
 }
-/* the route-aware CTA — MIRRORS the re-tuned home .sx-cta TRUE-GLASS recipe
-   EXACTLY, just SLIGHTLY less round (10px vs the home button's 12px) so the nav
-   chip reads as the same translucent frosted material, scaled to the bar: the
-   identical translucent fill (the bar shows THROUGH the blur — NO solid blue
-   gradient), the soft light glass edge (a whisper of blue, not a painted border),
-   the crisp inset top-light + bottom sheen, the neutral highlight-pool ::before,
-   and the SVG fractal-noise GRAIN ::after. On the home it reads "Access your
-   wallet"; on the CHARGE surface "Start earning now" (labels from config). The
-   slow ara.so morph levers (margin/padding, ~0.9s) are KEPT so it tightens with
-   the island and never snaps independently. The glass tokens get local fallbacks
-   here (same values as home.css) so the glass holds on EVERY route, not just
+/* the route-aware CTA — MIRRORS the home .sx-cta RAISED-PAPER recipe (owner-
+   locked 2026-06-10; the frosted-glass pane is retired) at nav scale, slightly
+   less round (10px vs the home button's 13px). A solid paper card seated on
+   the bar: hairline + lit top edge + soft drop; the accent arrives only on
+   hover. On the home it reads "Access your wallet"; on the CHARGE surface
+   "Start earning" (labels from config). The slow ara.so morph levers
+   (margin/padding, ~0.9s) are KEPT so it tightens with the island. The paper
+   tokens carry local fallbacks so the recipe holds on EVERY route, not just
    where home.css is loaded. */
 :root {
-  /* local fallbacks — kept IDENTICAL to home.css's refined --cta-* recipe so the
-     nav chip is the same confident, readable frosted glass on every route. */
-  --cta-fill: rgba(244, 249, 255, 0.42);
-  --cta-fill-hov: rgba(247, 251, 255, 0.58);
-  --cta-edge: linear-gradient(
-    150deg,
-    rgba(255, 255, 255, 0.95) 0%,
-    rgba(150, 190, 240, 0.5) 48%,
-    rgba(255, 255, 255, 0.78) 100%
-  );
-  --cta-hi: rgba(255, 255, 255, 0.85);
-  --cta-sheen: rgba(255, 255, 255, 0.42);
-  --cta-shadow: rgba(20, 50, 96, 0.24);
+  --ctap-hi: rgba(255, 255, 255, 0.85);
+  --ctap-drop: rgba(10, 27, 46, 0.25);
+  --ctap-ink-hov: var(--blue-deep);
 }
 :root[data-theme='dark'] {
-  --cta-fill: rgba(40, 64, 100, 0.4);
-  --cta-fill-hov: rgba(50, 80, 122, 0.54);
-  --cta-edge: linear-gradient(
-    150deg,
-    rgba(200, 222, 252, 0.5) 0%,
-    rgba(122, 196, 255, 0.42) 48%,
-    rgba(190, 214, 246, 0.28) 100%
-  );
-  --cta-hi: rgba(220, 235, 255, 0.3);
-  --cta-sheen: rgba(170, 200, 240, 0.14);
-  --cta-shadow: rgba(0, 0, 0, 0.52);
+  --ctap-hi: rgba(236, 239, 243, 0.08);
+  --ctap-drop: rgba(0, 0, 0, 0.55);
+  --ctap-ink-hov: var(--blue-bright);
 }
 .sx-nav__cta {
   position: relative;
@@ -349,91 +328,41 @@
   gap: 7px;
   margin-left: 10px;
   padding: 11px 18px;
-  /* slightly less round than the home .sx-cta (12px) — same family, nav-scale. */
+  /* slightly less round than the home .sx-cta — same family, nav-scale. */
   border-radius: 10px;
-  border: 1px solid transparent;
+  border: 1px solid var(--hair-strong);
   font-family: var(--sans);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   white-space: nowrap;
   color: var(--fg);
-  /* NO overflow:hidden — that clipped the outward glow to the chip's box. The
-     grain ::after clips itself to the rounded shape (border-radius + overflow on
-     the pseudo only), so the button stays unclipped and its glow blooms free. */
-  /* translucent frosted fill (padding-box) + soft light glass edge (border-box)
-     in ONE paint — the exact .sx-cta recipe so the two buttons read as the same
-     see-through lit-glass slab. NO solid blue gradient. */
-  background:
-    linear-gradient(var(--cta-fill), var(--cta-fill)) padding-box,
-    var(--cta-edge) border-box;
-  /* the SAME strong frost as the re-tuned home .sx-cta — clearly frosted glass. */
-  -webkit-backdrop-filter: blur(26px) saturate(1.7) brightness(1.05);
-  backdrop-filter: blur(26px) saturate(1.7) brightness(1.05);
+  background: var(--ink-raised);
   box-shadow:
-    0 12px 32px -16px var(--blue-glow),
-    0 6px 18px -14px var(--cta-shadow),
-    inset 0 1px 0 0 var(--cta-hi),
-    inset 0 -8px 18px -14px var(--cta-sheen);
+    var(--card-shadow),
+    0 8px 20px -14px var(--ctap-drop),
+    inset 0 1px 0 0 var(--ctap-hi);
   transition:
-    box-shadow 0.32s cubic-bezier(0.16, 1, 0.3, 1),
-    background 0.32s ease,
-    /* a smooth premium lift on the same premium curve as the glow/fill; the
-       crisp press is restored by the faster active transition below. */
     transform 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.32s cubic-bezier(0.16, 1, 0.3, 1),
     /* morph levers — the cta tightens (margin/padding) in lock-step with the
        island so it never snaps independently of the bar (slow ara.so morph). */
     margin var(--nav-dur) var(--nav-ease),
     padding var(--nav-dur) var(--nav-ease);
 }
-/* the soft neutral highlight pool — the same lit-glass catch the home .sx-cta
-   wears, so the nav button sits in the same glass family. */
-.sx-nav__cta::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(
-    120% 80% at 24% -12%,
-    rgba(255, 255, 255, 0.5),
-    rgba(255, 255, 255, 0) 58%
-  );
-  opacity: 0.9;
-  pointer-events: none;
-}
-/* the GRAIN texture — the same fine fractal-noise overlay the home .sx-cta uses
-   (soft-light, very low opacity) so the nav button reads as real textured glass. */
-.sx-nav__cta::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  /* LOCAL clip on the grain layer only — keeps the button overflow-visible so its
-     glow box-shadow blooms past the chip (this replaces the button-wide
-     overflow:hidden that cut the halo). */
-  overflow: hidden;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 120px 120px;
-  mix-blend-mode: soft-light;
-  opacity: 0.16;
-  pointer-events: none;
-}
-/* a smooth premium lift + glass-brighten + soft accent glow — the brighter fill
-   makes the glass read lit, the deeper halo + accent-hair ring is the soft glow,
-   the -1px rise is the lift (all on the same 0.32s cubic-bezier). Stays glassy. */
+/* hover — the card rises; the accent arrives (blue label + accent hairline +
+   a faint bloom under the deepened seat). */
 .sx-nav__cta:hover {
   transform: translateY(-1px);
-  background:
-    linear-gradient(var(--cta-fill-hov), var(--cta-fill-hov)) padding-box,
-    var(--cta-edge) border-box;
+  color: var(--ctap-ink-hov);
+  border-color: var(--accent-hair);
   box-shadow:
-    /* the wide soft bloom escapes the chip on all sides (low negative spread). */
-    0 18px 52px -14px var(--blue-glow),
-    0 0 28px -6px var(--accent-glow),
-    0 10px 26px -14px var(--cta-shadow),
-    0 0 0 1px var(--accent-hair),
-    inset 0 1px 0 0 var(--cta-hi),
-    inset 0 -8px 18px -14px var(--cta-sheen);
+    var(--card-shadow-hover),
+    0 14px 30px -14px var(--ctap-drop),
+    0 0 22px -10px var(--blue-glow),
+    inset 0 1px 0 0 var(--ctap-hi);
 }
 /* crisp press — a faster transition wins over the slow hover lift so the click
    feels immediate, then eases back out. */
@@ -441,15 +370,15 @@
   transform: translateY(1px);
   transition:
     transform 0.1s ease,
-    box-shadow 0.1s ease,
-    background 0.1s ease;
+    box-shadow 0.1s ease;
 }
 .sx-nav__cta:focus-visible {
   outline: none;
+  border-color: var(--accent);
   box-shadow:
-    var(--glow-accent),
     0 0 0 3px var(--accent-wash),
-    inset 0 1px 0 0 var(--cta-hi);
+    var(--card-shadow),
+    inset 0 1px 0 0 var(--ctap-hi);
 }
 @media (max-width: 720px) {
   .sx-nav__links .dx-navlink:not(.sx-nav__products) {

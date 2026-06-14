@@ -21,9 +21,10 @@ import { Reveal, CopyButton } from '../ui'
 //
 // LAWS: every CTA is a sharp frosted rectangle (.sx-cta) — never a pill; ZERO
 // decorative dots; ZERO boxes. Copy is pulled from BUSINESS (config.js).
-// HONESTY: `402-shaped, x402-compatible by design`. NO PRICING anywhere on this
-// page — the receipt shows the paid moment (an agent's payment landing), never
-// a fee split / net / "2%". Pricing lives only on the /pricing page.
+// HONESTY (claim ladder): `gasless, x402-compatible by design`; NEVER "on x402".
+// NO PRICING anywhere on this page — the receipt shows the paid moment (an
+// agent's payment landing), never a fee split / net / "2%". Pricing lives only
+// on the /pricing page.
 // ============================================================================
 
 // the shared station header — a huge serif line alone in the water (mirrors
@@ -81,12 +82,13 @@ function StationCta({ cta, ghost }) {
   )
 }
 
-// The CHARGE snippet — illustrative DX. Kept in sync with the rendered <pre>.
-const CHARGE_SNIPPET = `return suize.charge({
-  amount: 9.00,
-  memo: 'datafeed · monthly',
-  recurring: true,
-})`
+// The CHARGE snippet — the REAL @suize/pay middleware (npm-published). Kept in
+// sync with the rendered <pre>. The price is the merchant's OWN example number
+// (allowed), never a Suize fee. Subscriptions are push-not-pull: the customer
+// signs each renewal, nothing reaches into their account — no relayer, no pull.
+const CHARGE_SNIPPET = `import { suize } from '@suize/pay'
+
+app.use(suize({ to: '0xYOU', price: '9.00' }))`
 
 // STATION 1 — THE CHARGE. The snippet and the receipt it produces RISE side by
 // side as two floating SHARP-cornered glass laminae (NOT a boxed card pair, NO
@@ -108,21 +110,22 @@ export function ChargeBeat() {
           <div className="bz-lamina bz-snippet is-rising">
             <span className="bz-lamina__hair" aria-hidden="true" />
             <div className="bz-snippet__head">
-              <span className="ed-eyebrow">suize.charge</span>
+              <span className="ed-eyebrow">@suize/pay</span>
               <span className="bz-snippet__tags">
-                <span className="bz-tag">402-shaped</span>
+                <span className="bz-tag">x402</span>
                 <CopyButton value={CHARGE_SNIPPET} label="Copy charge snippet" />
               </span>
             </div>
             <pre className="bz-snippet__code">
               <code>
-                <span className="c-key">return</span> suize.
-                <span className="c-fn">charge</span>(<span className="c-str">{`{`}</span>
-                {'\n  '}amount: <span className="c-num">9.00</span>,
-                {'\n  '}memo: <span className="c-str">'datafeed · monthly'</span>,
-                {'\n  '}recurring: <span className="c-key">true</span>,
-                {'\n'}
-                <span className="c-str">{`}`}</span>)
+                <span className="c-key">import</span> {'{ suize }'}{' '}
+                <span className="c-key">from</span>{' '}
+                <span className="c-str">'@suize/pay'</span>
+                {'\n\n'}app.<span className="c-fn">use</span>(
+                <span className="c-fn">suize</span>({'{ '}to:{' '}
+                <span className="c-str">'0xYOU'</span>, price:{' '}
+                <span className="c-str">'9.00'</span>
+                {' }'}))
               </code>
             </pre>
           </div>
@@ -151,10 +154,10 @@ export function ChargeBeat() {
               </div>
               <div className="bz-receipt__row">
                 <span className="bz-receipt__act">
-                  Renews <span className="host">· monthly</span>
+                  Verified <span className="host">· on-chain</span>
                 </span>
                 <span className="bz-receipt__lead" />
-                <span className="bz-receipt__amt">on its own</span>
+                <span className="bz-receipt__amt">paid ✓</span>
               </div>
             </div>
             <div className="bz-receipt__foot">
@@ -289,7 +292,7 @@ export function CloseBeat() {
     <section className="sx-station sx-station--close sx-station--bzclose" id="get-paid">
       <div className="sx-wrap sx-close__inner">
         <Reveal>
-          {/* the 402-shaped honesty line — read plainly, not a whisper */}
+          {/* the claim-ladder honesty line — read plainly, not a whisper */}
           <p className="sx-close__custody bz-close__honest">{close.honest}</p>
         </Reveal>
 

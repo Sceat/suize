@@ -8,10 +8,38 @@
    This file is the SINGLE EXTRACTABLE CONTRACT for src/system/*. It has zero
    app-local dependencies; @import it once at the CSS root (src/styles/index.css).
 
-   Tailwind v4 reads `--color-*` inside @theme, so the @theme block at the bottom
-   re-exposes the live `:root` vars as utility aliases (text-ink, bg-paper, …).
-   ALL legacy ether/ice/carbon/gold/sui aliases are DELETED — none survive.
+   Tailwind is GONE (2026-06-11 — zero utilities were used); the small reset
+   below replaces the only thing its preflight provided.
    ========================================================================== */
+
+/* ── BASE RESET (replaces tailwind preflight) ─────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+input,
+textarea,
+select {
+  font: inherit;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
 
 /* ── LIGHT (default) ──────────────────────────────────────────────────────── */
 :root {
@@ -308,38 +336,48 @@ a {
   }
 }
 
-/* ── Tailwind v4 color aliases ────────────────────────────────────────────────
-   Re-expose the live `:root` vars as `--color-*` so utilities (bg-paper,
-   text-ink, border-hair, text-cyan, …) resolve to the THEMED value. Tailwind v4
-   reads these at build time as the value `var(--paper)`, so the utilities stay
-   theme-reactive at runtime. Also register the font families.
-   ────────────────────────────────────────────────────────────────────────── */
-@theme {
-  --color-paper: var(--paper);
-  --color-paper-2: var(--paper-2);
-  --color-paper-3: var(--paper-3);
-  --color-ink: var(--ink);
-  --color-ink-2: var(--ink-2);
-  --color-ink-3: var(--ink-3);
-  --color-hair: var(--hair);
-  --color-hair-2: var(--hair-2);
+/* ══════════════════════════════════════════════════════════════════════════
+   GLOBALS PROMOTED from the retired tokens-journal.css (2026-06-10 sweep):
+   the wordmark face + the custom-cursor layers — both load-bearing for the
+   production ui/ (rd.css reads 'Hashgraph Title'; CustomCursor mounts the
+   .j-cursor-* layers; `.rd` scopes its own cursor:none).
+   ════════════════════════════════════════════════════════════════════════ */
+@font-face {
+  font-family: 'Hashgraph Title';
+  src: url('/fonts/Hashgraph-Title.woff2') format('woff2');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
 
-  --color-cyan: var(--cyan);
-  --color-cyan-bright: var(--cyan-bright);
-  --color-cyan-soft: var(--cyan-soft);
-  --color-cyan-wash: var(--cyan-wash);
-  --color-good: var(--good);
-  --color-good-wash: var(--good-wash);
-  --color-warn: var(--warn);
-
-  --font-serif: var(--serif);
-  --font-sans: var(--sans);
-  --font-mono: var(--mono);
-
-  --radius-corner: var(--corner);
-
-  --ease-expo: var(--e-expo);
-  --ease-quart: var(--e-quart);
-  --ease-spring: var(--e-spring);
-  --ease-inout: var(--e-inout);
+.j-cursor-dot,
+.j-cursor-ring {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 90;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  will-change: transform;
+}
+.j-cursor-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #1e7fd6;
+  box-shadow: 0 0 10px 1px rgba(30, 127, 214, 0.35);
+}
+.j-cursor-ring {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(30, 127, 214, 0.28);
+  box-shadow: 0 0 12px rgba(30, 127, 214, 0.18);
+}
+@media (hover: none), (pointer: coarse) {
+  .j-cursor-dot,
+  .j-cursor-ring {
+    display: none;
+  }
 }

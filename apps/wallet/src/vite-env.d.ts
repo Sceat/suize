@@ -7,9 +7,19 @@ interface ImportMetaEnv {
   readonly VITE_SUI_RPC_URL?: string;
   readonly VITE_ENOKI_API_KEY?: string;
   readonly VITE_GOOGLE_CLIENT_ID?: string;
-  readonly VITE_OAUTH_REDIRECT_PATH?: string;
-  /** Backend WebSocket URL (e.g. ws://localhost:8099/ws dev, wss://api.suize.io/ws prod). */
+  /**
+   * A SECOND Google OAuth client id for the /agent-connect door — the external
+   * agent (MCP) authenticates under a DISTINCT zkLogin identity (a different `aud`)
+   * so it never reuses the human wallet session. Empty -> /agent-connect cannot
+   * mint an agent session (it shows the not-configured state). See env.ts
+   * GOOGLE_AGENT_CLIENT_ID.
+   */
+  readonly VITE_GOOGLE_AGENT_CLIENT_ID?: string;
+  /** Backend WebSocket URL (e.g. ws://localhost:8080/ws dev, wss://api.suize.io/ws prod). */
   readonly VITE_WS_URL?: string;
+  /** Backend HTTP base (x402 V2 facilitator) — used only by the /confirm SSO popup.
+   * Unset => dev http://localhost:8099, prod https://api.suize.io. See env.ts API_BASE. */
+  readonly VITE_SUIZE_API?: string;
   /**
    * The scoped AI agent's Sui address (0x…). The owner-minted AgentCap is transferred
    * here at account creation. Empty -> account creation throws "agent not configured"

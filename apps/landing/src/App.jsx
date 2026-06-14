@@ -34,21 +34,29 @@ const ROOM_IDS = ['crash']
 // The route that gets the dark, corporate BUSINESS room palette (theme.css
 // [data-room='business']) — the CHARGE page visibly shifts from the airy light
 // wallet world to a serious deep-blue corporate one.
-const BUSINESS_ROUTE = 'for-business'
+const BUSINESS_ROUTE = 'business'
 
-// Hash redirects so no inbound link 404s after the IA split. The old audience
-// routes AND the now-retired standalone product pages fold into the two
-// audience pages so old links never 404.
-//   #/agents     → #/             (PAY magic is the home)
-//   #/businesses → #/for-business (CHARGE got its own named page)
-//   #/wallet     → #/             (the PAY home already covers the wallet)
-//   #/checkout   → #/for-business (the CHARGE page already covers charging)
-const HASH_REDIRECTS = {
+// LEGACY redirects. Server-side path redirects (the old `/for-business` etc.)
+// live in vercel.json; this map only handles OLD HASH links (`#/for-business`)
+// — the hash never reaches the server, so the SPA converts it to the path once
+// on load. Every old inbound link lands on its new home, no 404.
+const LEGACY_HASH = {
+  'for-business': '/business',
+  businesses: '/business',
   agents: '/',
-  businesses: '/for-business',
   wallet: '/',
-  checkout: '/for-business',
+  checkout: '/business',
 }
+
+// Per-route <title> (the visible tab name; the static per-path OG cards in
+// index.html / business.html own the social previews for crawlers).
+const TITLES = {
+  business: 'Suize for business — get paid by AI agents',
+  pricing: 'Pricing — Suize',
+  docs: 'Docs — Suize',
+  deploy: 'Deploy — ship a site to Walrus, paid by an agent',
+}
+const DEFAULT_TITLE = 'Suize — the AI wallet that makes life easier'
 
 function routeId(route) {
   const seg = route.replace(/^\//, '').split('/')[0]
@@ -172,12 +180,23 @@ export default function App() {
     startMotion()
   }, [])
 
-  // redirect the retired audience routes to their new homes (replace, so Back
-  // doesn't bounce back into the dead route)
+  // ONE-TIME on load: convert an OLD hash link (`#/for-business`, `#/pricing`)
+  // to its clean path. The hash never reaches the server, so only the SPA can
+  // do this; path-level legacy redirects (`/for-business` → `/business`) are
+  // server-side in vercel.json.
   useEffect(() => {
-    const seg = routeId(route)
-    const to = HASH_REDIRECTS[seg]
-    if (to) window.location.replace(`#${to}`)
+    const h = window.location.hash.replace(/^#/, '')
+    if (!h.startsWith('/')) return
+    const seg = h.replace(/^\//, '').split('/')[0]
+    const dest = LEGACY_HASH[seg] ?? (seg ? `/${seg}` : '/')
+    window.history.replaceState({}, '', dest)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, [])
+
+  // keep the visible tab <title> in sync with the route (crawler OG cards are
+  // static per-path; this is just the live tab name on SPA navigation).
+  useEffect(() => {
+    document.title = TITLES[routeId(route)] ?? DEFAULT_TITLE
   }, [route])
 
   // refresh ScrollTrigger after a route change (pinned sections recalc)
@@ -214,8 +233,8 @@ export default function App() {
   if (id === 'pricing') page = <Pricing />
   // /docs — the demoable how-it-works + quickstart explainer (one page, merged).
   else if (id === 'docs') page = <Docs />
-  // /for-business (CHARGE) — its own named merchant page (Phase C rebuild).
-  else if (id === 'for-business') page = <Businesses />
+  // /business (CHARGE) — its own named merchant page (Phase C rebuild).
+  else if (id === 'business') page = <Businesses />
   // /deploy — THE featured real merchant; its own full page, not a stub.
   else if (id === 'deploy') page = <Deploy />
   else if (ROOM_IDS.includes(id)) page = <ProductStub id={id} />

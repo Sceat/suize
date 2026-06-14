@@ -1,19 +1,28 @@
 /**
- * The PAY-model data shapes — the v1 wallet built on the `suize::account` module.
+ * The PAY-model data shapes — the v1 wallet on the STANDALONE `subs::subscription`
+ * module + a plain wallet-USDC balance. The old `suize::account` cage (a funded
+ * shared Account + its deposit/withdraw/spend verbs) is RETIRED: there is no
+ * on-chain "sub-account" balance to deposit into anymore. The agent's spend cap is
+ * now its OWN address balance (see `useAgent`), and recurring payments are
+ * push-not-pull Party objects the user signs each period (see `subs.ts`). The
+ * agent's spend cap is the balance of its 1-of-2 multisig sub-account (see
+ * `useAgent`) — a separate on-chain address the user funds and can withdraw from.
  *
- * This REPLACES the legacy three-account cage types (mandate/vault) for the new face.
- * The mental model is TWO cards + a verifiable timeline:
- *   • "Your money"  — the user's OWN wallet USDC balance (getAllBalances).
- *   • "Agent money" — the shared `Account<USDC>` balance (balance_value).
- * Plus subscriptions (read from SubscriptionCreated/Cancelled events) and the
- * on-chain activity timeline (read from the account module's events).
+ * The mental model is now ONE wallet balance + two lists:
+ *   • "Your money" — the user's OWN wallet USDC balance (getBalance).
+ *   • Subscriptions — live `Subscription<USDC>` Party objects this owner holds
+ *     (read via getOwnedObjects), each {merchant, amount, period, paid-through}.
+ *   • Activity — subscription lifecycle events (Created/Renewed/Cancelled) +
+ *     sent payments (queryTransactionBlocks FromAddress, negative-USDC rows).
  *
- * Every figure is REAL on-chain truth or an honest empty/zero state — never fabricated.
- * Money is rendered in Martian-Mono blue (the locked broadsheet language).
+ * Every figure is REAL on-chain truth or an honest empty/zero state — never
+ * fabricated. Money renders in Martian-Mono blue (the locked broadsheet language).
  */
 
+import type { MultiSigPublicKey } from '@mysten/sui/multisig';
+
 // ───────────────────────────────────────────────────────────────────────────
-// Balances — the two cards.
+// Balances — the one wallet pot.
 // ───────────────────────────────────────────────────────────────────────────
 
 /** A USDC balance, both raw (base units) and human-scaled, plus its USD value. */
@@ -27,71 +36,85 @@ export interface UsdcBalance {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Subscriptions — owner-approved recurring authorizations (child fields).
+// Subscriptions — live `subs::subscription::Subscription<USDC>` Party objects.
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
- * One active subscription, reconstructed from the on-chain events
- * (`SubscriptionCreated` minus `SubscriptionCancelled`) and confirmed live via
- * `subscription_info`. The payee is FIXED at creation and can never be redirected.
+ * One live subscription, read straight from the on-chain Party object the owner
+ * holds (getOwnedObjects → showContent). The merchant + amount + period are FIXED
+ * at creation; only `paidUntilMs` advances. PUSH-not-pull: the object holds NO
+ * balance — each period is paid inline at create/renew (see `subs.ts`).
  */
 export interface Subscription {
-  /** the u64 sub key (dynamic-field key on the Account) — as a string for bigint-safety. */
-  subKey: string;
-  /** the FIXED recipient address. */
-  payee: string;
-  /** the per-period ceiling in USDC base units (1e-6) as a string. */
-  periodCapRaw: string;
-  /** per-period cap, human-scaled (USDC). */
-  periodCapUi: number;
+  /** the on-chain Subscription<USDC> object id (the Party object). */
+  id: string;
+  /** the FIXED merchant/recipient address. */
+  merchant: string;
+  /** the per-period price in USDC base units (1e-6) as a string. */
+  amountRaw: string;
+  /** per-period price, human-scaled (USDC). */
+  amountUi: number;
   /** the period length in ms (e.g. 30 days for monthly). */
   periodMs: number;
-  /** wall-clock ms of the most recent charge (or of creation). */
-  lastChargedMs: number;
-  /** a human label for the merchant, derived from the memo/known payees (best-effort). */
+  /** wall-clock ms the subscription is paid THROUGH (`active ⇔ now < paidUntilMs`). */
+  paidUntilMs: number;
+  /** merchant-supplied opaque ref (hex `0x…`), echoed from every event. */
+  ref: string;
+  /** a human label for the merchant (best-effort from known payees / ref). */
   label: string;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Activity timeline — the verifiable trace, read straight from chain events.
+// Activity timeline — the verifiable trace (subs events + sent payments).
 // ───────────────────────────────────────────────────────────────────────────
 
-/** The kind of activity row — one per on-chain account event. Drives the glyph + copy. */
+/**
+ * The kind of activity row. Drives the glyph + copy. The send/payment split is the
+ * presence of the Suize treasury fee output: a plain transfer has none (`sent`/
+ * `received`), a rail payment carries the 2%/$0.01 split (`paid`/`charged`).
+ */
 export type ActivityKind =
-  | 'created' // AccountCreated
-  | 'deposit' // Deposited
-  | 'withdraw' // Withdrawn
-  | 'spend' // Spent (the PAY receipt)
-  | 'charge' // Charged (the CHARGE receipt — a subscription debit)
-  | 'sub-created' // SubscriptionCreated
-  | 'sub-cancelled'; // SubscriptionCancelled
+  | 'sub-created' // SubscriptionCreated (first period paid inline)
+  | 'sub-renewed' // SubscriptionRenewed (one period charged)
+  | 'sub-cancelled' // SubscriptionCancelled
+  | 'sent' // a wallet → anyone PLAIN USDC transfer (no rail fee) — money OUT
+  | 'paid' // a wallet → merchant RAIL PAYMENT (treasury fee output) — money OUT
+  | 'received' // anyone → wallet PLAIN USDC transfer (no rail fee) — money IN
+  | 'charged'; // someone PAID YOU on the rail (treasury fee output) — money IN (the merchant leg)
 
 /** The sign of an amount on a timeline row — money out (−), money in (+), or neutral. */
 export type ActivityFlow = 'out' | 'in' | 'none';
 
 /**
- * One row in the verifiable activity timeline, reconstructed from a single on-chain
- * `account` event. Reverse-chronological. `txDigest` is tappable → the explorer
- * (the "verify ↗" affordance — this is the verifiable trace, read from chain).
+ * One row in the verifiable activity timeline. Reverse-chronological. `txDigest`
+ * is tappable → the explorer (the "verify ↗" affordance). Every row carries one.
  */
 export interface Activity {
-  /** stable id (the event id: `${txDigest}:${eventSeq}`). */
+  /** stable id (the event id `${txDigest}:${eventSeq}` or the tx digest). */
   id: string;
-  /** epoch ms (event timestampMs, or the on-chain `timestamp` field where present). */
+  /** epoch ms (event/tx timestampMs). */
   ts: number;
   kind: ActivityKind;
-  /** the human headline ("Paid", "Topped up", "Subscribed", …). */
+  /** the human headline ("Subscribed", "Renewed", "Sent", …). */
   title: string;
-  /** the counterparty / memo line under the title (payee, "Deploy by Suize", a memo). */
+  /** the resolved counterparty line — a `<name>@suize` handle, a SuiNS name, or a
+   *  short 0x… address. This is the "to whom" the row answers. */
   detail?: string;
+  /** the raw counterparty 0x… address (the send recipient / the subscription
+   *  merchant), before name resolution. Drives the reverse-SuiNS lookup that fills
+   *  `detail` with a human handle; absent only when no counterparty is on-chain. */
+  counterparty?: string;
   /** the amount in USDC base units (1e-6) as a string, or null for non-money rows. */
   amountRaw: string | null;
   /** human-scaled amount (USDC), or null. */
   amountUi: number | null;
   /** money direction for the +/− sign + color. */
   flow: ActivityFlow;
-  /** the tx digest — tappable → explorer ("verify ↗"). Always present (events carry it). */
+  /** the tx digest — tappable → explorer ("verify ↗"). Always present. */
   txDigest: string;
+  /** true for an OPTIMISTIC row not yet confirmed on-chain — rendered "confirming…",
+   *  no verify link, replaced by the real row once the chain surfaces it. */
+  pending?: boolean;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -99,14 +122,7 @@ export interface Activity {
 // ───────────────────────────────────────────────────────────────────────────
 
 /** Which primitive is mid-mutation (disables its control + shows a spinner). */
-export type PayPending =
-  | 'create'
-  | 'deposit'
-  | 'spend'
-  | 'withdraw'
-  | 'subscribe'
-  | 'send'
-  | null;
+export type PayPending = 'send' | 'subscribe' | 'cancel' | 'renew' | 'fund' | null;
 
 /** The full PAY snapshot the UI renders. Read-only; mutations go through the API. */
 export interface PayState {
@@ -119,15 +135,11 @@ export interface PayState {
 
   /** "Your money" — the user's OWN wallet USDC balance. */
   wallet: UsdcBalance;
-  /** "Agent money" — the shared Account<USDC> balance. Zero until the Account is funded. */
-  agent: UsdcBalance;
 
-  /** the shared Account<USDC> object id once it exists on-chain (else null). */
-  accountId: string | null;
-  /** true while the first balances/account read is still settling (drives the skeleton). */
+  /** true while the first balance/subs read is still settling (drives the skeleton). */
   loading: boolean;
 
-  /** active subscriptions (created minus cancelled), newest first. */
+  /** active subscriptions (live Party objects), newest first. */
   subscriptions: Subscription[];
   /** the verifiable activity timeline, reverse-chronological. */
   activity: Activity[];
@@ -140,43 +152,25 @@ export interface PayApi {
   pending: PayPending;
 
   /**
-   * Make the Account exist on-chain (idempotent — returns the existing id if already
-   * created). Mints + shares `Account<USDC>` (no fee_recipient arg — fee policy lives in
-   * the shared `RailConfig`, not the Account). Throws calmly (no fake success) before the
-   * `account` package publishes.
+   * Send `amountRaw` of the user's OWN wallet USDC to `to` (a resolved 0x address)
+   * — a single-output GASLESS P2P transfer (no fee, no merchant rake). The payer's
+   * own zkLogin session signs the gasless bytes locally; the chain's Address-Balance
+   * path covers gas. The Send sheet resolves names first. `label` is the recipient's
+   * display name (the typed handle) for the OPTIMISTIC activity row, if any.
    */
-  ensureAccount(): Promise<string>;
-
-  /** Move `amountRaw` USDC from the wallet → the Account (`deposit`). Auto-creates the Account first. */
-  deposit(amountRaw: bigint): Promise<string>;
-
-  /** OWNER-signed `spend`: pay `payee` `amountRaw` USDC from the Account with a `memo` (free). */
-  spend(args: { amountRaw: bigint; payee: string; memo: string }): Promise<string>;
-
-  /** OWNER-signed `withdraw`: pull `amountRaw` USDC from the Account back to the wallet. */
-  withdraw(amountRaw: bigint): Promise<string>;
+  sendWallet(args: { amountRaw: bigint; to: string; label?: string }): Promise<string>;
 
   /**
-   * OWNER-signed `create_subscription`: approve a recurring charge of up to
-   * `periodCapRaw` USDC to `payee` every `periodMs`. Auto-creates the Account first.
+   * Send `amountRaw` of USDC FROM the agent's 1-of-2 multisig sub-account to `to`
+   * — a GASLESS send the MAIN session member signs ALONE then combines (threshold
+   * 1). This is the AI's spend primitive AND the user's one-tap Withdraw (sweep to
+   * the user's own wallet). The chain enforces the sub-account balance as the cap.
    */
-  createSubscription(args: {
-    payee: string;
-    periodCapRaw: bigint;
-    periodMs: number;
-    label?: string;
-  }): Promise<string>;
+  spendFromSubaccount(args: { multisig: MultiSigPublicKey; to: string; amountRaw: bigint }): Promise<string>;
 
-  /** OWNER-signed `cancel_subscription`: stop a recurring charge by its sub key. */
-  cancelSubscription(subKey: string): Promise<string>;
+  /** OWNER-signed `cancel`: stop + destroy a subscription by its object id. */
+  cancelSubscription(subId: string): Promise<string>;
 
-  /**
-   * Send `amountRaw` of the user's OWN wallet USDC to `to` (a resolved 0x address) —
-   * a plain sponsored P2P transfer, NOT an Account verb. No fee, no publish gate
-   * (it never touches `account.move`). The Send sheet resolves names first.
-   */
-  sendWallet(args: { amountRaw: bigint; to: string }): Promise<string>;
-
-  /** Force a re-read of balances + account + events (after an external change). */
+  /** Force a re-read of balance + subscriptions + activity (after an external change). */
   refresh(): void;
 }

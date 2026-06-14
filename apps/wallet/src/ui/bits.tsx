@@ -1,7 +1,7 @@
 /**
- * REDESIGN LAB — tiny shared primitives for the three views: the spark glyph,
- * typing dots, the iOS switch, chat rows, and the Google mark. All visual;
- * the views own the choreography and the state.
+ * Shared primitives for the production wallet UI: the spark glyph, typing
+ * dots, the iOS switch, chat rows, the Google mark, the branded decorative QR,
+ * and the @name highlighter. All visual; the views own choreography + state.
  */
 import type { ReactNode } from 'react';
 import type { Who } from './copy';
@@ -194,17 +194,3 @@ export function SuizeQr({ value, size = 148 }: { value: string; size?: number })
   );
 }
 
-/** a small check glyph (record mark, not a status diode) */
-export function CheckGlyph() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M3 8.4 6.4 12 13 4.6"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}

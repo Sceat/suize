@@ -14,8 +14,9 @@ import '../docs.css'
 // LAWS (enforced):
 //  · every word from config; tech terms (402/USDC/MCP/Sui) are sanctioned on
 //    THIS page only — each section still leads monkey-simple.
-//  · NO pricing numbers anywhere — "the fee is printed on every receipt" +
-//    a link to #/pricing. The snippet price is the '…' placeholder token.
+//  · NO Suize pricing numbers anywhere — "the fee is printed on every receipt"
+//    + a link to #/pricing. The snippet/verify price is the MERCHANT's own
+//    example number ('0.10') — allowed; never a Suize fee.
 //  · "sub-account" / "allowance" — never "leash" / "pot".
 //  · glassmorphism cards (~12px), light default, high contrast, NO diode
 //    dots / device mockups / nav numbers.
@@ -107,13 +108,19 @@ function LoopDemo() {
               <CopyButton value={m.snippet.code} label="Copy the snippet" />
             </span>
           </div>
-          {/* a TRUE one-liner — the tier says "one line", so it is */}
+          {/* the FULL real path — install, import, one line. @suize/pay is the
+              real npm package; the price is the merchant's own example number. */}
           <pre className="dxd-code__pre">
             <code>
-              app.<span className="c-fn">use</span>(
+              npm i <span className="c-str">@suize/pay</span>
+              {'\n\n'}
+              <span className="c-fn">import</span> {'{ suize }'}{' '}
+              <span className="c-fn">from</span>{' '}
+              <span className="c-str">'@suize/pay'</span>
+              {'\n'}app.<span className="c-fn">use</span>(
               <span className="c-fn">suize</span>({'{ '}to:{' '}
               <span className="c-str">'0xYOU'</span>, price:{' '}
-              <span className="c-str">'…'</span>
+              <span className="c-str">'0.10'</span>
               {' }'}))
             </code>
           </pre>

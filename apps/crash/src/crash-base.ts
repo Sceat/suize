@@ -350,6 +350,25 @@ export function mount(
   // 0.0008 ≈ 0.08% (≈ $55 at $68k BTC), within the asked ~0.05–0.1% band.
   const HILO_THRESHOLD = 0.0008
   const perfEpochOffset = performance.now() - Date.now() // epoch -> perf time
+
+  // ---------------------------------------------------------------------
+  //  VISIBLE CLOCK — the chart's time axis advances ONLY while the page is
+  //  actually painting. requestAnimationFrame PAUSES while the tab is hidden
+  //  (and is heavily throttled when backgrounded / the machine sleeps), so two
+  //  consecutive rAF timestamps can be MINUTES apart. The old code fed that raw
+  //  leap straight into the x-axis, which (a) scrolled the head minutes to the
+  //  right of the last real sample — the line looked stranded / half-gone — and
+  //  (b) tripped pushSample()'s `t < now - WINDOW_MAX_MS` trim, DELETING the
+  //  whole history, so on return only the post-return ticks showed and a refresh
+  //  was required. Fix: any inter-frame gap beyond FRAME_GAP_CAP is treated as
+  //  paused time and folded into `hiddenMs`. `chartNow()` (= perf − hiddenMs)
+  //  then advances at real time WHILE frames flow and freezes across any stall,
+  //  so the full line survives and the head reconnects seamlessly on return.
+  let hiddenMs = 0 // total paused (hidden/throttled/slept) ms, excluded from the axis
+  let rawLast = performance.now() // last raw rAF timestamp (gap detector; owned by frame())
+  const FRAME_GAP_CAP = 500 // ms; a gap beyond this is paused time, not real time
+  const chartNow = (): number => performance.now() - hiddenMs
+
   let historyLoaded = false // real Binance history has been merged in
   let lastSampleP = 0 // de-dup: only append a sample when the real spot changes
 
@@ -418,14 +437,14 @@ export function mount(
     // last point stays put rather than extending with held-flat ticks).
     if (livePrice > 0 && !frozen) pushSample(livePrice, now)
   }
-  readHost(performance.now())
+  readHost(chartNow())
 
   // Kick off the REAL BTC history fetch immediately (no key, public Binance
   // klines). On success we merge genuine mountainous past into the buffer; on
   // failure (CORS/network) fetch_btc_history returns [] and we stay sparse,
   // accumulating live ticks — we NEVER fall back to fake/seeded data.
   fetch_btc_history(180)
-    .then(points => mergeHistory(points, performance.now()))
+    .then(points => mergeHistory(points, chartNow()))
     .catch(() => {
       historyLoaded = true // give up on history; live ticks carry the chart
     })
@@ -840,16 +859,22 @@ export function mount(
   let raf = 0
   let energy = 0
   const timeScale = reduceMotion ? 0.4 : 1
-  const t0 = performance.now()
+  const t0 = chartNow()
   let lastT = t0
 
   // RAF ROBUSTNESS: a per-frame throw must NEVER permanently kill the chart loop
   // while React keeps feeding host data (the chart would silently freeze). Run the
   // body in a try, log ONCE, and ALWAYS reschedule from the finally.
   let frameErrored = false
-  function frame(now: number): void {
+  function frame(rawNow: number): void {
+    // VISIBLE CLOCK: absorb any large inter-frame gap (tab hidden / throttled /
+    // slept) into `hiddenMs` so the axis never leaps. See the visible-clock note
+    // above pushSample(). frameBody/readHost/drawChart see the paused clock.
+    const gap = rawNow - rawLast
+    rawLast = rawNow
+    if (gap > FRAME_GAP_CAP) hiddenMs += gap - FRAME_GAP_CAP
     try {
-      frameBody(now)
+      frameBody(rawNow - hiddenMs)
     } catch (err) {
       if (!frameErrored) {
         frameErrored = true

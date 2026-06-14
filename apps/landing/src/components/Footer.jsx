@@ -8,7 +8,7 @@ export default function Footer() {
       <div className="sx-wrap">
         <div className="sx-foot__grid">
           <div className="sx-foot__brand">
-            <a className="sx-logo" href="#/" aria-label="Suize home">
+            <a className="sx-logo" href="/" aria-label="Suize home">
               <span className="sx-logo__mark">SUIZE</span>
             </a>
             <p className="sx-foot__tag">
@@ -24,7 +24,7 @@ export default function Footer() {
                 <a
                   className="sx-foot__link"
                   key={p.id}
-                  href={`#${p.route}`}
+                  href={p.route}
                   onClick={e => {
                     e.preventDefault()
                     navigate(p.route)
@@ -50,7 +50,7 @@ export default function Footer() {
               </a>
               <a
                 className="sx-foot__link"
-                href="#/pricing"
+                href="/pricing"
                 onClick={e => {
                   e.preventDefault()
                   navigate('/pricing')

@@ -13,15 +13,44 @@ export interface SubRow {
   name: string;
   renews: string;
   perMonth: number;
+  /** the sub-account can't cover the next period (coverage must never silently lie) */
+  warn?: boolean;
 }
 
 export interface LedgerRow {
   id: string;
+  /** the action word ("Sent" / "Paid" / "Received" / "Subscribed" / …). */
   what: string;
+  /** the counterparty token — a `name@suize` handle, a `.sui` name, or a short 0x…
+   *  address — rendered with its identity gradient (handle = red-orange, address =
+   *  blue). Absent for actions with no counterparty ("Topped up"). */
+  who?: string;
+  /** the compact-but-exact stamp shown inline ("14:32" today · "13 Jun 14:32" · "13 Jun 2025"). */
   when: string;
+  /** the full to-the-second timestamp, surfaced on hover (the "when exactly" proof). */
+  whenTitle?: string;
   amount: number | null;
   /** real explorer link when present; absent rows render no verify arrow */
   verifyHref?: string;
+  /** an OPTIMISTIC row mid-confirmation — shows "confirming…", no verify link */
+  pending?: boolean;
+}
+
+/** Classify a counterparty token for its identity gradient: a hex address is a
+ *  `num` (blue), a `name@suize`/`.sui` handle is a `handle` (red-orange), anything
+ *  else (a bare merchant label like "Netflix") is `plain` ink. */
+function tokenKind(t: string): 'num' | 'handle' | 'plain' {
+  if (/^0x/i.test(t)) return 'num';
+  if (t.includes('@') || /\.sui$/i.test(t)) return 'handle';
+  return 'plain';
+}
+
+/** Render a counterparty token in its identity gradient (handles red-orange, numbers
+ *  blue) — the single place the owner's "handles vs numbers" colour law lives. */
+export function Party({ token }: { token: string }) {
+  const kind = tokenKind(token);
+  if (kind === 'plain') return <>{token}</>;
+  return <span className={kind === 'num' ? 'rd-grad-num' : 'rd-grad-handle'}>{token}</span>;
 }
 
 /** the live subscriptions — a LIST on the page, never something you ask for */
@@ -44,8 +73,10 @@ export function SubsList({
           <span className="rd-mono-chip" aria-hidden="true">
             {s.name[0]?.toUpperCase() ?? '·'}
           </span>
-          <span className="rd-line__body">{s.name}</span>
-          <span className="rd-line__when">{s.renews}</span>
+          <span className="rd-line__body">
+            <Party token={s.name} />
+          </span>
+          <span className={`rd-line__when${s.warn ? ' is-warn' : ''}`}>{s.renews}</span>
           <span className="rd-line__dots" />
           <span className="rd-line__amt rd-line__amt--sub">{money(s.perMonth)}/mo</span>
           {onCancel ? (
@@ -67,7 +98,7 @@ export function ActivityList({ rows, empty }: { rows: LedgerRow[]; empty: string
       {rows.map((a) => {
         const dir = a.amount == null ? 'none' : a.amount > 0 ? 'in' : 'out';
         return (
-          <div className="rd-line rd-line--roomy" key={a.id}>
+          <div className={`rd-line rd-line--roomy${a.pending ? ' is-pending' : ''}`} key={a.id}>
             <span className={`rd-dir rd-dir--${dir}`} aria-hidden="true">
               {dir === 'in' ? (
                 <ArrowDown size={12} strokeWidth={2} />
@@ -75,13 +106,25 @@ export function ActivityList({ rows, empty }: { rows: LedgerRow[]; empty: string
                 <ArrowUpRight size={12} strokeWidth={2} />
               ) : null}
             </span>
-            <span className="rd-line__body">{a.what}</span>
-            <span className="rd-line__when">{a.when}</span>
+            <span className="rd-line__body">
+              {a.what}
+              {a.who ? (
+                <>
+                  {' · '}
+                  <Party token={a.who} />
+                </>
+              ) : null}
+            </span>
+            <span className="rd-line__when" title={a.pending ? undefined : a.whenTitle}>
+              {a.pending ? WALLET.books.confirming : a.when}
+            </span>
             <span className="rd-line__dots" />
             {a.amount != null ? (
               <span className="rd-line__amt rd-line__amt--money">{signedMoney(a.amount)}</span>
             ) : null}
-            {a.verifyHref ? (
+            {a.pending ? (
+              <span className="rd-line__spin" aria-label={WALLET.books.confirming} />
+            ) : a.verifyHref ? (
               <a
                 className="rd-line__verify"
                 href={a.verifyHref}
@@ -103,21 +146,42 @@ export function ActivityList({ rows, empty }: { rows: LedgerRow[]; empty: string
 export function CustodyNote() {
   return (
     <p className="rd-custody">
-      <b>Fully non-custodial</b> — your keys never leave your machine. Every payment is signed by your
-      own login; Suize never signs for you.
+      <b>{WALLET.books.custodyLead}</b>
+      {WALLET.books.custodyTail}
     </p>
   );
 }
 
-/** "2d" / "3w" / "now" — the compact timestamp the single-line rows need */
-export function compactWhen(ts: number): string {
+/**
+ * The inline stamp — exact, but as short as the recency allows so the single line
+ * never starves: just the time today ("14:32"), day+time this year ("13 Jun 14:32"),
+ * day+month+year before that ("13 Jun 2025"). 24h, locale-aware. The to-the-second
+ * truth rides the hover title (`fullWhen`).
+ */
+export function exactWhen(ts: number): string {
   if (!ts) return '';
-  const s = Math.max(0, (Date.now() - ts) / 1000);
-  if (s < 90) return 'now';
-  if (s < 3600) return `${Math.round(s / 60)}m`;
-  if (s < 86400) return `${Math.round(s / 3600)}h`;
-  if (s < 86400 * 21) return `${Math.round(s / 86400)}d`;
-  return `${Math.round(s / (86400 * 7))}w`;
+  const d = new Date(ts);
+  const now = new Date();
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (d.toDateString() === now.toDateString()) return time;
+  const day = d.getDate();
+  const mon = d.toLocaleString(undefined, { month: 'short' });
+  if (d.getFullYear() === now.getFullYear()) return `${day} ${mon} ${time}`;
+  return `${day} ${mon} ${d.getFullYear()}`;
+}
+
+/** The full to-the-second timestamp for the hover title ("13 Jun 2026, 14:32:08"). */
+export function fullWhen(ts: number): string {
+  if (!ts) return '';
+  return new Date(ts).toLocaleString(undefined, {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
 }
 
 /** "renews in 9 days" from the last charge + the period */

@@ -3,5 +3,15 @@
   "buildCommand": "bun run build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "redirects": [
+    { "source": "/for-business", "destination": "/business", "permanent": true },
+    { "source": "/businesses", "destination": "/business", "permanent": true },
+    { "source": "/agents", "destination": "/", "permanent": true },
+    { "source": "/wallet", "destination": "/", "permanent": true },
+    { "source": "/checkout", "destination": "/business", "permanent": true }
+  ],
+  "rewrites": [
+    { "source": "/business", "destination": "/business.html" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }

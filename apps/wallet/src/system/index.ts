@@ -1,60 +1,24 @@
 /**
- * @suize/system — the wallet design system (extractable module, replaces ether/).
+ * @suize/system — the wallet's shared chrome, post-redesign (2026-06-10).
  *
- * One barrel for the whole system. Zero app-local deps besides the data-type
- * import in WalletShell. Consumers import primitives from here and `@import` the
- * tokens once at their CSS root:
+ * The journal-era barrel (AmbientField / GradText / Wordmark / primitives /
+ * JournalShell / JournalHome) is RETIRED with the legacy screens — the design
+ * system now lives in `src/ui/rd.css` + the `ui/` components. What remains
+ * here is the cross-cutting chrome the production app still mounts:
  *
- *   import { Button, Field, WalletShell, AmbientField, Loader } from '../system';
- *   // and once, in styles: @import '../system/tokens.css';
+ *   import { Loader, ICON_STROKE, Check, … } from '../system';
  */
 
-// ambient + chrome
-export { AmbientField } from './AmbientField';
+// chrome
 export { Loader } from './Loader';
 export type { LoaderProps } from './Loader';
 export { Logo } from './Logo';
 export type { LogoProps } from './Logo';
-export { GradText } from './GradText';
-export type { GradTextProps } from './GradText';
-export { Wordmark, SuizeWordmark } from './Wordmark';
-export type { WordmarkProps } from './Wordmark';
 export { CustomCursor } from './CustomCursor';
 
 // theme
 export { ThemeProvider, useTheme, ThemeToggle } from './theme';
 export type { Theme } from './theme';
-
-// primitives
-export {
-  Button,
-  Field,
-  Eyebrow,
-  Pill,
-  HealthDot,
-  ModeSwitch,
-  CopyButton,
-} from './primitives';
-export type {
-  ButtonProps,
-  ButtonVariant,
-  ButtonSize,
-  FieldProps,
-  FieldState,
-  Mode,
-} from './primitives';
-
-// journal shell (THE shell — replaces the old WalletShell/HomeSimple/HomeAdvanced UI)
-export { JournalShell, Masthead } from './JournalShell';
-export type {
-  JournalShellProps,
-  JournalSlots,
-  JournalPresence,
-} from './JournalShell';
-
-// journal home (the wiring container that composes the leaves into the shell slots)
-export { JournalHome } from './JournalHome';
-export type { JournalHomeProps } from './JournalHome';
 
 // icons (curated lucide set + stroke constant)
 export * from './icons';

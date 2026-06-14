@@ -1,20 +1,18 @@
 /**
- * REDESIGN LAB — every word + every demo figure, in one place (the copy/config
- * law: components never hardcode copy). This is a DEV-ONLY design proposal
- * harness (`?preview=redesign`) — all figures are ILLUSTRATIVE demo data for
- * design review, pre-reconciled so the math always adds up on screen:
+ * THE WALLET'S COPY + DEMO FIGURES — every user-facing word in one place (the
+ * copy/config law: components never hardcode copy). The demo blocks feed the
+ * DEV-only `?demo=1` preview seam; production renders real on-chain data and
+ * the honest strings below. Demo figures are pre-reconciled so the math always
+ * adds up on screen:
  *
  *   WALLET   top-up $500.00 − Spotify $11.99 − Netflix $15.99 − coffee $12.02
- *            = $460.00 (pre-booking) → flight $240.00 → $220.00 (the landing
- *            hero's exact 460→220 artifact, made functional).
- *   BUSINESS $8,920.10 (customers) + $3,560.40 (AI agents) = $12,480.50 month;
- *            week bars 320+410+380+460+510+390+370 = $2,840 vs $2,410 ≈ +18%;
- *            receipt artifact $50.00 gross − $1.00 fee (2%) = $49.00 net.
+ *            = $460.00 (pre-booking) → flight $240.00 → $220.00.
+ *   BUSINESS $8,920.10 + $3,560.40 = $12,480.50 month; week bars sum $2,840;
+ *            receipt $50.00 gross − $1.00 fee (2%) = $49.00 net.
  *
- * Consumer-vocabulary laws hold even in demo copy: "sub-account" (never
- * leash/pot), no tech jargon, custody phrase VERBATIM, no pricing copy —
- * the only fee on any surface lives INSIDE the business receipt artifact
- * (the fee printed on the receipt IS the trust proof).
+ * Consumer-vocabulary laws hold everywhere: "sub-account" (never leash/pot),
+ * no tech jargon, the custody phrase VERBATIM, no pricing copy — the only fee
+ * on any surface lives INSIDE the business receipt artifact (trust proof).
  */
 
 // ── shared ─────────────────────────────────────────────────────────────────────
@@ -74,50 +72,18 @@ export const JOURNEY = {
 
 export const ASSISTANT = {
   title: 'Your assistant',
-  dock: 'Ask your wallet',
   recentLabel: 'Recent',
-} as const;
-
-// ── ONBOARDING · ONE PANE — the alternative conversational take ───────────────
-
-export const ONBOARDING = {
-  hello: {
-    eyebrow: 'Your AI wallet',
-    /** serif headline — the hot word takes the gradient clip ONCE */
-    h1: ['Meet the wallet', 'you talk to.'],
-    hot: 'talk',
-    sub: 'Tell it what you want. It remembers you, finds the best option, and pays — you just approve.',
-    cta: 'Continue with Google',
-    custody: CUSTODY_LINE,
-  },
-  name: {
-    aiAsk: "Hi — I'm your wallet. What should I call you?",
-    placeholder: 'yourname',
-    suffix: '@suize',
-    /** shown once the typed name passes the (demo) availability check */
-    free: 'is yours',
-    cta: 'Claim your name',
-  },
-  ready: {
-    aiDone: (name: string) =>
-      `Done — you're ${name}@suize. Top up your sub-account whenever you're ready, then just tell me what you need.`,
-    cta: 'Open your wallet',
-  },
 } as const;
 
 // ── WALLET — chat-first + history + the books ──────────────────────────────────
 
 export const WALLET = {
   handle: 'alice@suize',
-  /** masthead balance label — the sub-account IS the hero number */
-  balanceLabel: 'Sub-account',
-  agentToggle: 'Agent enabled',
-  agentOff: 'Agent off',
+  /** the masthead shows the TOTAL (wallet + sub-account) — owner-locked */
+  totalLabel: 'Total',
   composer: 'Ask your wallet anything…',
   composerOff: 'Your AI is off — flip it back on when you need it.',
-  booksLabel: 'Books',
   newChat: 'New chat',
-  historyTitle: 'Conversations',
 
   /** sub-account balance BEFORE the booking lands (the landing artifact) */
   balanceStart: 460.0,
@@ -161,7 +127,9 @@ export const WALLET = {
   prodReply:
     'I’m almost ready — soon I’ll handle this end to end. Your money already works: add funds, send, top up, withdraw, all live from this page.',
 
-  /** empty-thread suggestion chips (a new chat) */
+  /** PRODUCTION chip — honest (the conversational layer is roadmap) */
+  prodChip: 'What can you do?',
+  /** DEMO empty-thread suggestion chips */
   chips: [
     'Watch flight prices to SF',
     'Cancel subscriptions I don’t use',
@@ -211,44 +179,58 @@ export const WALLET = {
 
   /** THE BOOKS — the money surfaces: two pots, subscriptions, the trace */
   books: {
-    title: 'Your books',
     your: {
       label: 'Your money',
       amount: 1240.0,
       note: 'Only you can move it. Suize never touches it.',
       /** the classic wallet verbs live on the MAIN account */
       actions: ['Add funds', 'Send'] as const,
-      action: 'Top up sub-account', // legacy alternates (Minimal/Journal) still read this
     },
     agent: {
-      label: 'Sub-account',
-      note: 'What your AI can spend — it can’t go past it.',
-      /** the sub-account moves against the main account */
-      actions: ['Top up', 'Withdraw'] as const,
-      action: 'Pull back', // legacy alternates (Minimal/Journal) still read this
+      label: 'Agent balance',
+      note: 'What your AI can spend — the sub-account balance is its cap.',
+      /** the sub-account is a shared 1-of-2 multisig; either you or the agent can move it */
+      fund: 'Fund',
+      withdraw: 'Withdraw',
+      pause: 'Pause',
+      resume: 'Resume',
+      pausedNote: 'Paused — your agent won’t spend until you resume.',
+      /** shown before the sub-account exists (the agent's key isn't known until it signs in once) */
+      empty: 'Your AI’s own spending balance — you fund it, cap it, and sweep it back any time.',
+      emptyCta: 'Connect your sub-account',
     },
     subsTitle: 'Subscriptions',
-    subsMeta: 'Approved once · renew on their own',
+    subsMeta: 'Approved once · they renew themselves',
     subs: [
       { name: 'Netflix', perMonth: 15.99, renews: 'renews in 24 days' },
       { name: 'Spotify', perMonth: 11.99, renews: 'renews in 9 days' },
     ],
     cancel: 'Cancel',
+    /** the deck footnote — the bold lead + the tail (custody law, verbatim core) */
+    custodyLead: 'Fully non-custodial',
+    custodyTail:
+      ' — your keys never leave your machine. Every payment is signed by your own login; Suize never signs for you.',
     activityTitle: 'Activity',
     activityMeta: 'Read straight from chain · every row checkable',
     verify: 'verify',
-    /** newest first; the booked flight prepends LIVE on confirm.
-        `when` is compact so the single-line row never starves the body. */
+    /** an optimistic row still settling on-chain (shown until the chain confirms it) */
+    confirming: 'confirming…',
+    /** honest production empty states */
+    emptySubs: 'No subscriptions yet — approve one once and it renews on its own.',
+    emptyActivity: 'Nothing yet — every move lands here, checkable on-chain.',
+    /** newest first; the booked flight prepends LIVE on confirm. Each row answers
+        BOTH "to whom" (the handle/merchant) and "when exactly" — the inline stamp is
+        date+time, the full to-the-second timestamp rides the hover title. */
     activity: [
-      { what: 'Ordered your usual coffee', when: '2d', amount: -12.02 },
-      { what: 'Subscription charged · Netflix', when: '6d', amount: -15.99 },
-      { what: 'New subscription · Netflix', when: '6d', amount: null },
-      { what: 'Subscription charged · Spotify', when: '21d', amount: -11.99 },
-      { what: 'New subscription · Spotify', when: '21d', amount: null },
-      { what: 'Topped up', when: '3w', amount: 500.0 },
-      { what: 'Sub-account created', when: '3w', amount: null },
-    ] as { what: string; when: string; amount: number | null }[],
-    flightRow: { what: 'Booked · Flight to SFO', when: 'now', amount: -240.0 },
+      { what: 'Received', who: 'mom@suize', when: '12 Jun 19:22', whenTitle: '12 Jun 2026, 19:22:40', amount: 200.0 },
+      { what: 'Paid', who: 'bluebottle@suize', when: '11 Jun 08:14', whenTitle: '11 Jun 2026, 08:14:09', amount: -12.02 },
+      { what: 'Sent', who: 'alex@suize', when: '9 Jun 21:05', whenTitle: '9 Jun 2026, 21:05:33', amount: -40.0 },
+      { what: 'Paid', who: '0x087a…6e86', when: '8 Jun 14:53', whenTitle: '8 Jun 2026, 14:53:10', amount: -0.5 },
+      { what: 'Renewed', who: 'netflix@suize', when: '7 Jun 09:01', whenTitle: '7 Jun 2026, 09:01:55', amount: -15.99 },
+      { what: 'Subscribed', who: 'netflix@suize', when: '7 Jun 09:00', whenTitle: '7 Jun 2026, 09:00:42', amount: -15.99 },
+      { what: 'Topped up', when: '21 May 18:04', whenTitle: '21 May 2026, 18:04:33', amount: 500.0 },
+    ] as { what: string; who?: string; when: string; whenTitle?: string; amount: number | null }[],
+    flightRow: { what: 'Paid', who: 'united@suize', when: 'now', whenTitle: 'just now', amount: -240.0 },
     custody: CUSTODY_LINE,
   },
 } as const;
@@ -261,7 +243,6 @@ export const ACTIONS = {
   addFunds: {
     title: 'Add funds',
     sub: 'Receive to your wallet — scan, share, or request an exact amount.',
-    copy: 'Copy',
     copied: 'Copied',
     request: 'Request an exact amount',
     requestPlaceholder: '0.00',
@@ -269,6 +250,8 @@ export const ACTIONS = {
     /** person-to-person requests ride the FREE rail verb (spend) — this is the
      *  wallet surface, NEVER the merchant pay-link (which takes the 2%). */
     linkBase: 'wallet.suize.io/',
+    /** the network warning — the one line every wallet needs */
+    network: 'Send only USDC on Sui — other coins or networks may be lost.',
     more: 'More ways to add',
     soonTag: 'Soon',
     soon: ['Bank transfer', 'Apple Pay', 'Card'],
@@ -276,20 +259,20 @@ export const ACTIONS = {
   send: {
     title: 'Send',
     to: 'To',
-    toPlaceholder: 'name@suize · 0x address · email · phone',
-    found: 'found',
+    toPlaceholder: 'name@suize · name.sui · 0x address · email · phone',
+    found: 'looks right',
     addressReady: 'address · ready',
     /** email/phone are DETECTED but direct delivery is coming soon — the flow
      *  routes to a claimable link instead (consumer words, no tech names). */
-    emailSoon: 'Sending to emails is coming soon — share a claim link instead.',
-    phoneSoon: 'Sending to phone numbers is coming soon — share a claim link instead.',
+    emailSoon: 'Sending to emails is coming soon.',
+    phoneSoon: 'Sending to phone numbers is coming soon.',
     amount: 'Amount',
     cta: 'Send',
     claimCta: 'Create a claim link',
     claimAlt: 'Send as a claim link',
     claimBase: 'wallet.suize.io/claim/',
     claimNote: 'Anyone with this link can claim the money — share it however you like.',
-    sent: 'Sent · receipt logged',
+    sent: 'Sent',
   },
   topUp: {
     title: 'Top up sub-account',
@@ -311,6 +294,27 @@ export const ACTIONS = {
   max: 'Max',
 } as const;
 
+// ── THE AGENT — arm / fund / kill (the sub-account: a shared 1-of-2 multisig) ──
+// Consumer-vocabulary: the "agent balance" is its hard cap; the honest caveat is
+// delegated-spend, NOT custody — within its balance the agent can spend, you cap it
+// by funding and you exit by withdrawing (one tap, your wallet signs alone).
+
+export const AGENT = {
+  fund: {
+    title: 'Fund your agent',
+    sub: 'Move money from your wallet into the sub-account. Its balance is the cap — fund only what you’re comfortable letting it spend.',
+    cta: 'Fund',
+  },
+  withdraw: {
+    title: 'Withdraw to your wallet',
+    sub: 'Pull money back from the sub-account into your wallet — instant, and signed by you alone.',
+    label: 'In your sub-account',
+    cta: 'Withdraw',
+    empty: 'Nothing to withdraw',
+    working: 'Withdrawing…',
+  },
+} as const;
+
 // ── BUSINESS · CONSOLE — the sectioned, tabbed merchant view ───────────────────
 
 export const CONSOLE = {
@@ -322,7 +326,7 @@ export const CONSOLE = {
   balance: {
     label: 'Available to spend',
     amount: 4250.0,
-    note: 'Settled USDC — yours to move, anytime.',
+    note: 'Your USDC — yours to move, anytime.',
     actions: ['Add funds', 'Send', 'Transfer'] as const,
   },
   /** MRR/ARR — ARR = MRR × 12 ($2,838.58 × 12 = $34,062.96, reconciled) */
@@ -334,6 +338,10 @@ export const CONSOLE = {
     bars: [4.2, 5.1, 4.8, 6.0, 6.9, 7.4, 8.2, 8.0, 9.1, 10.3, 11.6, 12.5],
     labels: ['J', 'A', 'S', 'O', 'N', 'D', 'J', 'F', 'M', 'A', 'M', 'J'],
   },
+  /** honest production empty states */
+  emptyLedger: 'No charges yet — they land here the moment an agent pays you.',
+  emptyRenewals: 'No subscriptions yet — they appear here as agents subscribe to you.',
+  emptyRevenue: 'No revenue yet — the chart draws itself as you get paid.',
   renewalsHead: '38 renew this week · $742.10 on its own',
   renewals: [
     { payer: '0x9a3f…b4c5', plan: 'API subscription', amount: 19.99, when: 'in 2 days' },
@@ -383,6 +391,8 @@ export const BUSINESS = {
   },
 
   chatTitle: 'Ask about your business',
+  /** PRODUCTION empty-thread line (no revenue to narrate yet) */
+  chatEmpty: 'Once charges land, ask me anything about them here.',
   composer: 'Ask about revenue, agents, subscriptions…',
   /** seeded exchange — the analytics agent narrates READ-side data only */
   thread: [
@@ -418,14 +428,40 @@ export const BUSINESS = {
   ],
   scriptedReply:
     'I can break that down — revenue, agents, subscriptions, refunds. Ask away.',
+  /** PRODUCTION reply — honest until real charges exist to narrate */
+  prodReply:
+    'Nothing to report yet — the moment an agent pays you, I can break it all down here.',
+} as const;
+
+// ── THE SSO CONFIRM POPUP (/confirm) — the suite's money gate ──────────────────
+// Opened by other *.suize.io products (pay.suize.io) via the bridge; this window
+// builds-what-it-displays and signs locally. Strings only — flow in bridge/ConfirmPay.
+
+export const CONFIRM = {
+  label: 'Payment request',
+  unitsDetail: 'USDC on Sui',
+  fromLead: 'Paying from',
+  /** CTA — the amount is appended ("Pay $0.50"). */
+  approve: 'Pay',
+  decline: 'Cancel',
+  working: { build: 'Preparing your payment…', submit: 'Settling on-chain…' },
+  paid: 'Paid — you can close this window.',
+  cancelled: 'Cancelled — nothing was paid.',
+  retry: 'Try again',
+  signInLead: 'Sign in to confirm this payment.',
+  signInCta: 'Continue with Google',
+  noOpener: 'This window opens from a Suize payment page — nothing to confirm here.',
+  waiting: 'Reading the payment request…',
 } as const;
 
 // ── money formatting (the broadsheet number) ───────────────────────────────────
 
 export function money(n: number): string {
-  return (
-    '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  );
+  const a = Math.abs(n);
+  // a sub-cent amount must never collapse to "$0.00" (that reads as nothing moved) —
+  // show up to USDC's 6 decimals so a real tiny transfer stays truthful.
+  const maxFrac = a > 0 && a < 0.01 ? 6 : 2;
+  return '$' + a.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: maxFrac });
 }
 
 export function signedMoney(n: number): string {

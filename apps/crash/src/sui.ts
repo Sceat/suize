@@ -38,6 +38,7 @@ export type ReadClient = {
 }
 import {
   CLOCK_OBJECT,
+  COIN_ZERO,
   DUSDC_TYPE,
   EVENT_POSITION_MINTED,
   EVENT_POSITION_REDEEMED,
@@ -442,7 +443,9 @@ export const build_bet_tx = (opts: {
     ;[payment] = tx.splitCoins(primary_coin, [tx.pure.u64(opts.payment_amount)])
   } else {
     payment = tx.moveCall({
-      target: '0x2::coin::zero',
+      // NORMALIZED `0x2` form (COIN_ZERO from @suize/shared) so Enoki's normalized
+      // allow-list comparison matches — a short `0x2::coin::zero` silently 400s.
+      target: COIN_ZERO,
       typeArguments: [DUSDC_TYPE],
     })
   }

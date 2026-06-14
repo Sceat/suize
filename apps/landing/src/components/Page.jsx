@@ -42,7 +42,7 @@ export function PageHero({
         {back && (
           <a
             className="sx-back"
-            href="#/"
+            href="/"
             onClick={e => {
               e.preventDefault()
               navigate('/')

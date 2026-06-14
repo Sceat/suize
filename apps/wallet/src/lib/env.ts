@@ -27,6 +27,16 @@ export const ENOKI_API_KEY: string = import.meta.env.VITE_ENOKI_API_KEY ?? '';
 export const GOOGLE_CLIENT_ID: string = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
 
 /**
+ * A SECOND Google OAuth client id — the /agent-connect door. The external agent
+ * (MCP) signs in under a DISTINCT zkLogin identity (a different `aud`), so its
+ * address is its OWN (the human wallet can never sweep it — the non-custodial
+ * boundary that makes "fund a separate address = the cap" honest). Empty ->
+ * /agent-connect shows the not-configured state (it cannot mint an agent session).
+ */
+export const GOOGLE_AGENT_CLIENT_ID: string =
+  (import.meta.env.VITE_GOOGLE_AGENT_CLIENT_ID ?? '').trim();
+
+/**
  * Backend WebSocket URL — the single Enoki-verified transport. The wallet is
  * pure-WS now: handle + sponsor + execute + balance pushes all ride this one
  * socket. Dev: `ws://localhost:8080/ws`
@@ -37,6 +47,16 @@ export const GOOGLE_CLIENT_ID: string = import.meta.env.VITE_GOOGLE_CLIENT_ID ??
 export const WS_URL: string = (import.meta.env.VITE_WS_URL ?? 'ws://localhost:8080/ws')
   .trim()
   .replace(/\/$/, '');
+
+/**
+ * Backend HTTP base (the x402 V2 facilitator: /verify · /settle · /build · /terms)
+ * — used ONLY by the /confirm SSO popup (the wallet's own money verbs ride the WS).
+ * Env override first; dev falls back to the local backend, prod to the live API.
+ */
+export const API_BASE: string = (
+  (import.meta.env.VITE_SUIZE_API as string | undefined)?.trim() ||
+  (import.meta.env.DEV ? 'http://localhost:8099' : 'https://api.suize.io')
+).replace(/\/+$/, '');
 
 /**
  * The scoped AI agent's Sui address — the destination the owner-minted `AgentCap`

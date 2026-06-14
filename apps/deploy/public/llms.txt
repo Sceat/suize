@@ -1,0 +1,197 @@
+# Deploy by Suize — agent-native site hosting
+
+> POST a built static site, get a live hash-verified URL on decentralized
+> storage in seconds. Built for agents: one HTTP flow, no browser, no gas.
+> Deploy is a merchant on the Suize rail — every charge is paid in USDC over
+> x402, gaslessly, from your own Sui key. This file is your contract.
+
+What you get:
+
+- Your site live at `https://<id>.suize.site` (`id` derives from the site's
+  on-chain record).
+- Content integrity: every served byte is verified against the on-chain record
+  at serve time — a mismatch is never served.
+- Each deploy mints a NEW immutable site (new id → new URL). No overwrites, no
+  silent edits.
+
+## How you pay — one contract, every step
+
+There is one door: you speak the x402 contract directly against
+`https://api.suize.io`. No SDK, no Suize account, no API key — any Sui key
+holding USDC works, and **your address is the account**.
+
+Every paid step is the same three moves:
+
+1. Make the request with no payment → you get **HTTP 402** carrying a vanilla
+   x402 V2 `PaymentRequired` challenge. Read the `exact` requirement on the Sui
+   network: `payTo`, `asset` (USDC), `amount` (in atomic units, 6 dp), and
+   `extra.outputs` — the exact balance-change set you must pay.
+2. Settle it **gaslessly**. Either let Suize build the transfer for you —
+   `POST /build { sender, payTo, amount }` → `{ bytes }` — and sign `bytes` with
+   your own key, or (if you're Sui-native) build and sign the same gasless
+   `send_funds` transfer yourself.
+3. Retry the original request carrying `X-PAYMENT: <base64 x402 PaymentPayload>`.
+
+The payment carries no gas token, ever. The settlement's on-chain balance
+changes are your receipt — read them yourself; the rail fee, if any, is one of
+the declared outputs and visible there. Audit any digest via
+`GET https://api.suize.io/tx?digest=`.
+
+## No Sui key? Your human pays — get the result back with NO copy-paste
+
+Every 402 challenge carries a `payLink` — a hosted pay page
+(`https://pay.suize.io?payTo=…&amount=…&mode=authorize`). Relay it to your human; they
+sign in with Google (or connect a wallet) and tap once to **authorize** the `$0.50`.
+Because the link is `mode=authorize` the page does NOT settle — it produces a
+**signed-but-unsettled** base64 x402 `PaymentPayload` (the EXACT value an `X-PAYMENT`
+header carries). You submit THAT on the upload (§1); the backend settles it during the
+deploy, **whoever paid owns the site**, and nothing is on-chain before the deploy (no
+replay; **one payment → one site**, enforced on-chain).
+
+The only question is how that payload gets from your human's browser back to you. DO
+THIS — it removes the copy-paste entirely whenever you run on the SAME machine as your
+human's browser (the usual case for a local/CLI agent):
+
+1. **Start a tiny local HTTP server** on `127.0.0.1` (bind to `127.0.0.1` ONLY, never
+   `0.0.0.0`) at an ephemeral port, listening on a SINGLE unguessable path you generate
+   per request — a random nonce. Example URL: `http://127.0.0.1:<port>/cb/<random-hex>`.
+2. **Append that exact URL to the `payLink` as a URL-ENCODED `returnUrl` query param.**
+   So the link you relay becomes:
+   `https://pay.suize.io?payTo=…&amount=…&mode=authorize&returnUrl=http%3A%2F%2F127.0.0.1%3A<port>%2Fcb%2F<random-hex>`
+   (`returnUrl` MUST be `http`/`https`; a `127.0.0.1` `http` URL is accepted. URL-encode
+   it — do not paste a raw `http://…` with unescaped `:` `/`.)
+3. **Relay the augmented link and WAIT** — poll your local server; ~5 min is a sensible
+   timeout. After your human authorizes, the page shows a **"Return to 127.0.0.1:<port>"**
+   button; one tap navigates their browser to
+   `http://127.0.0.1:<port>/cb/<random-hex>?payment=<base64 PaymentPayload>`.
+4. **Your server receives that GET.** Read the `payment` query param (your HTTP framework
+   URL-DECODES it for you → the raw base64 `PaymentPayload`). REJECT any request whose
+   path is not your exact nonce path. Reply with a plain "Done — you can close this tab."
+5. **Shut the server down** and use that `payment` value VERBATIM as the `X-PAYMENT`
+   header on the upload (§1). No copy-paste, no token on screen.
+
+**Fallback — you have NO loopback (e.g. your human is on a DIFFERENT machine):** relay
+the BARE `payLink` (no `returnUrl`). The page shows a **"Copy authorization"** button;
+your human taps it and pastes the one value back to you — submit it as `X-PAYMENT`.
+
+## 1. Deploy a site — $0.50
+
+`$0.50` (USDC) is the deploy contract amount. The deploy is **two requests**: an
+unpaid one to get the 402, then the paid multipart upload.
+
+1. `POST /deploy` with no payment → **402**. Build + sign the payment with the moves
+   above, but DO NOT settle it yourself — present the signed `PaymentPayload` on the
+   upload (the backend settles it during the deploy).
+2. `POST /deploy` again as `multipart/form-data`, carrying the `X-PAYMENT` header
+   (your base64 signed `PaymentPayload`) plus:
+   - `site.tar` — a tar (ustar) of your BUILT static-site directory
+     (`index.html` at the root; caps: 100 MiB, 2000 files).
+   - `name` — your site label.
+
+   The payment IS the authorization — there is no separate signature. **Whoever pays
+   owns the site**: the recovered payer becomes the on-chain `owner`. (If you are
+   Sui-native you may pre-settle a normal payment and present that `X-PAYMENT`; the
+   recommended path is to present the SIGNED-UNSETTLED payload and let the deploy
+   settle it, so nothing is public before the deploy — there is nothing to replay.)
+
+   → `{ siteId, subdomain, url, version, digest }`. Live at `url` immediately.
+
+No Sui key? Submit your human's authorized payload (from the pay-link door above) as
+the same `X-PAYMENT` header — identical path, and the human owns the site.
+
+**One payment mints one site, enforced on-chain.** A retry after a transient failure
+re-presents the same payment and re-mints (the site only consumes the payment when it
+actually mints); a second, distinct site needs a second payment. A double-submit of a
+payment that already minted a site is rejected (`409`).
+
+Read back: `GET /sites?owner=<address>` lists your sites; `GET /sites/<siteId>`
+returns one, including `expiresAtMs` (when its storage window lapses).
+
+## 2. Extend storage — $0.50
+
+A deploy covers the site plus an initial storage period. To keep a site alive
+past it, extend its storage:
+
+`POST /sites/<siteId>/extend` with no payment → **402** for the renewal amount →
+build + sign the payment → retry with `X-PAYMENT` (the signed payload). The payer
+must be the site owner — a stranger cannot extend (and pay for) your site; the
+backend settles the payment only after confirming the recovered payer == the
+on-chain `Site.owner`. Each extend pushes the storage window out by one period.
+
+## 3. Subscribe — one plan per account, every site covered
+
+Deploy is itself a merchant on the Suize rail, and the recurring half of that rail
+is an on-chain subscription. A subscription is a standalone `Subscription` object
+**you own** (the merchant on it is the Deploy treasury). It is **$19.99/mo** (USDC),
+and it is **per-ACCOUNT, not per-site**: ONE active subscription owned by your address
+unlocks custom domains for **all** your sites (stage 4) and auto-renews **all** their
+Walrus storage so nothing ever lapses. The plan is unlimited sites, with one clause —
+up to **100 GB of total site storage** is auto-renewed (a generous safety ceiling on
+how much storage one plan keeps alive). The rail fee is carved on-chain inside each
+payment.
+
+Each period is one **user-signed, gasless** payment from your own key. Because the
+create pushes one period of USDC through the subscription module (not a plain
+transfer), this step is signed bytes Deploy hands you — not the bare x402 spine.
+It is **two requests**: build the signable bytes, then submit your signature.
+
+1. `POST /deploy/subscribe/build { siteId, sender }` → `{ bytes, digest, siteId,
+   merchant, amount, periodMs }`. `sender` must be a site owner; `amount` is the
+   per-period amount (atomic USDC, 6 dp), `periodMs` the renewal window, `merchant`
+   the Deploy treasury the periods pay.
+2. Sign `bytes` **with your own key** (locally), then
+   `POST /deploy/subscribe/submit { digest, signature }` →
+   `{ digest, subscriptionId, siteId, active }`. The subscription is live the
+   moment `active` is `true`; the first period is paid inline. One active plan per
+   account covers every site you own — you do not subscribe each site separately.
+
+Renewals are user-signed and gasless, pushing exactly one period — nothing reaches
+into your funds. **Cancel = deleting your `Subscription` object on-chain**; Deploy
+sees the cancel from the rail and stops auto-renewing all your sites. Read your
+subscription state any time from `GET /sites/<siteId>` — each of your sites carries a
+`subscribed` flag reflecting your account's active plan.
+
+## 4. Add a custom domain — DNS-verified
+
+Point your own domain at a deployed site. **Requires an active Deploy subscription
+on your account** (stage 3) — one plan unlocks custom domains for every site you own;
+without an active plan the calls below answer **402**. This is a two-call flow with a
+DNS step in between that a HUMAN performs (only they can edit the domain's DNS), so an
+agent's job is to relay the exact records and then verify.
+
+1. **Issue the challenge** (no auth, writes nothing):
+   `POST /domains { siteId, domain }` → the records to add:
+   - `txtName` — the TXT host, `_suize-verify.<domain>` (proves ownership).
+   - `txtValue` — the TXT value (a fresh challenge token).
+   - `cname` — the CNAME target, `<subdomain>.suize.site` (routes the domain).
+
+   Relay `txtName` / `txtValue` / `cname` to your human; they add the TXT record
+   and the CNAME at their DNS provider and wait for propagation.
+
+2. **Verify + link** (owner-signed):
+   `POST /domains?verify=1 { siteId, domain, ts, signature }`, where `ts` is the
+   current ms-epoch timestamp and `signature` is a base64 personal-message signature
+   over `Suize Deploy\nlink <domain> -> <siteId>\n@<ts>` from the site owner's key.
+   The backend checks the TXT (ownership) AND the CNAME (routing), recovers the signer
+   == `Site.owner`, and accepts `ts` within **~1 hour** (no server-issued nonce — the
+   auth is stateless), then links the domain on-chain. The owner signs ONCE: while the
+   DNS records propagate the response is `status: "pending"` with `txtOk` / `cnameOk`
+   flags and a `detail` naming the missing record — re-call with the SAME `ts`/signature
+   until `status: "linked"`. (If a slow DNS zone takes longer than the hour, the owner
+   simply re-signs with a fresh `ts`.)
+
+**Unlink** is simpler — owner-signature only, no DNS step, takes effect immediately:
+`DELETE /domains/<domain>` with `{ ts, signature }`, the signature over
+`Suize Deploy\nunlink <domain>\n@<ts>`. The backend recovers the signer == the
+`Site.owner` of the site the domain currently points at, then removes the link
+on-chain. (You may be unlinking precisely because you no longer control the domain's
+DNS — so unlink never asks for a DNS proof.)
+
+## Links
+
+- Dashboard (deploy from a browser): https://deploy.suize.io
+- API host: https://api.suize.io
+- The Suize rail — how to pay anything, and the full x402 contract:
+  https://suize.io/llms.txt
+- The consumer wallet (fund an AI to pay for you): https://wallet.suize.io
+- This file: https://deploy.suize.io/llms.txt

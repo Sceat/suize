@@ -1,20 +1,20 @@
 /**
- * REDESIGN LAB — THE ASSISTANT PANEL. The chat is SECONDARY by owner law
- * (2026-06-10): the wallet's money surfaces own the page; this panel docks
- * beside/over them. Every wallet variant mounts this same component —
- * Deck = a persistent right column · Minimal = a floating dock panel ·
- * Journal = a flat editorial rail (`flat` prop strips the glass).
+ * THE ASSISTANT PANEL. The chat is SECONDARY by owner law: the wallet's money
+ * surfaces own the page; this panel docks beside them (a right glass column).
+ * The agent on/off control is the SINGLE Pause/Resume button on the agent card
+ * (the deck) — NOT a duplicate switch here. This panel only READS `agentOn`
+ * (to quiet the composer when the agent is paused).
  *
- * It still carries the signature moment: the seeded SF thread plays once
- * (ask → plan → found-it), lands the CONFIRM CARD, and a tap on "Book it"
- * fires `onBooked()` so the host page ticks its balance + prepends the
- * activity row. The Agent-enabled switch lives in the panel head — arming
- * the assistant is the assistant's own affordance.
+ * PRODUCTION is honest: the conversational layer is still being built, so the
+ * thread starts empty (chips invite a try; the reply says plainly what works
+ * today) and there is NO fabricated history and NO fabricated confirm card.
+ * The `demo` seam (DEV-only) plays the full SF choreography — ask → plan →
+ * found-it → confirm card → "Book it" → `onBooked()` ticks the host balances.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, Check, ExternalLink, Plus, ICON_STROKE } from '../system';
 import { ASSISTANT, WALLET, money, type ChatMsg } from './copy';
-import { Divider, Row, Spark, Switch, TypingRow, rich } from './bits';
+import { Divider, Row, Spark, TypingRow, rich } from './bits';
 
 const reduceMotion = () =>
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -29,18 +29,19 @@ interface Extra {
 }
 
 export interface AssistantPanelProps {
+  /** READ-ONLY here — the Pause/Resume control lives on the agent card. Quiets the
+   *  composer when the agent is paused. */
   agentOn: boolean;
-  onToggleAgent: () => void;
-  /** the host ticks its balance + activity when the booking confirms */
-  onBooked: () => void;
-  /** journal variant: flat editorial rail — no glass, hairline separations */
-  flat?: boolean;
+  /** the host ticks its balance + activity when the DEMO booking confirms */
+  onBooked?: () => void;
+  /** DEV demo seam — seeded thread + sample history + the confirm card */
+  demo?: boolean;
 }
 
-export function AssistantPanel({ agentOn, onToggleAgent, onBooked, flat = false }: AssistantPanelProps) {
+export function AssistantPanel({ agentOn, onBooked, demo = false }: AssistantPanelProps) {
   const reduce = useMemo(reduceMotion, []);
 
-  const [convo, setConvo] = useState<string>('sf');
+  const [convo, setConvo] = useState<string>(demo ? 'sf' : 'new');
   const [seedShown, setSeedShown] = useState(reduce ? SEED_STEPS : 0);
   const seedRef = useRef(reduce ? SEED_STEPS : 0);
   const setSeed = (n: number) => {
@@ -54,9 +55,9 @@ export function AssistantPanel({ agentOn, onToggleAgent, onBooked, flat = false 
   const [draft, setDraft] = useState('');
   const threadRef = useRef<HTMLDivElement>(null);
 
-  // ── seeded choreography (plays once; StrictMode/cleanup-safe via seedRef) ──
+  // ── seeded choreography (DEMO only; StrictMode/cleanup-safe via seedRef) ──
   useEffect(() => {
-    if (convo !== 'sf') return;
+    if (!demo || convo !== 'sf') return;
     if (seedRef.current >= SEED_STEPS) return;
     if (seedRef.current > 0) {
       setTyping(false);
@@ -86,7 +87,7 @@ export function AssistantPanel({ agentOn, onToggleAgent, onBooked, flat = false 
       setTyping(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [convo]);
+  }, [convo, demo]);
 
   // auto-scroll to the foot on every thread change
   useEffect(() => {
@@ -96,7 +97,7 @@ export function AssistantPanel({ agentOn, onToggleAgent, onBooked, flat = false 
 
   function onBook() {
     setConfirm('done');
-    onBooked();
+    onBooked?.();
     if (reduce) {
       setPayoffShown(true);
       return;
@@ -128,54 +129,55 @@ export function AssistantPanel({ agentOn, onToggleAgent, onBooked, flat = false 
         setTyping(false);
         setExtras((e) => ({
           ...e,
-          [convo]: [...(e[convo] ?? []), { who: 'ai', text: WALLET.scriptedReply }],
+          // production answers HONESTLY (the AI is roadmap); the demo plays co-pilot
+          [convo]: [...(e[convo] ?? []), { who: 'ai', text: demo ? WALLET.scriptedReply : WALLET.prodReply }],
         }));
       },
       reduce ? 0 : 1100,
     );
   }
 
-  const activeHistory = WALLET.history.find((h) => h.id === convo);
-  const isSeed = convo === 'sf';
+  const activeHistory = demo ? WALLET.history.find((h) => h.id === convo) : undefined;
+  const isSeed = demo && convo === 'sf';
   const isNew = convo === 'new';
   const liveExtras = extras[convo] ?? [];
   const flightBooked = confirm === 'done';
 
   return (
-    <div className={`rd-asst${flat ? ' rd-asst--flat' : ' rd-glass'}`}>
-      {/* head — the assistant identity + the arming switch */}
+    <div className="rd-asst rd-glass">
+      {/* head — the assistant identity (the agent on/off control is the agent
+          card's Pause/Resume button, not a duplicate switch here) */}
       <div className="rd-asst__head">
         <span className="rd-asst__title">
           <Spark />
           {ASSISTANT.title}
         </span>
-        <span className="rd-asst__arm">
-          <span>{agentOn ? WALLET.agentToggle : WALLET.agentOff}</span>
-          <Switch on={agentOn} onToggle={onToggleAgent} label="Agent enabled" />
-        </span>
       </div>
 
-      {/* recent conversations — TOP-DOWN list (owner: never a single scrolling line) */}
-      <div className="rd-asst__recent">
-        <div className="rd-asst__recenthead">
-          <span className="rd-label">{ASSISTANT.recentLabel}</span>
-          <button type="button" className="rd-asst__new" onClick={() => setConvo('new')}>
-            <Plus size={11} strokeWidth={2} aria-hidden />
-            {WALLET.newChat}
-          </button>
+      {/* recent conversations — TOP-DOWN list (DEMO history only; production has
+          no past conversations to fabricate) */}
+      {demo ? (
+        <div className="rd-asst__recent">
+          <div className="rd-asst__recenthead">
+            <span className="rd-label">{ASSISTANT.recentLabel}</span>
+            <button type="button" className="rd-asst__new" onClick={() => setConvo('new')}>
+              <Plus size={11} strokeWidth={2} aria-hidden />
+              {WALLET.newChat}
+            </button>
+          </div>
+          {WALLET.history.map((h) => (
+            <button
+              key={h.id}
+              type="button"
+              className={`rd-asst__item${convo === h.id ? ' is-active' : ''}`}
+              onClick={() => setConvo(h.id)}
+            >
+              <span className="rd-asst__itemtitle">{h.title}</span>
+              <span className="rd-asst__itemwhen">{h.when}</span>
+            </button>
+          ))}
         </div>
-        {WALLET.history.map((h) => (
-          <button
-            key={h.id}
-            type="button"
-            className={`rd-asst__item${convo === h.id ? ' is-active' : ''}`}
-            onClick={() => setConvo(h.id)}
-          >
-            <span className="rd-asst__itemtitle">{h.title}</span>
-            <span className="rd-asst__itemwhen">{h.when}</span>
-          </button>
-        ))}
-      </div>
+      ) : null}
 
       {/* the thread */}
       <div className="rd-asst__thread" ref={threadRef}>
@@ -183,7 +185,7 @@ export function AssistantPanel({ agentOn, onToggleAgent, onBooked, flat = false 
           <div className="rd-asst__empty">
             <p className="rd-asst__emptytitle">What can I handle for you?</p>
             <div className="rd-chips">
-              {WALLET.chips.map((c) => (
+              {(demo ? WALLET.chips : [WALLET.prodChip]).map((c) => (
                 <button key={c} type="button" className="rd-chip" onClick={() => send(c)}>
                   {c}
                 </button>
@@ -213,7 +215,7 @@ export function AssistantPanel({ agentOn, onToggleAgent, onBooked, flat = false 
 
         {isSeed && seedShown >= SEED_STEPS ? (
           <div className="rd-row rd-row--ai is-in">
-            <article className={`rd-confirm${flat ? '' : ' rd-glass'}${flightBooked ? ' is-done' : ''}`}>
+            <article className={`rd-confirm rd-glass${flightBooked ? ' is-done' : ''}`}>
               <div className="rd-confirm__head">
                 <Spark />
                 {WALLET.confirmCard.label}
@@ -293,30 +295,5 @@ export function AssistantPanel({ agentOn, onToggleAgent, onBooked, flat = false 
   );
 }
 
-/**
- * The floating dock — the Minimal variants' fully-secondary chat. A quiet
- * glass pill bottom-right; tap → the panel rises. `children` is the panel
- * content (an AssistantPanel or the business chat).
- */
-export function AssistantDock({
-  open,
-  onToggle,
-  label = ASSISTANT.dock,
-  children,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  /** the pill label — the business face says "Ask about your business" */
-  label?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <>
-      <button type="button" className={`rd-dock${open ? ' is-open' : ''}`} onClick={onToggle}>
-        <Spark />
-        {label}
-      </button>
-      <div className={`rd-dockpanel${open ? ' is-open' : ''}`}>{children}</div>
-    </>
-  );
-}
+// (The floating AssistantDock died with the dock-pill pattern — both faces now
+// keep their chat as a PERMANENT column, owner law 2026-06-10.)

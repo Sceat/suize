@@ -25,7 +25,7 @@ export function RoomHero({ eyebrow, title, sub, ctaHref, ctaLabel, motif = true 
       <div className="sx-room__hero-inner sx-wrap">
         <a
           className="sx-back sx-room__back"
-          href="#/"
+          href="/"
           onClick={e => {
             e.preventDefault()
             navigate('/')
@@ -44,7 +44,7 @@ export function RoomHero({ eyebrow, title, sub, ctaHref, ctaLabel, motif = true 
           </a>
           <a
             className="sx-link"
-            href="#/pricing"
+            href="/pricing"
             onClick={e => {
               e.preventDefault()
               navigate('/pricing')

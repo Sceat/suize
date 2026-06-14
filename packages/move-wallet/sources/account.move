@@ -43,9 +43,9 @@
 ///     discount, but any rate ≤ 10_000 is allowed),
 ///   - `fee_recipient` is the single Suize treasury for the whole rail.
 /// `charge` / `charge_subscription` / `pay` each take `&RailConfig` and resolve the
-/// rate against the relevant merchant address (the `charge` merchant param, the
-/// `pay` merchant's `owner`, the subscription's fixed `payee`). Only the holder of
-/// the `RailAdminCap` (the publisher) can mutate the config.
+/// rate against the relevant merchant address (the `charge` / `pay` merchant param,
+/// the subscription's fixed `payee`). Only the holder of the `RailAdminCap` (the
+/// publisher) can mutate the config.
 ///
 /// This module SUPERSEDES the mandate/vault cage (kept in the package as legacy
 /// adapters). The one good idea kept from the old cage is the `Clock`-gated,
@@ -282,6 +282,9 @@ public struct SubscriptionCreated has copy, drop {
 
 /// The CHARGE receipt — one per successful subscription debit. Same fee split as
 /// `Spent`; the payee is the subscription's FIXED payee, never a caller input.
+/// `memo` mirrors `ChargePaid` / `Paid`: the caller (the relayer) stamps a
+/// paymentId / renewal note here so a recurring debit is /verify-visible exactly
+/// like a one-off — without it a renewal receipt couldn't be matched to its bill.
 public struct Charged has copy, drop {
     account_id: ID,
     sub_key: u64,
@@ -289,6 +292,7 @@ public struct Charged has copy, drop {
     gross: u64,
     fee: u64,
     net: u64,
+    memo: vector<u8>,
     timestamp: u64,
     decision_hash: vector<u8>,
     walrus_blob_id: vector<u8>,
@@ -317,10 +321,11 @@ public struct ChargePaid has copy, drop {
 }
 
 /// The open-facilitator receipt — one per `pay`. A raw payer (NO Suize Account)
-/// settles a merchant with a `Coin<T>` they own; the 2% fee (read from the
-/// merchant's Account) is taken inline. There is NO `account_id` because the payer
-/// has no Account in this path. `payer` is the caller; `merchant` is the paid
-/// address; `decision_hash` / `walrus_blob_id` reserved (empty in v1).
+/// settles a merchant with a `Coin<T>` they own; the 2% fee (resolved from the
+/// shared `RailConfig` against the merchant address) is taken inline. There is NO
+/// `account_id` because NO Account exists on either side of this path. `payer` is
+/// the caller; `merchant` is the paid PLAIN address ("your address is your
+/// account"); `decision_hash` / `walrus_blob_id` reserved (empty in v1).
 public struct Paid has copy, drop {
     payer: address,
     merchant: address,
@@ -631,11 +636,17 @@ public fun create_subscription<T>(
 /// The payee is the subscription's FIXED `payee`; it is NOT a caller argument and
 /// can never be redirected. This is the ONLY path that takes the 2% fee (`spend`
 /// is a free transfer). Emits `Charged`.
+///
+/// `memo` follows the `charge` / `pay` convention: a caller-supplied UTF-8 note
+/// (the relayer's paymentId) recorded verbatim in the receipt — it carries NO
+/// authority (the subscription terms are the leash), it only makes the renewal
+/// receipt matchable off-chain (/verify).
 public fun charge_subscription<T>(
     account: &mut Account<T>,
     config: &RailConfig,
     sub_key: u64,
     amount: u64,
+    memo: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -677,6 +688,7 @@ public fun charge_subscription<T>(
         gross: amount,
         fee,
         net,
+        memo,
         timestamp: now,
         decision_hash: vector[],
         walrus_blob_id: vector[],
@@ -754,8 +766,11 @@ public fun charge<T>(
 // === PAY (CHARGE) — the open facilitator (raw payer, no Account) ===
 
 /// The open facilitator: a one-off charge from ANY raw payer with a `Coin<T>` in
-/// hand — NO Suize Account required on the payer side. This is the door for
-/// external 402 / AP2 agents that hold USDC but have no funded Account.
+/// hand — NO Suize Account required on the payer side, and NO Account on the
+/// MERCHANT side either (owner amendment 2026-06-10): the merchant is a plain
+/// `address` — "your address is your account." This is the door for external
+/// 402 / AP2 agents that hold USDC but have no funded Account, paying any
+/// merchant that can receive USDC.
 ///
 /// PERMISSIONLESS (no owner gate): the payer's signature over the `payment: Coin<T>`
 /// input IS the authorization — you can only pass a coin you own. There is no
@@ -763,22 +778,22 @@ public fun charge<T>(
 /// over-spend a coin you handed in).
 ///
 /// FEE SOURCE (founder decision — Suize-owned policy): the rate + recipient are
-/// read from the shared `RailConfig`, resolved against the merchant being paid
-/// (`merchant_account.owner`) — NOT from the merchant's own Account (a merchant
-/// can't zero their own rate) and NOT a module constant. `net` is transferred to
-/// the merchant and `fee` to `config.fee_recipient`, both as fresh `Coin<T>`s — the
-/// same payout primitive as `charge` / `charge_subscription`.
+/// read from the shared `RailConfig`, resolved against the merchant ADDRESS being
+/// paid — NOT from any merchant-owned object (a merchant can't zero their own
+/// rate) and NOT a module constant. `net` is transferred to the merchant and `fee`
+/// to `config.fee_recipient`, both as fresh `Coin<T>`s — the same payout primitive
+/// as `charge` / `charge_subscription`.
 ///
-/// Emits `Paid` (no `account_id` — the payer has no Account here).
+/// Emits `Paid` (no `account_id` — neither side has an Account here; the receipt
+/// carries the merchant ADDRESS).
 public fun pay<T>(
-    merchant_account: &Account<T>,
+    merchant: address,
     config: &RailConfig,
     payment: Coin<T>,
     memo: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    let merchant = merchant_account.owner;
     let fee_recipient = config.fee_recipient;
 
     let gross = coin::value(&payment);
@@ -888,4 +903,36 @@ public fun subscription_info<T>(account: &Account<T>, sub_key: u64): (address, u
 #[test_only]
 public fun init_for_testing(ctx: &mut TxContext) {
     init(ACCOUNT {}, ctx)
+}
+
+/// Build the `Paid` receipt a test EXPECTS, so `event::events_by_type<Paid>()`
+/// results can be asserted field-for-field (event fields are private outside this
+/// module; a constructor beats a pile of accessors). `decision_hash` /
+/// `walrus_blob_id` are pinned empty — exactly what v1 emits.
+#[test_only]
+public fun paid_event_for_testing(
+    payer: address,
+    merchant: address,
+    gross: u64,
+    fee: u64,
+    net: u64,
+    memo: vector<u8>,
+    timestamp: u64,
+): Paid {
+    Paid { payer, merchant, gross, fee, net, memo, timestamp, decision_hash: vector[], walrus_blob_id: vector[] }
+}
+
+/// Same idea for the `Charged` receipt — the subscription-debit expectation.
+#[test_only]
+public fun charged_event_for_testing(
+    account_id: ID,
+    sub_key: u64,
+    payee: address,
+    gross: u64,
+    fee: u64,
+    net: u64,
+    memo: vector<u8>,
+    timestamp: u64,
+): Charged {
+    Charged { account_id, sub_key, payee, gross, fee, net, memo, timestamp, decision_hash: vector[], walrus_blob_id: vector[] }
 }

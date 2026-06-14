@@ -26,8 +26,11 @@ import { corsHeaders, json, text } from "./http";
 import { sponsorReady, sponsorInfo, maskKey } from "./sponsor";
 import { handleReady, handleInfo } from "./handle";
 import { handleDeployRoute, deployReady, deployInfo } from "./deploy";
-import { startRenewalRelayer, relayerInfo } from "./relayer";
+import { startStorageCron, storageInfo } from "./deploy/extend";
+import { subscribeInfo } from "./deploy/subscribe";
 import { handleMcpRoute, mcpInfo } from "./mcp";
+import { brainInfo } from "./brain";
+import { handleFacilitatorRoute, facilitatorInfo, treasuryReady } from "./facilitator";
 import { tryUpgrade, websocketHandler, wsConnectionCount, type WsData } from "./ws";
 
 // Fail fast on missing secrets — same guard the standalone sponsor had.
@@ -153,6 +156,13 @@ Bun.serve({
     const mcp = handleMcpRoute(req, url, origin, server);
     if (mcp) return mcp;
 
+    // Facilitator module — x402 V2 'exact', KEYLESS: POST /verify, POST /settle,
+    // GET /supported, POST /build, GET /terms, GET /tx, POST /checkout. Payments
+    // settle by broadcasting the payer's signed gasless send_funds PTB over gRPC —
+    // no Enoki, no account.move. `server` is threaded for the per-IP limiter.
+    const facilitated = handleFacilitatorRoute(req, url, origin, server);
+    if (facilitated) return facilitated;
+
     // Deploy module — POST /deploy, GET /sites[/:id], POST /domains,
     // DELETE /domains/:domain. 503s cleanly when the deploy wallet is unconfigured.
     const deployed = handleDeployRoute(req, url, origin, server);
@@ -187,9 +197,10 @@ console.log(`[backend] enoki key: ${maskKey(config.enokiPrivateApiKey)}`);
 console.log(
   `[backend] sponsor move targets: ${sponsorInfo.allowedMoveTargetCount} ` +
     `(crash=${sponsorInfo.crashTargetCount}, ` +
-    (sponsorInfo.accountPublished
-      ? `account=${sponsorInfo.accountTargetCount} [RAIL LIVE])`
-      : `wallet=${sponsorInfo.walletTargetCount} [legacy; rail unpublished])`),
+    (sponsorInfo.subsPublished
+      ? `subs=${sponsorInfo.subsTargetCount} [SUBS LIVE]`
+      : `subs=0 [unpublished]`) +
+    `; account.move RETIRED — x402 V2 settles keyless)`,
 );
 console.log(`[backend] allowed origins: ${config.allowedOrigins.join(", ") || "(none)"}`);
 console.log(
@@ -197,38 +208,68 @@ console.log(
     ? `enabled (parent=${handleInfo.parentDomain}) — WS-only`
     : "DISABLED (SuiNS not configured)"}`,
 );
-console.log(
-  `[backend] deploy: ${deployInfo.enabled
-    ? `enabled (base=${deployInfo.baseDomain}, epochs=${deployInfo.epochs}, ` +
-      `cf=${deployInfo.cloudflare ? "on" : "off"})` +
-      (deployInfo.chainReady ? "" : " — WAITING ON deploy_sui PUBLISH (placeholder on-chain ids)") +
-      (deployInfo.chargeGate
-        ? " — CHARGE GATE LIVE ($0.50/deploy)"
-        : " — charge gate OFF (rail unpublished / merchant unpinned; un-gated deploys)")
-    : "DISABLED (DEPLOY_WALLET_PRIVATE_KEY not set)"}`,
-);
+{
+  const chargeLive = deployInfo.enabled ? await deployInfo.chargeGateReady() : false;
+  console.log(
+    `[backend] deploy: ${deployInfo.enabled
+      ? `enabled (base=${deployInfo.baseDomain}, epochs=${deployInfo.epochs}, ` +
+        `cf=${deployInfo.cloudflare ? "on" : "off"})` +
+        (deployInfo.chainReady ? "" : " — WAITING ON deploy_sui PUBLISH (placeholder on-chain ids)") +
+        (chargeLive
+          ? ` — CHARGE GATE LIVE (x402 V2, $${deployInfo.chargePrice}/deploy)`
+          : " — charge gate OFF (treasury unresolved; un-gated deploys)")
+      : "DISABLED (DEPLOY_WALLET_PRIVATE_KEY not set)"}`,
+  );
+}
 console.log(
   `[backend] mcp: POST ${mcpInfo.endpoint} (${mcpInfo.transport}, ` +
     `protocol=${mcpInfo.protocolVersion}, tools=[${mcpInfo.tools.join(", ")}])`,
 );
-
-// The renewal relayer — the deterministic subscription↔storage cron. Enabled
-// only when the deploy wallet is set AND the charge gate is live; a no-op start
-// otherwise (the rest of the backend is unaffected).
-startRenewalRelayer();
 console.log(
-  `[backend] renewal relayer: ${relayerInfo.enabled
-    ? `ON (tick=${relayerInfo.tickMs}ms, extend=${relayerInfo.extendEpochs} epochs, ` +
-      `safety=${relayerInfo.safetyEpochs} epochs, period=${relayerInfo.subPeriodMs}ms)`
-    : "OFF (deploy wallet unset or rail/deploy ids unpinned)"}`,
+  `[backend] brain (wallet AI): ${brainInfo.enabled
+    ? `ON over WS (brainChatRequest — FENCED/keyless, model=${brainInfo.model}, ` +
+      `cap=${brainInfo.dailyTokenMax} tok/user/day; narrates + PROPOSES, never signs)`
+    : "OFF (ANTHROPIC_API_KEY not set — brain frame returns not-configured)"}`,
+);
+{
+  const treasuryOk = await treasuryReady();
+  console.log(
+    `[backend] facilitator (x402 V2 'exact', ${facilitatorInfo.network}): ` +
+      `${facilitatorInfo.routes.join(", ")} ` +
+      `(merchants=${facilitatorInfo.merchantCount}, treasury=${facilitatorInfo.treasuryName} ` +
+      `${treasuryOk ? "RESOLVED" : "unresolved — fee-tier paths 503"})`,
+  );
+}
+
+// The Walrus storage extender — the deterministic subscription↔storage backstop, now
+// driven by the MERCHANT SDK (suizeSubs.watch over the Deploy-merchant sub lifecycle;
+// the subs module CHARGES push/user-signed, this just keeps a PAID site's storage
+// extended). Enabled only when the deploy wallet is set AND the subs module is published;
+// a no-op start otherwise (the rest of the backend is unaffected). Async (it resolves the
+// treasury to construct suizeSubs) — fire-and-forget; never blocks boot, never throws.
+void startStorageCron().catch((err) =>
+  console.error("[backend] storage extender start failed:", (err as Error).message),
+);
+console.log(
+  `[backend] storage extender: ${storageInfo.enabled
+    ? `ON (suizeSubs.watch poll=${storageInfo.tickMs}ms, extend=${storageInfo.extendEpochs} epochs, ` +
+      `safety=${storageInfo.safetyEpochs} epochs; + on-settle hook per sponsored renewal)`
+    : "OFF (deploy wallet unset or subs module unpublished)"}`,
+);
+console.log(
+  `[backend] deploy subscriptions: ${subscribeInfo.enabled
+    ? `ON (POST /deploy/subscribe/build·/submit — merchant SDK suizeSubs; ` +
+      `$${(subscribeInfo.amount / 1e6).toFixed(2)}/${Math.round(subscribeInfo.periodMs / 86_400_000)}d)`
+    : "OFF (deploy wallet unset or subs module unpublished)"}`,
 );
 
 console.log(
   `[backend] routes: GET /ws (websocket — incl. sponsor/execute + handle ops), ` +
-    `POST /mcp, POST /deploy/quote, POST /deploy/charge, POST /deploy/subscribe, ` +
-    `POST|DELETE /deploy/renewal, POST /execute, POST /deploy, ` +
-    `GET /sites, GET /sites/:id, POST /domains, ` +
-    `DELETE /domains/:domain, ` +
+    `POST /mcp, POST /verify, POST /settle, GET /supported, POST /build, ` +
+    `GET /terms, GET /tx, POST /checkout, ` +
+    `POST /deploy, POST /deploy/subscribe/build, POST /deploy/subscribe/submit, ` +
+    `GET /sites, GET /sites/:id, POST /sites/:id/extend, ` +
+    `POST /domains, DELETE /domains/:domain, ` +
     `GET /health, GET /ready, GET /ready/serve, GET /ready/sponsor, ` +
     `GET /ready/handle, GET /ready/deploy, GET /ready/ws`,
 );

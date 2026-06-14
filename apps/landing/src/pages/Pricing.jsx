@@ -28,7 +28,7 @@ export default function Pricing() {
               <div className="sx-prow">
                 <span className="sx-prow__k">Get paid by an agent (Charge)</span>
                 <span className="sx-prow__lead" />
-                <span className="sx-prow__v">2%</span>
+                <span className="sx-prow__v">2% · 1¢ min</span>
               </div>
               <div className="sx-prow">
                 <span className="sx-prow__k">Setup / account</span>

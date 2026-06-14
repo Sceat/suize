@@ -18,11 +18,14 @@ export const SUI_NETWORK: SuiNetwork = resolveNetwork(import.meta.env.VITE_SUI_N
 export const RPC_URL: string =
   import.meta.env.VITE_SUI_RPC_URL?.trim() || fullnodeUrl(SUI_NETWORK)
 
-// The unified backend's `deploy` module base URL. From Vite env, defaulting to
-// the local backend. The route is OPEN (no auth) in the MVP.
+// The unified backend's `deploy` module base URL. `vite dev` → the local backend;
+// `vite build` (prod) → https://api.suize.io. NEVER hardcode a localhost default that
+// applies to prod — it bakes localhost into the deployed bundle (deploy.suize.io then
+// can't reach its API + Chrome prompts about local-network access). Only VITE_DEPLOY_API_URL
+// overrides, and it must be UNSET when building for prod.
 export const DEPLOY_API_URL =
   import.meta.env.VITE_DEPLOY_API_URL?.trim().replace(/\/+$/, '') ||
-  'http://localhost:8080'
+  (import.meta.env.DEV ? 'http://localhost:8099' : 'https://api.suize.io')
 
 // Re-export the deploy package id (PLACEHOLDER '0x0' until published). Surfaced
 // in the UI footer so it's obvious when the chain side is still un-published.

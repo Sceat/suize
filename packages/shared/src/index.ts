@@ -50,6 +50,25 @@ export const USDC_TYPES: Record<SuiNetwork, string> = {
  */
 export const USDC_TYPE = USDC_TYPES.testnet;
 
+// ── Facilitator wire-shape validators — the ONE source of truth ───────────────
+// The 402/pay wire (paymentId memo, decimal-string amounts, Sui addresses) is a
+// public contract; these regexes + the memo cap are the validators every surface
+// shares (the pay page, the SSO confirm popup, the backend verifier). The
+// zero-dep published packages (`@suize/pay`, `@suize/mcp`) keep their OWN copies
+// — they must not import this package — but every app that already depends on
+// `@suize/shared` imports from here so the contract can't silently drift.
+export const SUI_ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/;
+/** A non-negative USDC decimal: integer part + up to 6 fractional digits. */
+export const USDC_DECIMAL_RE = /^(\d+)(?:\.(\d{1,6}))?$/;
+/** A base58 Sui tx digest (no 0/O/I/l, ~44 chars) — the shape `/verify` matches. */
+export const TX_DIGEST_RE = /^[A-Za-z0-9]{40,50}$/;
+/** Max bytes of a payment memo / paymentId carried in a receipt. */
+export const MAX_MEMO_LEN = 256;
+
+/** The CAIP-2 chain id for a Sui network (`sui:testnet` / `sui:mainnet`) — the
+ * `network` field x402 PaymentRequirements carry. */
+export const caip2 = (net: SuiNetwork) => `sui:${net}` as const;
+
 /**
  * Per-network Walrus HTTP endpoint DEFAULTS (the public operator endpoints).
  * The backend overrides these via WALRUS_AGGREGATOR / WALRUS_PUBLISHER_URL; the
@@ -70,6 +89,16 @@ export const WALRUS_DEFAULTS: Record<SuiNetwork, { aggregator: string; publisher
 // On-chain package ids + the exact Move targets the sponsor may sponsor.
 // These are public on-chain ids — safe to commit.
 // ---------------------------------------------------------------------------
+
+/**
+ * The Sui framework package `0x2`, in its NORMALIZED 64-hex form. Enoki's sponsor
+ * allow-list compares against the tx's NORMALIZED move-call targets, so any
+ * framework helper we allow-list for sponsorship (e.g. the `CoinWithBalance`-intent
+ * helpers in SUBS_MOVE_TARGETS) MUST use this form — a short `0x2::…` never matches
+ * and silently breaks sponsorship (proven on testnet 2026-06-12).
+ */
+const FRAMEWORK_PKG =
+  '0x0000000000000000000000000000000000000000000000000000000000000002';
 
 /**
  * Crash router package (live on testnet — version-gated + accumulator build).
@@ -93,111 +122,138 @@ const WALLET_PACKAGE =
  * Deploy Move package (`deploy_sui`) — v2 REPUBLISHED to testnet 2026-06-10
  * (publish digest Gkg5FJPAkf8pPAM7w24gTWzVFN3N17uxBTnihtBkhiwu; the 2026-06-06
  * v1 publish 0xadcc8d… is abandoned — its Sites/domains are orphaned). v2 adds:
- * Site blob-OBJECT id fields (Walrus storage extension), the shared ChargeLedger
- * (on-chain single-use deploy-charge digests; LedgerCap-gated writes), and the
- * shared RenewalRegistry (subscription↔site join for storage auto-renewal).
- * PACKAGE is the package id; the four *_OBJECT ids are the shared objects created
- * by the modules' init — the deploy backend reads these to build PTBs, the
- * worker reads them to resolve + serve sites.
- * Caps from this publish (held by the publisher/CLI dev wallet 0x087aa862…):
- * version::AdminCap 0x6dccadf4…, charge_ledger::LedgerCap 0xb70219fc…,
- * UpgradeCap 0xc655cb7f….
+ * Site blob-OBJECT id fields (Walrus storage extension). PACKAGE is the package id;
+ * the two *_OBJECT ids are the shared objects created by the modules' init — the
+ * deploy backend reads these to build PTBs, the worker reads them to resolve + serve
+ * sites.
+ *
+ * NOTE (x402 V2 pivot 2026-06-12): the `charge_ledger` + `renewal_registry` modules
+ * were REMOVED from move-deploy (deploy billing is now x402-exact one-off settlements
+ * via the keyless facilitator; storage auto-renewal rides the standalone `subs`
+ * module). Their two shared objects from THIS testnet publish are orphaned-harmless
+ * (nothing references them); the MAINNET republish excludes both modules.
+ * REPUBLISHED on testnet 2026-06-14 (publish digest BQ7Pna6hwEutTeJCpvtFKivxy9MP6RHYfJHgQZEY2UQB)
+ * to add the on-chain ONE-SITE-PER-PAYMENT guard: `site::create_site` now takes a
+ * settled payment digest + the shared `SiteDigestRegistry` and aborts `EDigestUsed`
+ * (site.move code 0) if the digest already minted a site — the chain is the atomic
+ * dedup lock (multi-replica-safe; replaces the old in-memory settledDeploys map).
+ * Caps from this publish: the DeployerCap 0xfcdbc25d… (the create_site mint authority —
+ * gates Site minting to the paid backend) was minted to the publisher 0x087aa862… then
+ * TRANSFERRED to the prod deploy service wallet 0xcc58bc00… (agent@suize, which signs
+ * create_site in prod and already holds the SiteAdminCaps — digest mLcJFogd…). The cap's
+ * CUSTODY == the mint trust root (a hot-wallet single point of failure; see
+ * apps/deploy/SPEC.md). version::AdminCap 0x6aa982b5… + UpgradeCap 0x81f93227… stay on the
+ * CLI publisher. (2026-06-14 republish `6kAxGVLn…` adds the DeployerCap gate — Move audit.)
  */
 const DEPLOY_PACKAGE =
-  '0x9a769a50014208e54c9deb446fd694e54e0d3000fd7d4ceebe5391df01a90ad4';
+  '0x5cbf0ce0a2f56128ef0d7679aab8f3a8ba690533163dc2524754fd40f27faf0b';
 const DEPLOY_VERSION_OBJECT =
-  '0x9e919cb20f1f62871e231a984d143184698de26ee8060b4a3bbe4b1abf960ebf';
+  '0x339c2b6bbd8ed4cb5ddef2c6c8f137374c6e1eab4aedef665b61c0b464a77898';
 const DEPLOY_DOMAIN_REGISTRY_OBJECT =
-  '0x7e7fe6245aed8ed86b81bb0c793de06639a2eb595fbe17700f5be6599151041e';
-const DEPLOY_CHARGE_LEDGER_OBJECT =
-  '0x2d6ff597351d63c3c1fb60b73cd2dd8e7a002cadc3c3b25a7ac6ba7fc5f9664e';
-const DEPLOY_RENEWAL_REGISTRY_OBJECT =
-  '0xf66b25dfce7c86e926464e21ba3fb534bdca1baef407aa222b09295feb027dc6';
+  '0xec0565e9c27ab340595a26b8b823ed681e36616f32ebf4aba20a0193574d4c08';
+const DEPLOY_SITE_DIGEST_REGISTRY_OBJECT =
+  '0x8ed1be2e9ad1813150368e7c458a1f70239185e8545717b04a233bb5333ca5f0';
+/** The owned `DeployerCap` (held by the deploy service wallet): the mint authority
+ *  `create_site` now requires — only the paid backend can mint a Site, so every Site
+ *  field (owner/size/blob ids) is service-attested. Custody == the mint trust root. */
+const DEPLOY_DEPLOYER_CAP_OBJECT =
+  '0xfcdbc25dafbe2af0aeeb2471acab6d1e657d4f0ac9380435f17a46c4cf8894bf';
+
+// NOTE (x402 V2 pivot 2026-06-12): the `suize::account` rail package + its shared
+// `RailConfig` object are RETIRED. Payments are now vanilla x402 V2 'exact' over
+// gasless Address-Balance PTBs, settled KEYLESS over gRPC by the facilitator — there
+// is no on-chain Account, no RailConfig, no `&RailConfig` arg, no sponsor allow-list
+// entry for the rail. The 2% (+$0.01 floor) fee lives in the declared `extra.outputs`
+// split (facilitator-enforced), not in an on-chain fee object. The unpublished
+// account.move source stays under packages/move-wallet as a retired-in-place archive.
 
 /**
- * Account Move package (`suize::account`) — the v1 PAY core. PLACEHOLDER id until
- * the `account` module is published to testnet (it currently lives unpublished at
- * packages/move-wallet/sources/account.move; the legacy mandate/vault/swap/navi
- * package above is a DIFFERENT publish). `0x0` until then — the wallet reads this id
- * from here per the single-source-of-truth rule, so the moment `account` publishes,
- * setting this one constant lights up every live write/read in apps/wallet.
- *
- * The Account is generic over the settlement coin (`Account<USDC>` in production —
- * Circle's testnet USDC, see apps/wallet/src/data/coins.ts). The state-changing
- * targets below are the sponsorable owner/permissionless surface; the read-only
- * accessors (`balance_value` / `subscription_info` / …) are devInspect-only and are
- * not listed (reads are never signed/sponsored).
+ * Subscriptions Move package (`subs::subscription`) — the standalone Party-object
+ * subscription module: each subscription is its own object (fixed payee +
+ * per-period cap + period); renewals are USER-SIGNED, sponsored txs the relayer
+ * triggers. CONFIG_OBJECT is the shared config the module's `init` creates; the
+ * wallet/relayer read these ids from here per the single-source-of-truth rule.
  */
-// PUBLISHED to testnet 2026-06-10 (digest 7yrZfyhbaGxAnx7VNm9qSxiR3QVz9EQF1nDvFCAYMYx3)
-// from the CLI dev wallet 0x087aa862… — which therefore holds the RailAdminCap
-// (0x234f822d…) + UpgradeCap (0x035edb9d…) and seeds RailConfig.fee_recipient.
-// Mainnet stays '0x0' in NETWORK_ADDRESSES — the mainnet publish is the v1 gate.
-const ACCOUNT_PACKAGE: string =
-  '0x9f4027e955a483e02def5f4b12c8c2241ab0095c5b04f2f7928869bd9bb210f3';
+// PUBLISHED to testnet 2026-06-14 (publish digest 2XbnJRCCJzcRXkmPWsVY2sthDevjm25UDB9tZKDNTaqi)
+// from packages/move-subs (module: subscription) by the CLI dev wallet 0x087aa862… —
+// which therefore holds the SubsAdminCap (0xd3840886…) + UpgradeCap (0xbfa04cd0…) and is
+// the SubsConfig.treasury until synced. This republish adds the USDC coin-type PIN
+// (set_coin_type, EWrongCoin) + a 10-year period cap — run `bun run subs:sync-treasury`
+// after publish to set BOTH treasury AND coin_type on the fresh SubsConfig. CONFIG_OBJECT
+// is the shared SubsConfig init created. Mainnet stays '0x0' — its publish is a republish.
+const SUBS_PACKAGE: string = '0xb6bca1cfbcff846c2e575190c70a78fc777f858deae9d4d5a6e797cb005d1c69';
+const SUBS_CONFIG_OBJECT: string = '0xd176a16a392bf2b358d467c486eebbb4fee660196ec927b93ddc174b4c45c4bf';
 
 /**
- * The shared `RailConfig` object (`suize::account::RailConfig`) — Suize's ONE fee-policy
- * object: `{ default_fee_bps = 200, fee_recipient, overrides: Table<address,u16> }`,
- * created + shared at the account package's `init` (publish) and mutated only via the
- * `RailAdminCap`. Every CHARGE verb (`charge` / `charge_subscription` / `pay`) takes
- * this as its `&RailConfig` arg and resolves the per-merchant rate against it.
- * PLACEHOLDER `0x0` until the account package publishes — the publish step MUST capture
- * the shared `RailConfig` id from the `init` effects into this constant (sibling to the
- * DEPLOY `VERSION_OBJECT` / `DOMAIN_REGISTRY_OBJECT` shared-object slots). The backend's
- * CHARGE PTB builders + the charge gate read this id from here per the
- * single-source-of-truth rule.
+ * The Suize treasury is the SuiNS handle `treasury@suize` — the ONE source of truth,
+ * resolved LIVE everywhere it's needed (the x402 fee split, the Deploy charge). There
+ * is NO hardcoded treasury address anywhere in the code (owner law 2026-06-14: "any
+ * fees go to whatever treasury.suize.sui resolves to; nothing in the code points at a
+ * literal address — we abstract"). This reverses the 2026-06-12 pin: a name hijack is
+ * the (accepted) tradeoff for a rotatable, single-source treasury; callers CACHE the
+ * resolution and FAIL-CLOSED (mint no fee-tier terms) when it can't be resolved, so a
+ * transient miss never silently misroutes the rake.
  */
-const ACCOUNT_RAIL_CONFIG: string =
-  '0x8b32e4c3c75a6b4c97b5147327ad4b1c7fd16fcc7306c54f7c7bc5a2ff04c9ba';
+export const TREASURY_SUINS_NAME = 'treasury@suize';
+
+/** `treasury@suize` as the dotted `.sui` name the SuiNS RPC actually resolves. */
+export const TREASURY_SUINS_DOTTED = 'treasury.suize.sui';
+
+/** The minimal SuiNS-resolving client both runtimes satisfy — dapp-kit's `SuiClient`
+ *  (browser) and `SuiJsonRpcClient` (backend) each expose `resolveNameServiceAddress`. */
+export interface TreasuryResolver {
+  resolveNameServiceAddress(input: { name: string }): Promise<string | null>;
+}
 
 /**
- * The Suize treasury — the fee recipient. Post-refactor this is no longer a per-Account
- * field: it SEEDS `RailConfig.fee_recipient` at the account package's `init` (publish),
- * and is re-set thereafter only via the admin-gated `set_fee_recipient(cap, config, addr)`.
- * The 2% CHARGE fee lands here; `spend` is free so it never routes here. PLACEHOLDER
- * `0x0` until the treasury address is pinned alongside the account publish (the publisher
- * then runs `set_fee_recipient` to point `RailConfig.fee_recipient` at this address).
+ * Resolve the Suize treasury address from `treasury@suize` (the single source of
+ * truth). Returns a lower-cased 0x… address, or `null` when the name doesn't resolve
+ * to a valid address — callers MUST fail-closed on null (never fall back to a literal).
+ * Callers own caching; this is a single pure async resolve so it stays reusable + testable.
  */
-// TESTNET DEV: the CLI default account plays every role (owner directive
-// 2026-06-10 — no role-address ceremony in dev). It published the rail, so it IS
-// RailConfig.fee_recipient already. Real treasury address lands at mainnet pin.
-export const SUIZE_TREASURY: string =
-  '0x087aa862ca645c0b94400c49e11b491011fca35db837361ccfc4c6f69d356e86';
+export async function resolveTreasury(client: TreasuryResolver): Promise<string | null> {
+  const addr = await client.resolveNameServiceAddress({ name: TREASURY_SUINS_DOTTED });
+  return addr && SUI_ADDRESS_RE.test(addr) ? addr.toLowerCase() : null;
+}
 
-/**
- * The DEPLOY MERCHANT address — the `merchant` argument the deploy `charge` ($0.50)
- * pays. This is the Deploy-by-Suize business's receiving address (where the $0.50
- * net lands; the 2% fee splits off to `RailConfig.fee_recipient`, i.e. the Suize
- * treasury — the rate is now resolved per-merchant from the shared `RailConfig`, not
- * from any Account). It is DISTINCT from `SUIZE_TREASURY` (the protocol fee recipient):
- * one is "the merchant being paid," the other is "the rail's cut." For the demo the
- * deploy service wallet can BE the merchant (it then both receives the $0.50 net and
- * pays the on-chain Site gas). PLACEHOLDER `0x0` until the owner pins the merchant
- * address. The backend's deploy-charge join reads this as the charge merchant.
- */
-// TESTNET DEV: same CLI default account as SUIZE_TREASURY (merchant == treasury
-// == publisher in dev). Distinct receive-only merchant address lands at mainnet.
-export const SUIZE_DEPLOY_MERCHANT: string =
-  '0x087aa862ca645c0b94400c49e11b491011fca35db837361ccfc4c6f69d356e86';
+// NOTE (x402 V2 pivot 2026-06-12): SUIZE_DEPLOY_MERCHANT / DEPLOY_MERCHANT_SET are
+// GONE. Deploy is a FIRST-PARTY x402 merchant — the merchant IS the Suize treasury
+// (resolved from `treasury@suize`), so a separate merchant address const is dead. The
+// deploy charge is a single full-amount output to that treasury (no fee split).
+// See services/backend/src/deploy/payment.ts.
+//
+// ON-CHAIN CAVEAT (subs): `subs::subscription`'s `SubsConfig.treasury` is set ON-CHAIN
+// at publish and Move can't resolve SuiNS — so the subscription rake goes to whatever
+// that stored address is. Point it at the resolved `treasury@suize` via a one-time
+// `SubsAdminCap` admin tx; that is NOT a code change (no literal belongs here).
 
 /** The price (in native USDC base units, 6 decimals) of one one-off deploy charge: $0.50 = 500_000. */
 export const DEPLOY_CHARGE_AMOUNT = 500_000;
 
+/** The price of a one-off Walrus-storage EXTEND, as a DECIMAL USDC string ("0.50")
+ * — the x402/facilitator wire convention (decimal strings, not base units), so it
+ * drops straight into a PaymentRequirements amount. Same $0.50 as the deploy charge. */
+export const DEPLOY_EXTEND_PRICE_USDC = '0.50';
+
 /**
  * The Deploy subscription — $19.99/mo (price placeholder, owner-flagged), unlocking
- * (a) custom domains and (b) Suize auto-renewing the site's Walrus storage via
- * `charge_subscription` (LOCKED #10). PRICE is what each period debits; PERIOD_CAP
- * is the on-chain per-period ceiling the owner signs at `create_subscription`
- * (slight headroom over the price — the cap is the LEASH, the price is policy);
- * PERIOD_MS is the recurring interval (30 days). The relayer charges PRICE, never
- * more — `EOverPeriodCap` is physics if it ever tried.
+ * (a) custom domains and (b) Suize auto-renewing the site's Walrus storage. PRICE is
+ * what each period debits; PERIOD_MS is the recurring interval (30 days). On the subs
+ * module the fixed `amount` IS the per-period leash (the module asserts
+ * `payment.value() == amount`), so there is no separate PERIOD_CAP const.
  */
 export const DEPLOY_SUB_PRICE_USDC = 19_990_000;
-export const DEPLOY_SUB_PERIOD_CAP = 20_000_000;
 export const DEPLOY_SUB_PERIOD_MS = 2_592_000_000;
 
-/** True once the Deploy merchant address has been pinned (no longer the 0x0 placeholder). */
-export const DEPLOY_MERCHANT_SET: boolean = SUIZE_DEPLOY_MERCHANT !== '0x0';
+/**
+ * The per-ADDRESS auto-renew ceiling: a single Deploy subscription (owned by an
+ * address) auto-renews the Walrus storage of ALL that address's sites, but only up
+ * to this much TOTAL site storage. A WAL-spend safety bound — a malicious owner with
+ * 10 TB of sites must NOT make the service wallet renew all of it for one $19.99 sub.
+ * Cost basis ~$0.023/GB/mo Walrus ⇒ ~$2.30/mo of WAL at the 100 GiB cap, comfortably
+ * under the $19.99 revenue. 100 GiB = 100 * 1024^3 bytes.
+ */
+export const DEPLOY_RENEW_MAX_BYTES = 100 * 1024 ** 3;
 
 /**
  * Crash router package + its 7 sponsorable `router::*` targets, PLUS the one
@@ -225,7 +281,11 @@ export const CRASH_TESTNET_IDS = {
     SUPPLY: `${CRASH_ROUTER_PACKAGE}::router::supply`,
     REDEEM_LP: `${CRASH_ROUTER_PACKAGE}::router::redeem_lp`,
     // Sui framework: zero-coin mint for a fully-manager-funded bet (moves no value).
-    COIN_ZERO: `0x2::coin::zero`,
+    // MUST be the NORMALIZED 64-hex `0x2` form (`0x000…002`): Enoki compares the
+    // request's allow-list against the tx's NORMALIZED move-call targets, so a short
+    // `0x2::…` entry never matches and silently breaks sponsorship (the same bug class
+    // proven on the subs `redeem_funds`/`into_balance` helpers, testnet 2026-06-12).
+    COIN_ZERO: `${FRAMEWORK_PKG}::coin::zero`,
   },
 } as const;
 
@@ -287,85 +347,71 @@ const deployIds = (ids: {
   pkg: string;
   version: string;
   registry: string;
-  chargeLedger: string;
-  renewalRegistry: string;
+  siteDigestRegistry: string;
+  deployerCap: string;
 }) => ({
   PACKAGE: ids.pkg,
   VERSION_OBJECT: ids.version,
   DOMAIN_REGISTRY_OBJECT: ids.registry,
-  // Shared ChargeLedger (`charge_ledger::ChargeLedger`) — on-chain single-use
-  // deploy-charge digests (Table<String, ID>). Writes are LedgerCap-gated (the
-  // deploy service wallet) so a settled digest can't be front-run-recorded by an
-  // attacker to brick a paid deploy; Table key uniqueness is the replay physics.
-  CHARGE_LEDGER_OBJECT: ids.chargeLedger,
-  // Shared RenewalRegistry (`renewal_registry::RenewalRegistry`) — the on-chain
-  // subscription↔site join the relayer reads: SubRef{account_id, sub_key} → site_id.
-  RENEWAL_REGISTRY_OBJECT: ids.renewalRegistry,
+  /** The shared `SiteDigestRegistry`: the on-chain one-site-per-payment dedup set.
+   *  `create_site` records the settled payment digest here + aborts EDigestUsed on a
+   *  duplicate — the multi-replica-safe consume guard. */
+  SITE_DIGEST_REGISTRY_OBJECT: ids.siteDigestRegistry,
+  /** The owned `DeployerCap` (deploy service wallet): `create_site`'s mint authority —
+   *  the FIRST moveCall arg. Only the holder can mint a Site, so an attacker cannot
+   *  forge one (free hosting / a renewer-draining Site). Mainnet '0x0' until transferred
+   *  to the prod service wallet. */
+  DEPLOYER_CAP_OBJECT: ids.deployerCap,
   TARGETS: {
     CREATE_SITE: `${ids.pkg}::site::create_site`,
     LINK_DOMAIN: `${ids.pkg}::domain_registry::link_domain`,
     UNLINK_DOMAIN: `${ids.pkg}::domain_registry::unlink_domain`,
-    RECORD_CHARGE: `${ids.pkg}::charge_ledger::record_charge`,
-    LINK_RENEWAL: `${ids.pkg}::renewal_registry::link_renewal`,
-    UNLINK_RENEWAL: `${ids.pkg}::renewal_registry::unlink_renewal`,
   },
 });
 
 /**
- * Account package block (`suize::account`) — the v1 PAY core (the new wallet).
- * PLACEHOLDER id (`0x0`) until `account` publishes; the wallet reads these targets
- * from here so the read-only flows render today and the writes go live the moment
- * the id is set. The sponsorable WRITE targets across the owner + permissionless +
- * admin surface; read accessors are devInspect-only and intentionally omitted.
- *   create_account     — owner mints + shares their Account (NO fee_recipient arg —
- *                         fee policy lives in the shared RailConfig, not the Account;
- *                         `create_account_with_fee` was REMOVED on-chain)
- *   deposit            — anyone tops up (owner funding the wallet)
- *   spend              — OWNER-ONLY free transfer to a payee (the PAY primitive; no config)
- *   charge             — OWNER-ONLY one-off merchant charge, 2% inline, takes &RailConfig (verb ②)
- *   charge_subscription — permissionless-but-terms-gated, takes &RailConfig (backend relayer, verb ③)
- *   pay                — PERMISSIONLESS raw-payer facilitator, takes &RailConfig, no payer Account (verb ④)
- *   withdraw           — OWNER-ONLY pull back to a Coin (returns Coin<T>)
- *   create_subscription / cancel_subscription — OWNER-ONLY recurring authorizations
- *   set_default_fee_bps / set_fee_recipient / set_merchant_rate / remove_merchant_rate
- *                      — ADMIN (each takes &RailAdminCap): mutate the rail fee policy in
- *                        RailConfig. Listed so they CAN be sponsored if Suize automates
- *                        rate changes (cap possession is the on-chain auth).
- *
- * The function names here MUST match `packages/move-wallet/sources/account.move`
- * verbatim — the sponsor allow-lists this exact set, so a typo silently breaks
- * sponsorship of that verb.
+ * Subscriptions package block (`subs::subscription`) — the standalone Party-object
+ * subscription module (named address `subs`, module `subscription`). PUBLISHED on
+ * testnet (real ids in SUBS_PACKAGE / SUBS_CONFIG_OBJECT above; mainnet is a
+ * republish — '0x0' until then). The three write targets are USER-SIGNED +
+ * Enoki-sponsored (the wallet signs create/cancel locally; the relayer triggers
+ * user-pre-authorized renewals), so the sponsor allow-lists this exact set via
+ * SUBS_MOVE_TARGETS.
+ *   create — the user mints a subscription (fixed payee + per-period cap + period)
+ *   renew  — a sponsored, user-pre-authorized recurring debit (relayer-triggered)
+ *   cancel — the user kills the subscription
+ * Plus the Sui framework helpers the `CoinWithBalance` intent injects under
+ * sponsorship (`redeem_funds` / `into_balance`) — the sponsor allow-list must
+ * accept them or the sponsored renewal PTB is rejected. The function names MUST
+ * match the published module verbatim — a typo silently breaks sponsorship.
  */
-const accountIds = (ids: { pkg: string; railConfig: string }) => ({
+const subsIds = (ids: { pkg: string; config: string }) => ({
   PACKAGE: ids.pkg,
-  // The shared `RailConfig` object id — the `&RailConfig` arg every CHARGE verb
-  // (`charge` / `charge_subscription` / `pay`) takes. `0x0` until publish; the publish
-  // step captures the `init`-shared `RailConfig` id into ACCOUNT_RAIL_CONFIG (above).
-  RAIL_CONFIG: ids.railConfig,
+  CONFIG_OBJECT: ids.config,
   TARGETS: {
-    CREATE_ACCOUNT: `${ids.pkg}::account::create_account`,
-    DEPOSIT: `${ids.pkg}::account::deposit`,
-    SPEND: `${ids.pkg}::account::spend`,
-    CHARGE: `${ids.pkg}::account::charge`,
-    CHARGE_SUBSCRIPTION: `${ids.pkg}::account::charge_subscription`,
-    PAY: `${ids.pkg}::account::pay`,
-    WITHDRAW: `${ids.pkg}::account::withdraw`,
-    CREATE_SUBSCRIPTION: `${ids.pkg}::account::create_subscription`,
-    CANCEL_SUBSCRIPTION: `${ids.pkg}::account::cancel_subscription`,
-    // Admin (RailAdminCap-gated) fee-policy mutators — sponsorable so Suize can
-    // automate rate changes; possession of the cap is the on-chain authority.
-    SET_DEFAULT_FEE_BPS: `${ids.pkg}::account::set_default_fee_bps`,
-    SET_FEE_RECIPIENT: `${ids.pkg}::account::set_fee_recipient`,
-    SET_MERCHANT_RATE: `${ids.pkg}::account::set_merchant_rate`,
-    REMOVE_MERCHANT_RATE: `${ids.pkg}::account::remove_merchant_rate`,
+    CREATE: `${ids.pkg}::subscription::create`,
+    RENEW: `${ids.pkg}::subscription::renew`,
+    CANCEL: `${ids.pkg}::subscription::cancel`,
+    // Sui framework: the helpers the SDK's `tx.balance({ type, balance })` intent
+    // injects to materialize the period's `Balance<USDC>` from the sender's funds
+    // under sponsorship — `balance::redeem_funds` draws it from the Address Balance,
+    // and `coin::into_balance` (+ `balance::redeem_funds` again) covers the
+    // split-from-Coin-objects path. The sponsor allow-list must accept these or the
+    // sponsored create/renew PTB is rejected. MUST be the NORMALIZED 64-hex `0x2`
+    // form (`0x000…002`): Enoki compares the request's allow-list against the tx's
+    // NORMALIZED targets, so a short `0x2::…` entry never matches and silently
+    // breaks sponsorship (proven on testnet 2026-06-12 — short form → Enoki 400
+    // "not part of an allow-listed move call target"; full form → accepted).
+    BALANCE_REDEEM_FUNDS: `${FRAMEWORK_PKG}::balance::redeem_funds`,
+    COIN_INTO_BALANCE: `${FRAMEWORK_PKG}::coin::into_balance`,
   } as Record<string, string>,
 });
 
 /**
  * Per-network ADDRESS SLOTS for the network-keyed blocks. Mainnet is ALL '0x0'
- * placeholders until the mainnet publish/republish (LOCKED #12 — publishing
- * `account` to mainnet is the v1 gate; `deploy_sui` mainnet is a republish).
- * CRASH is deliberately ABSENT here — it is network-pinned (CRASH_TESTNET_IDS).
+ * placeholders until the mainnet publish/republish (LOCKED #12 — `deploy_sui` +
+ * `subs` mainnet are republishes). CRASH is deliberately ABSENT here — it is
+ * network-pinned (CRASH_TESTNET_IDS).
  */
 const NETWORK_ADDRESSES: Record<
   SuiNetwork,
@@ -375,10 +421,10 @@ const NETWORK_ADDRESSES: Record<
       pkg: string;
       version: string;
       registry: string;
-      chargeLedger: string;
-      renewalRegistry: string;
+      siteDigestRegistry: string;
+      deployerCap: string;
     };
-    account: { pkg: string; railConfig: string };
+    subs: { pkg: string; config: string };
   }
 > = {
   testnet: {
@@ -387,10 +433,10 @@ const NETWORK_ADDRESSES: Record<
       pkg: DEPLOY_PACKAGE,
       version: DEPLOY_VERSION_OBJECT,
       registry: DEPLOY_DOMAIN_REGISTRY_OBJECT,
-      chargeLedger: DEPLOY_CHARGE_LEDGER_OBJECT,
-      renewalRegistry: DEPLOY_RENEWAL_REGISTRY_OBJECT,
+      siteDigestRegistry: DEPLOY_SITE_DIGEST_REGISTRY_OBJECT,
+      deployerCap: DEPLOY_DEPLOYER_CAP_OBJECT,
     },
-    account: { pkg: ACCOUNT_PACKAGE, railConfig: ACCOUNT_RAIL_CONFIG },
+    subs: { pkg: SUBS_PACKAGE, config: SUBS_CONFIG_OBJECT },
   },
   mainnet: {
     wallet: '0x0',
@@ -398,15 +444,15 @@ const NETWORK_ADDRESSES: Record<
       pkg: '0x0',
       version: '0x0',
       registry: '0x0',
-      chargeLedger: '0x0',
-      renewalRegistry: '0x0',
+      siteDigestRegistry: '0x0',
+      deployerCap: '0x0',
     },
-    account: { pkg: '0x0', railConfig: '0x0' },
+    subs: { pkg: '0x0', config: '0x0' },
   },
 };
 
 /**
- * The network-keyed package-id table. WALLET / DEPLOY / ACCOUNT resolve from
+ * The network-keyed package-id table. WALLET / DEPLOY / SUBS resolve from
  * NETWORK_ADDRESSES[network]; CRASH is ALWAYS the testnet ids (LOCKED #11/#12 —
  * Crash is network-pinned, the mainnet flip never drags it along).
  */
@@ -414,7 +460,7 @@ export const packageIds = (network: SuiNetwork) => ({
   CRASH: CRASH_TESTNET_IDS,
   WALLET: walletIds(NETWORK_ADDRESSES[network].wallet),
   DEPLOY: deployIds(NETWORK_ADDRESSES[network].deploy),
-  ACCOUNT: accountIds(NETWORK_ADDRESSES[network].account),
+  SUBS: subsIds(NETWORK_ADDRESSES[network].subs),
 });
 
 /**
@@ -428,29 +474,16 @@ export const PACKAGE_IDS = packageIds('testnet');
 export const CRASH_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.CRASH.TARGETS);
 
 /**
- * Flat list of the `account` write targets (the v1 PAY core: create/deposit/spend/
- * charge/charge_subscription/pay/withdraw/sub create+cancel + the four RailAdminCap-gated
- * fee-policy mutators). `RAIL_CONFIG` is a sibling key on the ACCOUNT block, NOT in
- * TARGETS, so it is correctly excluded from this flatten (it is an object id, not a
- * move target). The sponsor allow-lists these so the gasless wallet can call ONLY the
- * Account surface; every one is gated on-chain (owner-only spend/charge/withdraw/sub-ops;
- * terms-gated charge_subscription; pay is permissionless but takes only the handed-in
- * coin; the admin setters take &RailAdminCap), so listing our own functions is safe.
- * Placeholder package id until `account` publishes
- * — the sponsor MUST union these in ONLY when ACCOUNT_PUBLISHED is true, else a `0x0`
- * target poisons the allow-list (Enoki would match a `0x0::account::*` call).
+ * Flat list of the `subs` write targets (create / renew / cancel) PLUS the Sui
+ * framework helpers the `CoinWithBalance` intent injects under sponsorship — the
+ * sponsor allow-lists this exact set so the gasless wallet/relayer can call ONLY
+ * the subscription surface. The sponsor MUST union these in only when SUBS_PUBLISHED
+ * is true, else a `0x0::subs::*` target poisons the allow-list.
  */
-export const ACCOUNT_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.ACCOUNT.TARGETS);
+export const SUBS_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.SUBS.TARGETS);
 
-/** True once the `account` package has been published (its id is no longer the 0x0 placeholder). */
-export const ACCOUNT_PUBLISHED: boolean = PACKAGE_IDS.ACCOUNT.PACKAGE !== '0x0';
-
-/**
- * True once the shared `RailConfig` object id has been captured from the account
- * package's `init` effects (no longer the 0x0 placeholder). Every CHARGE PTB needs this
- * id as its `&RailConfig` arg, so the CHARGE gates require it ALONGSIDE ACCOUNT_PUBLISHED.
- */
-export const RAIL_CONFIG_SET: boolean = PACKAGE_IDS.ACCOUNT.RAIL_CONFIG !== '0x0';
+/** True once the `subs` package has been published (its id is no longer the 0x0 placeholder). */
+export const SUBS_PUBLISHED: boolean = PACKAGE_IDS.SUBS.PACKAGE !== '0x0';
 
 /** Flat list of the wallet targets — the wallet pkg is LIVE on testnet (mandate/vault/swap/navi). */
 export const WALLET_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.WALLET.TARGETS);
@@ -570,11 +603,10 @@ export interface HandleClaimResponse {
 // the unified backend's deploy module (POST /deploy, GET /sites, GET /sites/:id,
 // POST /domains, DELETE /domains/:domain). Sites are deployed to Walrus + a fresh
 // on-chain `Site` object by the backend's OWN deploy service wallet (it pays SUI +
-// WAL gas). POST /deploy is AUTHENTICATED — every deployer Google-logs-in (dashboard
-// via zkLogin, the future MCP via OAuth → a Suize wallet) and signs a single-use
-// server nonce (buildDeployAuthMessage); the on-chain `owner` is ALWAYS the
-// cryptographically-recovered signer. There is NO anonymous/service-owned deploy.
-// See docs/deploy/SPEC.md.
+// WAL gas). POST /deploy is AUTHENTICATED BY THE PAYMENT ITSELF — the X-PAYMENT header
+// carries a signed gasless payment, and the on-chain `owner` is ALWAYS the recovered
+// payer (whoever pays, owns). There is no separate deploy-auth nonce/signature and no
+// anonymous/service-owned deploy. See apps/deploy/SPEC.md.
 // ---------------------------------------------------------------------------
 
 /**
@@ -593,70 +625,65 @@ export interface DeployResponse {
 }
 
 // ---------------------------------------------------------------------------
-// CHARGE↔Deploy join wire types — the payment-gated deploy. A deploy is now a
-// one-off $0.50 `charge` on the rail BEFORE the Walrus upload + Site mint runs.
-// The flow is three steps because the backend NEVER signs an owner tx (it only
-// builds the sponsored bytes the caller's LOCAL zkLogin session signs):
+// CHARGE↔Deploy join — the payment-gated deploy (x402 V2 'exact', first-party,
+// 2026-06-12). A deploy is a one-off $0.50 gasless settlement on the rail BEFORE the
+// Walrus upload + Site mint. There are NO Suize-specific wire types here anymore: the
+// wire is vanilla x402 V2 (the `PaymentRequired` body + the `X-PAYMENT` header carrying
+// the b64 `PaymentPayload`), so the dashboard + agents import the shapes from
+// `@suize/pay` / `@suize/x402`, NOT from here. The old sub-account convenience door
+// (deploy/quote · deploy/charge · deploy/execute + their request/response types) is
+// DELETED — the payer pays directly from its Address Balance, keyless-settled. See
+// `services/backend/src/deploy/payment.ts` + `apps/deploy/SPEC.md` §2.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Facilitator wire types — the open merchant-side door of the rail (x402 V2).
 //
-//   1. POST /deploy/quote   -> a 402-shaped quote { price, merchant, feeBps, … }.
-//   2. POST /deploy/charge  -> the backend builds + Enoki-SPONSORS the `charge`
-//      ($0.50) PTB for the caller's Account; the caller signs `bytes` locally and
-//      submits via POST /execute (the existing sponsor execute path), getting back
-//      the charge tx digest.
-//   3. POST /deploy (existing) carrying { chargeDigest } -> the backend VERIFIES the
-//      charge settled (a ChargePaid event paying the Deploy merchant ≥ $0.50, not
-//      already consumed) and ONLY THEN runs the Walrus upload + Site mint.
-//
-// All three are 503-gated until PACKAGE_IDS.ACCOUNT is published AND the Deploy
-// merchant address is pinned (mirrors the deploy module's 0x0-package gate).
+// NOTE (x402 V2 pivot 2026-06-12): the GET /verify {paid,gross,fee,net} shape and
+// the POST /pay/build + /pay/submit sponsored-door types are DELETED. Verification
+// is now the vanilla x402 POST /verify → `VerifyResponse` and POST /settle →
+// `SettleResponse` (both exported from `@suize/x402` / `@suize/pay`, NOT here —
+// they ride the standard wire). Payments settle KEYLESS over gRPC (no Enoki
+// sponsor of the payer leg), so there is no sponsored build/submit pair. Only the
+// optional `/checkout` URL-formatter wire (below) is Suize-shaped + lives here.
 // ---------------------------------------------------------------------------
 
 /**
- * GET/POST /deploy/quote response — the 402-shaped price the caller must settle
- * before a deploy runs. `amount` is in native USDC base units (6 decimals; $0.50 =
- * 500_000); `merchant` is the Deploy merchant address the `charge` pays; `feeBps` is
- * the rail's 2% (emitted in the event, visible by design); `coinType` is the
- * settlement coin (testnet USDC). `payVerb` names the primary rail verb for a
- * wallet-holding agent (`charge` — a funded Suize Account); a raw-coin payer would
- * use `pay` instead (not built in this join — the demo path is the Account holder).
+ * POST /checkout request body — the OPTIONAL no-auth URL FORMATTER (backend
+ * SPEC §7.3): pure string assembly of the hosted pay-page URL, for merchants
+ * who want a server-call shape. NO store, NO session record — the terms live
+ * entirely in the returned URL. `payTo` is a
+ * 0x…64-hex Sui address; `amount` a positive decimal USDC string (≤ 6 dp);
+ * `memo` (optional) is the merchant's own correlation id (≤ 256 chars — put
+ * the 402 `paymentId` here); `returnUrl` (optional) an http(s) URL the pay
+ * page redirects to AFTER settlement with `?digest=` appended.
  */
-export interface DeployQuoteResponse {
-  amount: number;
-  coinType: string;
-  merchant: string;
-  feeBps: number;
-  payVerb: 'charge';
-  /** Human-readable, e.g. "$0.50 per deploy (one-off)". */
-  description: string;
-}
-
-/**
- * POST /deploy/charge request — the caller asks the backend to build the sponsored
- * `charge` ($0.50) PTB for THEIR Account. `account` is the caller's shared Account
- * object id; `sender` is the caller's zkLogin owner address (it MUST equal the
- * Account's `owner`, since `charge` is owner-only — the backend pins it as the
- * sponsored `sender`). `memo` is an optional UTF-8 note recorded in the ChargePaid
- * event (defaults to a deploy tag).
- */
-export interface DeployChargeRequest {
-  account: string;
-  sender: string;
+export interface FacilitatorCheckoutRequest {
+  /** The merchant address being paid. */
+  payTo: string;
+  /** Decimal USDC string, e.g. "0.50". */
+  amount: string;
+  /** Optional correlation id stamped as the pay-link's memo (≤ 256 chars). */
   memo?: string;
+  /** Optional post-settlement redirect (http/https only). */
+  returnUrl?: string;
+  /**
+   * Optional Suize handle (`name`, `name@suize`, or `name.suize.sui`) —
+   * round-tripped UNRESOLVED into the link's `to=` param (the pay page
+   * resolves it on-chain client-side and prefers it over `payTo`; the raw
+   * `payTo` stays in the link as the protocol fallback).
+   */
+  handle?: string;
 }
 
-/**
- * POST /deploy/charge response — the SPONSORED `charge` tx the caller signs locally.
- * `bytes` (base64) is signed VERBATIM with the caller's zkLogin session, then
- * `{ digest, signature }` is submitted to POST /execute (the existing sponsor execute
- * path). `digest` is echoed back to /execute. `amount`/`merchant` echo the quote so
- * the caller can show what it is signing. The resulting executed digest becomes the
- * `chargeDigest` the caller passes to POST /deploy.
- */
-export interface DeployChargeResponse {
-  bytes: string;
-  digest: string;
-  amount: number;
-  merchant: string;
+/** POST /checkout response. `sessionUrl` is the hosted pay-page URL carrying
+ * the exact terms (`?payTo=&amount=&memo=&returnUrl=`); `paymentId` is the
+ * caller's `memo` echoed back, or a freshly generated `pay_[0-9a-f]{32}`
+ * (128 CSPRNG bits) when absent — either way it IS the link's `memo` param,
+ * so the merchant's later GET /verify correlates by it. */
+export interface FacilitatorCheckoutResponse {
+  sessionUrl: string;
+  paymentId: string;
 }
 
 /**
@@ -674,6 +701,17 @@ export interface SiteInfo {
   fileCount: number;
   createdAtMs: number;
   domains: string[];
+  /** The Walrus storage END epoch (the EARLIER of the site's two blobs' end epochs
+   * — the binding expiry constraint), read live. Absent on the list endpoint /
+   * pre-v2 sites. */
+  storageEndEpoch?: number;
+  /** The wall-clock ms the storage lapses at (epochToMs(storageEndEpoch)). Absent
+   * when the end epoch is unknown. Drives the dashboard's "expires <date>" copy. */
+  expiresAtMs?: number;
+  /** True when the site has an ACTIVE Deploy subscription (read through the merchant
+   * SDK — suizeSubs.findByRef(siteId)). Unlocks custom domains + auto-renews storage.
+   * Absent on the list endpoint; absent when the subs module is unpublished. */
+  subscribed?: boolean;
 }
 
 /**
@@ -694,120 +732,69 @@ export interface DomainLinkRequest {
  * zkLogin signer; the backend reconstructs that exact message, recovers the
  * signer address via `verifyPersonalMessageSignature`, and requires it to equal
  * `Site.owner`. There is NO client-claimed `requester` — the recovered address
- * IS the requester. `nonce` is the single-use token from `GET /auth/nonce` (or
- * the issue-step response); `signature` is base64 of the personal-message sig.
+ * IS the requester. `ts` is the client ms-epoch timestamp the signed message binds
+ * (the backend accepts it within a freshness window — STATELESS, no nonce store);
+ * `signature` is base64 of the personal-message sig.
  */
 export interface DomainLinkVerifyRequest {
   siteId: string;
   domain: string;
-  nonce: string;
+  ts: number;
   signature: string;
 }
 
 /**
  * DELETE /domains/:domain request body — UNLINK. Same cryptographic authority as
  * the link-verify path: the client signs `buildDeployUnlinkAuthMessage(domain,
- * nonce)`; the backend recovers the signer and requires it to equal the
- * `Site.owner` of the site the domain currently points at. No `requester`.
+ * ts)`; the backend recovers the signer and requires it to equal the `Site.owner`
+ * of the site the domain currently points at. No `requester`.
  */
 export interface DomainUnlinkRequest {
-  nonce: string;
+  ts: number;
   signature: string;
 }
 
-/** GET /auth/nonce response body — a single-use, short-TTL, CSPRNG nonce (hex). */
-export interface DeployNonceResponse {
-  nonce: string;
-}
-
-/**
- * POST /deploy/renewal request — link a rail subscription to a site's Walrus
- * auto-renewal. `accountId` is the payer's shared rail Account object id; `subKey`
- * the u64 subscription key from `SubscriptionCreated`; `signature` is over
- * `buildDeployRenewalLinkAuthMessage(siteId, accountId, subKey, nonce)`. The
- * backend verifies ON-CHAIN that the recovered signer == Account.owner, that the
- * subscription exists with payee == SUIZE_DEPLOY_MERCHANT and period_cap >=
- * DEPLOY_SUB_PRICE_USDC, then cap-signs `renewal_registry::link_renewal`.
- */
-export interface DeployRenewalLinkRequest {
-  siteId: string;
-  accountId: string;
-  subKey: number;
-  nonce: string;
-  signature: string;
-}
-
-/** DELETE /deploy/renewal request — unlink (signature over the unlink message). */
-export interface DeployRenewalUnlinkRequest {
-  accountId: string;
-  subKey: number;
-  nonce: string;
-  signature: string;
-}
-
-/** POST/DELETE /deploy/renewal response — the on-chain link/unlink tx digest. */
-export interface DeployRenewalResponse {
-  siteId: string;
-  accountId: string;
-  subKey: number;
-  digest: string;
-}
+// NOTE (x402 V2 pivot 2026-06-12): the POST/DELETE /deploy/renewal join + its wire
+// types (DeployRenewalLinkRequest / …UnlinkRequest / …Response) are DELETED. Storage
+// auto-renewal now rides the standalone `subs` module (the wallet signs
+// `subscription::create` with `ref` = the site id; the backend's extender keeps the
+// site's Walrus storage extended). There is no subscription↔site registry to link.
 
 // ---------------------------------------------------------------------------
 // Deploy domain-op AUTH MESSAGE BUILDERS — the EXACT personal-message strings the
 // client signs and the backend reconstructs to recover the requester address.
 // SHARED so the format can NEVER drift between the dashboard signer and the
 // backend verifier (LOCKED-DECISION #5). Each message binds to (a) the exact
-// operation + its params and (b) a server-issued single-use nonce, so a captured
-// signature can't be replayed against a different op or after the nonce is burned.
+// operation + its params and (b) a CLIENT timestamp (`ts`, ms epoch) the backend
+// accepts within a freshness window — STATELESS (no server-issued nonce store),
+// multi-replica-safe (THE PRINCIPLE: the chain is the database, no shared map).
+// The op is owner-gated on-chain (Site.owner + the registry's EDomainTaken/
+// EWrongCap), so a within-window replay of an owner's own signature is idempotent.
+//
+// NOTE (deploy-auth is GONE): a deploy no longer carries a separate signed nonce.
+// The x402 payment payload IS the private signed authorization — the recovered
+// payer becomes the on-chain owner (one auth, no second signature).
 // ---------------------------------------------------------------------------
 
-/**
- * Personal message a DEPLOYER signs to prove they are the authenticated owner of
- * the deploy they're about to make. A deploy can't bind to a siteId — the Site
- * doesn't exist until create_site runs — so the message binds ONLY the signer (via
- * the recovered address) + a server-issued single-use `nonce`. The backend recovers
- * the signer and uses it AS the on-chain `owner`, so a caller can only ever set
- * THEMSELVES as owner — there is no anonymous/service-owned deploy path.
- */
-export const buildDeployAuthMessage = (nonce: string): string =>
-  `Suize Deploy\ndeploy\n::${nonce}`;
-
-/** Personal message for LINKING `domain` -> `siteId`, bound to single-use `nonce`. */
+/** Personal message for LINKING `domain` -> `siteId`, bound to a client `ts` (ms epoch).
+ * The backend recovers the signer, requires it == Site.owner, and rejects a `ts`
+ * outside its freshness window. */
 export const buildDeployLinkAuthMessage = (
   domain: string,
   siteId: string,
-  nonce: string,
-): string => `Suize Deploy\nlink ${domain} -> ${siteId}\n::${nonce}`;
+  ts: number,
+): string => `Suize Deploy\nlink ${domain} -> ${siteId}\n@${ts}`;
 
-/** Personal message for UNLINKING `domain`, bound to single-use `nonce`. */
+/** Personal message for UNLINKING `domain`, bound to a client `ts` (ms epoch). */
 export const buildDeployUnlinkAuthMessage = (
   domain: string,
-  nonce: string,
-): string => `Suize Deploy\nunlink ${domain}\n::${nonce}`;
+  ts: number,
+): string => `Suize Deploy\nunlink ${domain}\n@${ts}`;
 
-/**
- * Personal message for LINKING a rail subscription (`accountId` + `subKey`) to a
- * site's auto-renewal, bound to a single-use `nonce`. The backend recovers the
- * signer and requires it to equal the rail `Account.owner` ON-CHAIN — only the
- * person whose Account gets debited can authorize the join, so a site owner can
- * never renew on a stranger's subscription.
- */
-export const buildDeployRenewalLinkAuthMessage = (
-  siteId: string,
-  accountId: string,
-  subKey: number,
-  nonce: string,
-): string => `Suize Deploy\nlink-renewal ${accountId}#${subKey} -> ${siteId}\n::${nonce}`;
-
-/** Personal message for UNLINKING a subscription's renewal, bound to `nonce`.
- * Accepted from EITHER the Account.owner (stop my sub renewing) or the
- * Site.owner (stop renewing my site) — the backend checks both. */
-export const buildDeployRenewalUnlinkAuthMessage = (
-  accountId: string,
-  subKey: number,
-  nonce: string,
-): string => `Suize Deploy\nunlink-renewal ${accountId}#${subKey}\n::${nonce}`;
+// NOTE (x402 V2 pivot 2026-06-12): the renewal-join auth-message builders
+// (buildDeployRenewalLink/UnlinkAuthMessage) are DELETED — there is no
+// subscription↔site registry to link/unlink anymore (storage auto-renewal rides the
+// standalone `subs` module; the join is the subscription's on-chain `ref` = the site id).
 
 /**
  * SSL-provisioning status for a linked custom domain (Cloudflare-for-SaaS
@@ -839,8 +826,10 @@ export type DomainSslStatus =
  * - `digest` — the `link_domain` tx digest (only on a successful `linked`).
  * - `ssl` — the best-effort Cloudflare SSL provisioning result (only on `linked`).
  * - `instructions` — manual-CNAME guidance when the CF adapter is off (`linked`).
- * - `nonce` — a fresh single-use auth nonce, issued on the ISSUE step (verify=0)
- *   for the client to sign (`buildDeployLinkAuthMessage`) on the verify step.
+ *
+ * The verify/unlink step's owner auth is STATELESS: the client signs
+ * `buildDeployLinkAuthMessage(domain, siteId, ts)` with a fresh `ts` (ms epoch) it
+ * picks itself — no server-issued nonce is needed (THE PRINCIPLE: no shared store).
  */
 export interface DomainChallengeResponse {
   domain: string;
@@ -848,8 +837,6 @@ export interface DomainChallengeResponse {
   txtName: string;
   txtValue: string;
   cname: string;
-  /** Single-use auth nonce to sign for the verify step (present on the issue step). */
-  nonce?: string;
   /** Ownership TXT verified (present + matches the challenge nonce). */
   txtOk?: boolean;
   /** Routing CNAME verified (the domain points at our `cname` target). */

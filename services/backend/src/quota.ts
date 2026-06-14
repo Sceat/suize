@@ -67,6 +67,45 @@ export const createDailyCeiling = (opts: CeilingOpts): DailyCeiling => {
   };
 };
 
+// ── Token budget (sum-of-tokens per key per day) ────────────────────────────
+// The COUNT ceiling above caps the NUMBER of units; the brain instead caps the
+// SUM of tokens a user spends on inference per day. `over()` is the PRE-GATE
+// (checked BEFORE a model call — a user already past the cap is refused with the
+// work-in-progress notice, no call made); `record()` adds the actual usage AFTER
+// the call returns. In-memory, per-replica, 24h window — same trade-off as the
+// ceiling above (a single replica's cap blunts abuse; the model API's own org
+// limits are the ultimate backstop).
+export interface DailyTokenBudget {
+  /** True when `key` has already met/exceeded the daily token cap. */
+  over(key: string): boolean;
+  /** Add `tokens` spent by `key` in the active window. */
+  record(key: string, tokens: number): void;
+}
+
+export const createDailyTokenBudget = (
+  perKeyMax: number,
+  windowMs: number = DAY_MS,
+): DailyTokenBudget => {
+  let windowStart = Date.now();
+  const perKey = new Map<string, number>();
+  const roll = (now: number): void => {
+    if (now - windowStart >= windowMs) {
+      windowStart = now;
+      perKey.clear();
+    }
+  };
+  return {
+    over(key) {
+      roll(Date.now());
+      return (perKey.get(key) ?? 0) >= perKeyMax;
+    },
+    record(key, tokens) {
+      roll(Date.now());
+      if (tokens > 0) perKey.set(key, (perKey.get(key) ?? 0) + tokens);
+    },
+  };
+};
+
 // ── Shared singletons (one per spending surface) ────────────────────────────
 // Sponsor: every /sponsor + WS sponsorRequest funds an Enoki-sponsored tx.
 export const sponsorDailyCeiling = createDailyCeiling({

@@ -41,9 +41,7 @@ import {
   type ClientPacket,
   type Packet,
   type ServerPacket,
-  type WsHandleAvailableResponse,
   type WsHandleClaimResponse,
-  type WsHandleMeResponse,
   type WsSponsorResponse,
   type WsExecuteResponse,
   type BalanceUpdate,
@@ -214,15 +212,42 @@ function failAllPending(reason: string): void {
 }
 
 /**
+ * Wait for the socket to reach 'connected', kicking a fresh connect when it's down.
+ * The heal path for "the socket died while the app sat open" (laptop sleep, an
+ * exhausted backoff, a server-side transient auth failure): a user action is fresh
+ * intent, so it earns a fresh connection attempt instead of an instant fail.
+ */
+function ensureConnected(timeoutMs = 6_000): Promise<boolean> {
+  if (state.status === 'connected') return Promise.resolve(true);
+  if (state.status === 'disconnected' && connect_address) {
+    reconnect_attempts = 0; // fresh intent → fresh retry budget
+    connect(connect_address);
+  }
+  return new Promise((resolve) => {
+    const done = (ok: boolean) => {
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(ok);
+    };
+    const timer = setTimeout(() => done(state.status === 'connected'), timeoutMs);
+    const unsubscribe = subscribe(() => {
+      if (state.status === 'connected') done(true);
+    });
+  });
+}
+
+/**
  * Send an RPC REQUEST and resolve with its correlated RESPONSE `data`. The caller
  * mints the id; the server echoes it; `handleMessage` settles the matching entry.
- * Rejects if the socket isn't connected, on timeout, or on disconnect.
+ * A down socket is healed first (see `ensureConnected`); rejects only if the heal
+ * times out, on RPC timeout, or on disconnect.
  */
-function request<Res>(build: (id: string) => ClientPacket): Promise<Res> {
-  const { ws, status } = use_ws.getState();
-  if (!ws || status !== 'connected') {
-    return Promise.reject(new Error('Wallet connection not ready.'));
+async function request<Res>(build: (id: string) => ClientPacket): Promise<Res> {
+  if (!(await ensureConnected())) {
+    throw new Error('Reconnecting — try again in a moment.');
   }
+  const { ws } = use_ws.getState();
+  if (!ws) throw new Error('Reconnecting — try again in a moment.');
   const id = crypto.randomUUID();
   return new Promise<Res>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -306,8 +331,6 @@ async function handleMessage(packet: ServerPacket, ws: WebSocket): Promise<void>
     // ── RPC responses (correlated by id) ─────────────────────────────────────
     case 'sponsorResponse':
     case 'executeResponse':
-    case 'handleAvailableResponse':
-    case 'handleMeResponse':
     case 'handleClaimResponse': {
       settle(packet.id, packet.data);
       return;
@@ -454,6 +477,23 @@ function disconnect(): void {
   setState({ status: 'disconnected', ws: null, address: null });
 }
 
+// ── Self-heal on wake. A laptop sleep or network drop can kill the socket after
+// the backoff budget is spent; returning to the tab or regaining network is
+// user-grade intent, so it kicks a fresh connect while a signed-in target exists.
+// Module-scope: registered exactly once per page.
+if (typeof window !== 'undefined') {
+  const kick = () => {
+    if (connect_address && state.status === 'disconnected') {
+      reconnect_attempts = 0;
+      connect(connect_address);
+    }
+  };
+  window.addEventListener('online', kick);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) kick();
+  });
+}
+
 // Expose the imperative controls on the hook object so the (non-React) lifecycle
 // bridge calls `use_ws.getState().connect(...)` / `.disconnect()` — same ergonomics
 // as the zustand store it replaces, without the dependency.
@@ -476,24 +516,6 @@ export function registerSigner(fn: PersonalMessageSigner | null): void {
 // ───────────────────────────────────────────────────────────────────────────
 // RPC senders — the data layer (suins.ts / useHome) calls THESE, not fetch().
 // ───────────────────────────────────────────────────────────────────────────
-
-/** WS RPC: check whether a bare handle label is claimable. */
-export function wsHandleAvailable(name: string): Promise<WsHandleAvailableResponse> {
-  return request<WsHandleAvailableResponse>((id) => ({
-    type: 'handleAvailableRequest',
-    id,
-    data: { name },
-  }));
-}
-
-/** WS RPC: does the authenticated address (ws.data) already own a handle? */
-export function wsHandleMe(): Promise<WsHandleMeResponse> {
-  return request<WsHandleMeResponse>((id) => ({
-    type: 'handleMeRequest',
-    id,
-    data: {},
-  }));
-}
 
 /**
  * WS RPC: claim `name` for the authenticated address. No address is sent — the

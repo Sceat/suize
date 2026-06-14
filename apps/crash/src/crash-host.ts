@@ -82,12 +82,14 @@ export type SideVM = {
   exitValueStr: string
   // This side's cost basis, muted: "paid $0.50" (cents-aware).
   paidStr: string
-  // ----- conditional settle figures (ALWAYS grey, ALWAYS "IF"-prefixed) -----
-  // The net profit IF this side wins at settle = (qty × $1) − cost. "+$2.09".
+  // ----- conditional settle figure (ALWAYS grey label, ALWAYS "IF"-prefixed) ----
+  // ONE aggregated line (owner 2026-06-10): the bright prize number is the FULL
+  // gross payout this side pays if right = qty × $1, signed + cents-formatted
+  // ("+$9.50") — the total CREDIT that lands at settle, not the net (the wager
+  // left at bet time; the cost basis sits right above as "paid $X"). Replaces
+  // the old net-profit number + "pays $X total" subline.
   // NEVER tinted — it can never green a loser. Deterministic (no live quote needed).
-  profitIfRightStr: string
-  // The FULL gross payout you'd hold if right = qty × $1. "pays $3.90 total".
-  totalIfSettledStr: string
+  ifWinTotalStr: string
   // ----- cash-out CTA -----
   // Signed real exit net, agreeing with the hero: "Cash out · take +$0.31" (green) /
   // "...take −$0.74" (honest red). Plain "Cash out" until the first live quote.

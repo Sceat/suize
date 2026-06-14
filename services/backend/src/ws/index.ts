@@ -49,6 +49,7 @@ import {
   HandleError,
 } from "../handle";
 import { fetchMainBalanceUpdate } from "./balance";
+import { handleBrainChat } from "../brain";
 
 const SUI_ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/;
 
@@ -144,40 +145,74 @@ setInterval(() => {
 //   signer  = pubkey.toSuiAddress()
 //   assert signedNonce === ws.data.nonce  AND  signer === ws.data.address
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * zkLogin signatures verify against the fullnode RPC, so the verify call can fail
+ * for INFRA reasons (5xx, timeout, network) that say nothing about the credential.
+ * Misclassifying those as "invalid signature" sends `connectionRejected`, which the
+ * client honors as PERMANENT (no reconnect) — one fullnode hiccup bricked the
+ * session until a reload (seen live 2026-06-10: "Unexpected status code: 504").
+ */
+const isTransientVerifyError = (err: Error): boolean =>
+  /status code|timed? ?out|network|fetch failed|ECONN|EAI_AGAIN|socket/i.test(err.message);
+
+const VERIFY_ATTEMPTS = 3;
+const VERIFY_RETRY_DELAY_MS = 400;
+
 const verifyAuth = async (
   data: WsData,
   expectedNonce: string,
   bytes: string,
   signature: string,
-): Promise<{ ok: true } | { ok: false; reason: string }> => {
+): Promise<{ ok: true } | { ok: false; reason: string; transient?: boolean }> => {
+  let messageBytes: Uint8Array;
+  let signedNonce: string | undefined;
   try {
-    const messageBytes = fromBase64(bytes);
-    const message = new TextDecoder().decode(messageBytes);
-    const [, signedNonce] = message.split("::");
-
-    const publicKey = await verifyPersonalMessageSignature(messageBytes, signature, {
-      client: suiClient,
-    });
-    const signer = publicKey.toSuiAddress();
-
-    // The signed message must carry the exact nonce we issued for this socket.
-    // `expectedNonce` is the value BURNED from ws.data before this call, so a
-    // replayed second attempt (which sees data.nonce === "") can never match.
-    // An empty expectedNonce (already-burned) is itself a hard reject.
-    if (!expectedNonce || signedNonce !== expectedNonce) {
-      return { ok: false, reason: "nonce mismatch" };
-    }
-    // The recovered signer must be the address bound at upgrade. (zkLogin gives a
-    // stable address; a mismatch here means the socket was opened for someone
-    // else's address — reject, do NOT fall through like aresrpg's legacy warn.)
-    if (signer !== data.address) {
-      return { ok: false, reason: "address mismatch" };
-    }
-    return { ok: true };
-  } catch (err) {
-    console.error("[ws/auth] verify failed:", (err as Error).message);
-    return { ok: false, reason: "invalid signature" };
+    messageBytes = fromBase64(bytes);
+    [, signedNonce] = new TextDecoder().decode(messageBytes).split("::");
+  } catch {
+    return { ok: false, reason: "malformed auth payload" };
   }
+
+  // Verify with a short retry budget for infra-flavored failures only; a genuine
+  // bad signature throws a non-transient error and exits on the first attempt.
+  let signer: string | null = null;
+  for (let attempt = 1; attempt <= VERIFY_ATTEMPTS; attempt += 1) {
+    try {
+      const publicKey = await verifyPersonalMessageSignature(messageBytes, signature, {
+        client: suiClient,
+      });
+      signer = publicKey.toSuiAddress();
+      break;
+    } catch (err) {
+      const error = err as Error;
+      const transient = isTransientVerifyError(error);
+      console.error(
+        `[ws/auth] verify failed (attempt ${attempt}/${VERIFY_ATTEMPTS}, ${transient ? "transient" : "credential"}):`,
+        error.message,
+      );
+      if (!transient) return { ok: false, reason: "invalid signature" };
+      if (attempt === VERIFY_ATTEMPTS) {
+        return { ok: false, reason: "verification temporarily unavailable", transient: true };
+      }
+      await new Promise((r) => setTimeout(r, VERIFY_RETRY_DELAY_MS));
+    }
+  }
+  if (!signer) return { ok: false, reason: "invalid signature" };
+
+  // The signed message must carry the exact nonce we issued for this socket.
+  // `expectedNonce` is the value BURNED from ws.data before this call, so a
+  // replayed second attempt (which sees data.nonce === "") can never match.
+  // An empty expectedNonce (already-burned) is itself a hard reject.
+  if (!expectedNonce || signedNonce !== expectedNonce) {
+    return { ok: false, reason: "nonce mismatch" };
+  }
+  // The recovered signer must be the address bound at upgrade. (zkLogin gives a
+  // stable address; a mismatch here means the socket was opened for someone
+  // else's address — reject, do NOT fall through like aresrpg's legacy warn.)
+  if (signer !== data.address) {
+    return { ok: false, reason: "address mismatch" };
+  }
+  return { ok: true };
 };
 
 /** Reject a still-unauthenticated socket: tell the client why, then close. */
@@ -210,6 +245,17 @@ const handleSignatureResponse = async (ws: WsSocket, frame: ClientPacket): Promi
 
   const result = await verifyAuth(ws.data, expectedNonce, bytes, signature);
   if (!result.ok) {
+    if (result.transient) {
+      // Infra hiccup, NOT a bad credential: close WITHOUT `connectionRejected`
+      // (that packet means "permanent — don't come back" to the client). A plain
+      // close lands in the client's backoff reconnect → fresh handshake, fresh nonce.
+      try {
+        ws.close(WS_CLOSE.VERIFY_UNAVAILABLE, result.reason);
+      } catch {
+        // socket already closed
+      }
+      return;
+    }
     reject(ws, WS_CLOSE.AUTH_FAILED, result.reason);
     return;
   }
@@ -267,6 +313,7 @@ const RATE_LIMITED: ReadonlySet<ClientPacket["type"]> = new Set([
   "executeRequest",
   "handleAvailableRequest",
   "handleClaimRequest",
+  "brainChatRequest",
 ]);
 
 const route = async (ws: WsSocket, frame: ClientPacket): Promise<void> => {
@@ -388,6 +435,16 @@ const route = async (ws: WsSocket, frame: ClientPacket): Promise<void> => {
         const reason = err instanceof HandleError ? err.reason : undefined;
         sendPacket(ws, { type: "errorResponse", id, data: { requestType: "handleClaimRequest", message, reason } });
       }
+      return;
+    }
+
+    case "brainChatRequest": {
+      // The wallet AI. The brain is KEYLESS + FENCED (CLAUDE.md LOCKED #5): it
+      // streams narration + PROPOSED actions over this socket and NEVER signs or
+      // settles. Identity is the verified ws.data.address (never a frame field);
+      // the wallet executes every proposal locally. `send` is bound here so the
+      // brain module never imports the socket — it only emits frames.
+      await handleBrainChat(address, id, frame.data, (packet) => sendPacket(ws, packet));
       return;
     }
 

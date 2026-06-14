@@ -1,0 +1,45 @@
+{
+  "name": "@suize/mcp",
+  "version": "0.2.3",
+  "description": "Local stdio MCP server — give your AI assistant (Claude Code / Claude Desktop) a Suize agent wallet that pays HTTP 402 merchants and sends USDC on Sui, gas-free. zkLogin-popup auth only: keys never leave your machine, all signing is local.",
+  "private": false,
+  "type": "module",
+  "bin": {
+    "suize-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@mysten/enoki": "^1.0.8",
+    "@mysten/sui": "^2.17.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.10.0",
+    "@suize/x402": "workspace:^",
+    "tsup": "^8.3.5",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "402",
+    "x402",
+    "payments",
+    "agents",
+    "sui",
+    "usdc",
+    "suize",
+    "claude"
+  ],
+  "license": "MIT"
+}

@@ -12,9 +12,8 @@ import { EnokiClient } from "@mysten/enoki";
 import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import {
   CRASH_MOVE_TARGETS,
-  WALLET_MOVE_TARGETS,
-  ACCOUNT_MOVE_TARGETS,
-  ACCOUNT_PUBLISHED,
+  SUBS_MOVE_TARGETS,
+  SUBS_PUBLISHED,
 } from "@suize/shared";
 import type { SponsorRequest, SponsorResponse, ExecuteRequest, ExecuteResponse } from "@suize/shared";
 import { config } from "../config";
@@ -32,23 +31,27 @@ export const maskKey = (key: string) => (key.length <= 6 ? "***" : `***${key.sli
 //
 // The target lists are the SINGLE SOURCE OF TRUTH in @suize/shared:
 //   - CRASH_MOVE_TARGETS   : the live `…::router::*` Crash targets (testnet).
-//   - ACCOUNT_MOVE_TARGETS : the v1 PAY rail (`…::account::*`) — the new wallet +
-//     the CHARGE↔Deploy join. Only valid once `account` PUBLISHES (its package id is
-//     no longer `0x0`); a `0x0::account::*` placeholder would poison the list.
-//   - WALLET_MOVE_TARGETS  : the LEGACY mandate/vault/swap/navi package — live on
-//     testnet, kept ONLY while the rail is unpublished so the existing gasless wallet
-//     keeps working. Per services/backend/SPEC §2, the effective allow-list MUST
-//     swap to [...CRASH, ...ACCOUNT] the moment the rail goes live.
+//   - SUBS_MOVE_TARGETS    : the standalone `subs::subscription` create/renew/cancel
+//     (+ the framework helpers the CoinWithBalance intent injects). User-signed +
+//     Enoki-sponsored; unioned in only once published.
 //
-// THE GATE (fixes the SPEC-flagged drift): when `account` is published, the
-// effective list is [...CRASH, ...ACCOUNT] (the rail is live; retire the legacy
-// cage). Until then it is [...CRASH, ...WALLET] (the legacy wallet is the only live
-// `account`-shaped surface). ACCOUNT is NEVER unioned in while it is `0x0`.
+// RETIRED — WALLET_MOVE_TARGETS (the legacy mandate/vault/swap/navi package) is NO
+// LONGER sponsored. move-wallet is retired-in-place and called by NO first-party code;
+// leaving its 28 targets in this list was a live path (a free zkLogin session could get
+// gas sponsored for dead-module constructor calls — bounded griefing) and contradicted
+// the "in NO live path" law. Removed 2026-06-14 (Move audit). If a legacy demo ever
+// needs it, re-add behind a default-OFF env flag (mirror the SUBS_PUBLISHED fence).
 // ---------------------------------------------------------------------------
 
-const ALLOWED_MOVE_TARGETS: string[] = ACCOUNT_PUBLISHED
-  ? [...CRASH_MOVE_TARGETS, ...ACCOUNT_MOVE_TARGETS]
-  : [...CRASH_MOVE_TARGETS, ...WALLET_MOVE_TARGETS];
+// x402 V2 settles KEYLESS over gRPC, NOT via the sponsor — so the rail's payment
+// verbs are never Enoki-sponsored. CRASH stays (its gasless router writes); SUBS is
+// unioned in only once published (the renewal/create PTBs are user-signed +
+// Enoki-sponsored). A `0x0::subs::*` target would poison the list, so the
+// SUBS_PUBLISHED guard fences it.
+const ALLOWED_MOVE_TARGETS: string[] = [
+  ...CRASH_MOVE_TARGETS,
+  ...(SUBS_PUBLISHED ? SUBS_MOVE_TARGETS : []),
+];
 
 // ---------------------------------------------------------------------------
 
@@ -212,6 +215,15 @@ export const executeSponsor = async (input: Partial<ExecuteRequest>): Promise<Ex
 
   try {
     const result = await enokiClient.executeSponsoredTransaction({ digest, signature });
+    // FIRE-AND-FORGET storage hook: a sponsored tx just executed. If it was a Deploy
+    // storage subscription create/renew, the extender reads its events and extends the
+    // site's Walrus storage now (the safety cron is the backstop). Never blocks the
+    // execute response, never throws — a best-effort side-effect on the ONE call site
+    // every sponsored tx passes through. The dynamic import avoids a module-init cycle
+    // (deploy/extend imports the deploy module which imports back).
+    void import("../deploy/extend")
+      .then((m) => m.notifySettled(result.digest))
+      .catch(() => {});
     return { digest: result.digest };
   } catch (err) {
     throw enokiFailure("execute", err, "execution failed");
@@ -221,12 +233,13 @@ export const executeSponsor = async (input: Partial<ExecuteRequest>): Promise<Ex
 export const sponsorInfo = {
   allowedMoveTargetCount: ALLOWED_MOVE_TARGETS.length,
   crashTargetCount: CRASH_MOVE_TARGETS.length,
-  // The rail (account) targets are only in the effective list once published; the
-  // legacy wallet targets are only in it until then. Report which is live so the
-  // startup log makes the gate state obvious.
-  accountPublished: ACCOUNT_PUBLISHED,
-  accountTargetCount: ACCOUNT_PUBLISHED ? ACCOUNT_MOVE_TARGETS.length : 0,
-  walletTargetCount: ACCOUNT_PUBLISHED ? 0 : WALLET_MOVE_TARGETS.length,
+  // move-wallet (the retired mandate/vault/swap/navi package) is NO LONGER sponsored
+  // (2026-06-14 audit) — it is called by no first-party code and is out of every live
+  // path, including this allow-list.
+  // SUBS (the recurring half) is in the effective list only once published — the
+  // renewal/create PTBs are user-signed + Enoki-sponsored. Report the gate state.
+  subsPublished: SUBS_PUBLISHED,
+  subsTargetCount: SUBS_PUBLISHED ? SUBS_MOVE_TARGETS.length : 0,
 };
 
 /**

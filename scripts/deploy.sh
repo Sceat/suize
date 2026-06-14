@@ -7,10 +7,11 @@
 # runs `vercel --prod` from the app's directory (its own linked Vercel project).
 #
 # Usage:
-#   bun run deploy <wallet|crash|landing> [patch|minor|major]
+#   bun run deploy <wallet|crash|landing|deploy|pay> [patch|minor|major]
 #   bun run deploy:wallet [patch|minor|major]
 #   bun run deploy:crash  [patch|minor|major]
 #   bun run deploy:landing [patch|minor|major]
+#   bun run deploy:deploy  [patch|minor|major]
 #
 # Examples:
 #   bun run deploy:wallet patch    # 0.1.0 -> 0.1.1, tag wallet-v0.1.1, deploy
@@ -19,7 +20,7 @@
 # One-time per app (owner): from apps/<app>/ run `npx vercel link` to a project
 # (Root Directory = apps/<app>), set the Production env vars in the Vercel
 # dashboard, and attach the domain. RELEASE IS GATED on the unified backend
-# (WS + /sponsor) being live at api.suize.io — see services/backend/DEPLOY.md.
+# (WS + /sponsor) being live at api.suize.io — see services/backend/SPEC.md §11 (Ops).
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -30,9 +31,9 @@ APP="${1:-}"
 BUMP="${2:-}"
 
 case "$APP" in
-  wallet | crash | landing | deploy) ;;
+  wallet | crash | landing | deploy | pay) ;;
   *)
-    echo "usage: bun run deploy <wallet|crash|landing|deploy> [patch|minor|major]"
+    echo "usage: bun run deploy <wallet|crash|landing|deploy|pay> [patch|minor|major]"
     exit 1
     ;;
 esac

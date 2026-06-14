@@ -13,10 +13,10 @@
  * DEV preview (`?preview=claim`) passes `preview` so no real claim fires.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSignTransaction } from '@mysten/dapp-kit';
+import { useSignTransaction, useSuiClient } from '@mysten/dapp-kit';
 import { Check, X, ICON_STROKE } from '../system';
 import { useAuth } from '../data/useAuth';
-import { checkHandleAvailable, claimHandle, setCachedHandle, setReverseRecord } from '../data/suins';
+import { checkHandleAvailable, claimHandle, setReverseRecord } from '../data/suins';
 import { JOURNEY } from './copy';
 import { GoogleMark } from './bits';
 
@@ -61,7 +61,7 @@ export function HelloScreen({ onGoogle, busy = false }: { onGoogle: () => void; 
 // ── CLAIM — name pick + the real setting-up manifest ───────────────────────────
 
 type Beat = 'name' | 'setup';
-type Avail = 'idle' | 'invalid' | 'checking' | 'free' | 'taken';
+type Avail = 'idle' | 'invalid' | 'checking' | 'free' | 'taken' | 'error';
 
 export function ClaimFlow({
   suggestedName = '',
@@ -71,7 +71,10 @@ export function ClaimFlow({
   suggestedName?: string;
   /** DEV-only: never fire a real claim (no session in the preview). */
   preview?: boolean;
-  onDone: () => void;
+  /** Completion handler — receives the just-claimed "<name>@suize" handle so the
+   *  caller can show it OPTIMISTICALLY the instant Home renders (the chain
+   *  reverse-record read lags the claim by a beat). */
+  onDone: (handle: string) => void;
 }) {
   const [beat, setBeat] = useState<Beat>('name');
   const [name, setName] = useState(clean(suggestedName));
@@ -81,7 +84,7 @@ export function ClaimFlow({
       {beat === 'name' ? (
         <NameBeat value={name} onChange={(v) => setName(clean(v))} preview={preview} onNext={() => setBeat('setup')} />
       ) : (
-        <SetupBeat name={name} preview={preview} onDone={onDone} />
+        <SetupBeat name={name} preview={preview} onDone={onDone} onPickAnother={() => setBeat('name')} />
       )}
     </div>
   );
@@ -99,8 +102,17 @@ function NameBeat({
   onNext: () => void;
 }) {
   const [avail, setAvail] = useState<Avail>('idle');
+  // bumped ~2.5s after an 'error' result so the check re-fires on its own — the
+  // copy promises "try again in a moment", so it must actually do that, not wait
+  // for the user to retype.
+  const [retry, setRetry] = useState(0);
+  const client = useSuiClient();
 
-  // debounced REAL availability (the backend enforces the same rules)
+  // debounced ON-CHAIN availability (owner law 2026-06-11: chain only, nothing
+  // else). FAILS CLOSED — an unreadable chain must never show a name as free
+  // (the old fail-open `.catch(() => 'free')` showed the owner his own TAKEN
+  // handle as available). `checkHandleAvailable` resolves `<label>.suize.sui`
+  // on-chain and maps RPC failure to { available:false, reason:'unreachable' }.
   useEffect(() => {
     if (!value) {
       setAvail('idle');
@@ -117,20 +129,32 @@ function NameBeat({
     setAvail('checking');
     let cancelled = false;
     const t = setTimeout(() => {
-      checkHandleAvailable(value)
+      checkHandleAvailable(value, client)
         .then((res) => {
-          if (!cancelled) setAvail(res.available ? 'free' : 'taken');
+          if (cancelled) return;
+          if (res.available) setAvail('free');
+          else if (res.reason === 'unreachable') setAvail('error');
+          else if (res.reason === 'invalid') setAvail('invalid');
+          else setAvail('taken');
         })
         .catch(() => {
-          // transient backend error → don't dead-end; the claim is the real gate
-          if (!cancelled) setAvail('free');
+          // belt-and-braces: any unexpected throw also fails CLOSED
+          if (!cancelled) setAvail('error');
         });
     }, 450);
     return () => {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [value, preview]);
+  }, [value, preview, client, retry]);
+
+  // self-healing backoff: when the chain read failed ('error'), schedule a fresh
+  // attempt so waiting does what the copy says — no retype required.
+  useEffect(() => {
+    if (avail !== 'error') return;
+    const t = setTimeout(() => setRetry((n) => n + 1), 2500);
+    return () => clearTimeout(t);
+  }, [avail]);
 
   const ready = avail === 'free';
   const handle = `${value}${JOURNEY.name.suffix}`;
@@ -191,6 +215,11 @@ function NameBeat({
             <X size={13} strokeWidth={ICON_STROKE} aria-hidden />
             {JOURNEY.name.invalid}
           </>
+        ) : avail === 'error' ? (
+          <>
+            <X size={13} strokeWidth={ICON_STROKE} aria-hidden />
+            can’t check right now — try again in a moment
+          </>
         ) : (
           ' '
         )}
@@ -213,7 +242,18 @@ function NameBeat({
 
 const STEP_MS = 850;
 
-function SetupBeat({ name, preview, onDone }: { name: string; preview: boolean; onDone: () => void }) {
+function SetupBeat({
+  name,
+  preview,
+  onDone,
+  onPickAnother,
+}: {
+  name: string;
+  preview: boolean;
+  onDone: (handle: string) => void;
+  /** Back to the name picker — the recovery for a "name taken" claim race. */
+  onPickAnother: () => void;
+}) {
   const { ownerAddress } = useAuth();
   const { mutateAsync: signTransaction } = useSignTransaction();
 
@@ -225,10 +265,17 @@ function SetupBeat({ name, preview, onDone }: { name: string; preview: boolean; 
   const [shown, setShown] = useState(0);
   const [done, setDone] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // true when the error is a lost claim race (name taken between check + claim) —
+  // re-running the SAME claim is doomed, so the recovery is "pick another name".
+  const [taken, setTaken] = useState(false);
   const [attempt, setAttempt] = useState(0);
   // StrictMode-safe: only fire one claim per attempt (a re-mount must not double-mint)
   const firedAttempt = useRef(-1);
   const claimedRef = useRef(false);
+  // the real "<name>@suize" the backend confirmed — threaded out to onDone so Home
+  // shows it optimistically before the chain reverse-record read catches up. Falls
+  // back to the locally-built handle for the preview / already-claimed paths.
+  const claimedHandle = useRef(`${name}${JOURNEY.name.suffix}`);
 
   // the visual cadence — rows appear; row 2 WAITS for the real claim
   useEffect(() => {
@@ -242,18 +289,24 @@ function SetupBeat({ name, preview, onDone }: { name: string; preview: boolean; 
     return () => timers.forEach(clearTimeout);
   }, [reduce, error, attempt]);
 
-  // the REAL claim (or the preview's timed stand-in)
+  // the REAL claim (or the preview's timed stand-in).
+  //
+  // StrictMode subtlety: the dev double-mount runs effect → cleanup → effect,
+  // but `firedAttempt` (a ref, surviving the fake unmount) blocks the re-fire —
+  // so there is NO retry coming and a cleanup-time "cancelled" flag would
+  // strand the in-flight claim forever (a server-side mint with no reverse
+  // record, a spinner with no error). The fix: never cancel the fired run.
+  // Post-unmount setState is a safe no-op in React 18+, so the promise simply
+  // finishes wherever the component ended up.
   useEffect(() => {
     if (error) return;
     if (firedAttempt.current === attempt) return;
     firedAttempt.current = attempt;
 
-    let cancelled = false;
     const finish = () => {
-      if (cancelled) return;
       setDone(2);
       setShown(3);
-      setTimeout(() => !cancelled && setDone(3), reduce ? 0 : STEP_MS * 0.8);
+      setTimeout(() => setDone(3), reduce ? 0 : STEP_MS * 0.8);
     };
 
     if (preview || claimedRef.current) {
@@ -264,26 +317,31 @@ function SetupBeat({ name, preview, onDone }: { name: string; preview: boolean; 
       setError('Something went wrong setting up your wallet.');
       return;
     }
-    (async () => {
+    void (async () => {
       try {
         const claimed = await claimHandle(name);
-        if (cancelled) return;
         if (claimed.setDefault) {
           const { signature } = await signTransaction({ transaction: claimed.setDefault.bytes });
-          if (cancelled) return;
           await setReverseRecord({ digest: claimed.setDefault.digest, signature });
-          if (cancelled) return;
         }
-        setCachedHandle(ownerAddress, claimed.handle);
+        // No local cache (owner law 2026-06-11: chain only) — the reverse record
+        // set above is what makes the handle resolve everywhere, immediately.
+        claimedHandle.current = claimed.handle;
         claimedRef.current = true;
         finish();
       } catch (e: unknown) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Could not finish setting up your name.');
+        const raw = e instanceof Error ? e.message : '';
+        // The claim-race: the name went from free (at the check) to taken (at the
+        // claim). Re-running the SAME claim is doomed — route to "pick another name"
+        // and say it plainly instead of echoing the raw server string.
+        if (/taken|already|exists|unavailable/i.test(raw)) {
+          setTaken(true);
+          setError('That name was just taken. Pick another one.');
+        } else {
+          setError(raw || 'Could not finish setting up your name.');
+        }
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [preview, name, ownerAddress, signTransaction, error, attempt, reduce]);
 
   const finished = done >= total;
@@ -298,18 +356,26 @@ function SetupBeat({ name, preview, onDone }: { name: string; preview: boolean; 
         <p className="rd-jny__note" role="alert">
           {error}
         </p>
-        <button
-          type="button"
-          className="rd-cta rd-jny__cta"
-          onClick={() => {
-            setError(null);
-            setShown(0);
-            setDone(0);
-            setAttempt((n) => n + 1);
-          }}
-        >
-          Try again
-        </button>
+        {taken ? (
+          // A lost claim race: the only useful action is a different name — retrying
+          // the SAME claim would just 409 again.
+          <button type="button" className="rd-cta rd-jny__cta" onClick={onPickAnother}>
+            Pick another name
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="rd-cta rd-jny__cta"
+            onClick={() => {
+              setError(null);
+              setShown(0);
+              setDone(0);
+              setAttempt((n) => n + 1);
+            }}
+          >
+            Try again
+          </button>
+        )}
       </div>
     );
   }
@@ -344,7 +410,12 @@ function SetupBeat({ name, preview, onDone }: { name: string; preview: boolean; 
 
       <div className={`rd-jny__done${finished ? ' is-in' : ''}`}>
         <p className="rd-jny__donetitle">{JOURNEY.setup.done(name)}</p>
-        <button type="button" className="rd-cta rd-jny__cta" onClick={onDone} disabled={!finished}>
+        <button
+          type="button"
+          className="rd-cta rd-jny__cta"
+          onClick={() => onDone(claimedHandle.current)}
+          disabled={!finished}
+        >
           {JOURNEY.setup.cta}
         </button>
       </div>

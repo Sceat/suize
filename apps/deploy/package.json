@@ -7,13 +7,15 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "deploy": "npx vercel@latest pull --yes --environment production && npx vercel@latest build --prod && npx vercel@latest deploy --prebuilt --prod"
   },
   "dependencies": {
     "@mysten/dapp-kit": "^1.0.6",
     "@mysten/enoki": "^1.0.8",
     "@mysten/sui": "^2.17.0",
     "@mysten/wallet-standard": "^0.20.0",
+    "@suize/pay": "workspace:*",
     "@suize/shared": "workspace:*",
     "@tanstack/react-query": "^5.90.5",
     "react": "^19.1.0",

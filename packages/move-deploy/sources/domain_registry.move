@@ -137,10 +137,17 @@ fun setup(scenario: &mut test_scenario::Scenario, deployer: address) {
     scenario.next_tx(deployer);
     { init(scenario.ctx()); };
     scenario.next_tx(deployer);
+    { site::init_for_testing(scenario.ctx()); };
+    scenario.next_tx(deployer);
     {
         let v = scenario.take_shared<Version>();
+        let mut reg = scenario.take_shared<site::SiteDigestRegistry>();
+        let deployer_cap = scenario.take_from_sender<site::DeployerCap>();
         let cap = site::create_site(
+            &deployer_cap,
             &v,
+            &mut reg,
+            b"\x01",
             string::utf8(b"my-site"),
             deployer,
             string::utf8(b"quilt"),
@@ -153,6 +160,8 @@ fun setup(scenario: &mut test_scenario::Scenario, deployer: address) {
             scenario.ctx(),
         );
         transfer::public_transfer(cap, deployer);
+        scenario.return_to_sender(deployer_cap);
+        test_scenario::return_shared(reg);
         test_scenario::return_shared(v);
     };
     scenario.next_tx(deployer);
@@ -244,12 +253,18 @@ fun test_link_domain_aborts_with_wrong_cap() {
     {
         let v = scenario.take_shared<Version>();
         let mut reg = scenario.take_shared<DomainRegistry>();
+        let mut digest_reg = scenario.take_shared<site::SiteDigestRegistry>();
         let real_cap = scenario.take_from_sender<SiteAdminCap>();
+        let deployer_cap = scenario.take_from_sender<site::DeployerCap>();
         let site = scenario.take_shared<Site>();
 
-        // Mint a SECOND, unrelated site -> its cap is NOT bound to `site`.
+        // Mint a SECOND, unrelated site -> its cap is NOT bound to `site`. A fresh
+        // digest (the `setup` site used b"\x01") keeps the consume guard happy.
         let wrong_cap = site::create_site(
+            &deployer_cap,
             &v,
+            &mut digest_reg,
+            b"\x02",
             string::utf8(b"other-site"),
             deployer,
             string::utf8(b"quilt2"),
@@ -268,6 +283,8 @@ fun test_link_domain_aborts_with_wrong_cap() {
         transfer::public_transfer(wrong_cap, deployer);
         test_scenario::return_shared(site);
         scenario.return_to_sender(real_cap);
+        scenario.return_to_sender(deployer_cap);
+        test_scenario::return_shared(digest_reg);
         test_scenario::return_shared(reg);
         test_scenario::return_shared(v);
     };

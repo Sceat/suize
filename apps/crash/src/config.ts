@@ -159,6 +159,13 @@ export const VERSION_ID =
 // Module path for the router's entry fns (the only signed write targets).
 export const MOD_ROUTER = `${ROUTER_PACKAGE}::router`
 
+// The Sui framework `coin::zero` target for the fully-manager-funded re-bet's
+// 0-value payment coin. MUST be the NORMALIZED 64-hex `0x2` form — Enoki compares
+// the request's allow-list against the tx's NORMALIZED targets, so a short `0x2::…`
+// never matches and silently breaks sponsorship. Sourced from @suize/shared (the
+// single source of truth, already normalized) rather than hardcoding the short form.
+export const COIN_ZERO = PACKAGE_IDS.CRASH.TARGETS.COIN_ZERO
+
 // ----------------------------------------------------------------------------
 // ENOKI SPONSORSHIP ALLOWLIST — the seven (and only seven) move-call targets the
 // app ever signs. EVERY user write goes through one of these, so sponsored gas

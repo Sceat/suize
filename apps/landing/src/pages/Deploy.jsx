@@ -184,7 +184,7 @@ export default function Deploy() {
               </a>
               <a
                 className="sx-link"
-                href="#/pricing"
+                href="/pricing"
                 onClick={e => {
                   e.preventDefault()
                   navigate('/pricing')

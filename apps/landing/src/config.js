@@ -20,10 +20,10 @@ export const LINKS = {
   // how-it-works + quickstart (the one-liner snippet + the MCP card live there).
   // The old docs.suize.io site is DEAD — never link it, never resurrect a
   // separate quickstart link.
-  checkout: '#/docs',
+  checkout: '/docs',
   deploy: 'https://deploy.suize.io',
   crash: 'https://crash.suize.io',
-  docs: '#/docs',
+  docs: '/docs',
   llms: '/llms.txt',
   // primary CTA — start the onboarding at the wallet.
   start: 'https://wallet.suize.io',
@@ -42,8 +42,8 @@ export const NAV = {
   // The Products dropdown + Pricing are rendered AFTER these audience links in
   // Nav.jsx (Products is the menu trigger, not a plain link).
   links: [
-    { label: 'For users', href: '#/' },
-    { label: 'For business', href: '#/for-business' },
+    { label: 'For users', href: '/' },
+    { label: 'For business', href: '/business' },
   ],
   // the Products dropdown — ADDITIONAL products only (Deploy + Crash). Wallet &
   // Charge are covered by the For users / For business audience pages, so they
@@ -53,7 +53,7 @@ export const NAV = {
     routes: ['deploy', 'crash'],
   },
   // Pricing — its own top-level link, rendered last.
-  pricing: { label: 'Pricing', href: '#/pricing' },
+  pricing: { label: 'Pricing', href: '/pricing' },
   // ONE CTA, every route — same label, same door (the wallet). The route-aware
   // home/business variant is dead; the business page's own section CTAs carry
   // the merchant door (#/docs via LINKS.checkout).
@@ -152,11 +152,11 @@ export const HOME = {
     },
     {
       title: "You're in control.",
-      body: 'Flip Agent enabled off anytime. Approve exactly what you want to see — nothing happens behind your back.',
+      body: 'Flip Agent enabled off anytime, and pull every cent back to your own wallet in one tap. It only ever spends what you funded.',
     },
     {
       title: 'Free to start.',
-      body: 'Free to use, no card needed. Turn on a smarter AI when you want one that plans further and finds you more.',
+      body: 'Free to use, no card needed — the full AI wallet, from your very first message.',
     },
   ],
   // BEAT 1 — SUB-ACCOUNTS (owner-locked; REPLACES the empty "Money, without the
@@ -222,7 +222,7 @@ export const HOME = {
     // handles the money. (Alt: "Money, handled." / "Sit back and relax.")
     closer: ['Sit back and relax.', 'Your AI handles the rest.'],
     cta: { label: 'Get started free', href: LINKS.start },
-    bridge: { label: 'Run a business? Get paid by agents →', href: '#/for-business' },
+    bridge: { label: 'Run a business? Get paid by agents →', href: '/business' },
   },
 }
 
@@ -234,7 +234,10 @@ export const HOME = {
 // "Start earning now" CTA so it drills in.
 //
 // HONESTY (non-negotiable, baked into the strings):
-//  · `402-shaped, x402-compatible by design` — NEVER "on x402".
+//  · CLAIM LADDER — ALLOWED: "gasless", "x402-compatible by design", "implements
+//    the merged x402 Sui exact scheme", "we run a live x402 facilitator for Sui".
+//    FORBIDDEN until the mechanism PR MERGES: "on x402", "official x402
+//    facilitator", "the default Sui facilitator" (as fact).
 //  · No Deploy reference on this page — Deploy is its own product page; the
 //    business pitch proves charge-side value (speed, every-fee-on-the-receipt,
 //    custody).
@@ -251,7 +254,7 @@ export const BUSINESS = {
     // SECONDARY beat below.
     h1: ['Start accepting payments', 'from AI agents.'],
     hot: 'from AI agents.',
-    sub: 'Drop in one line and let agents pay you directly — one-off or on a subscription. No KYB, no payments stack, live in minutes.',
+    sub: 'Drop in one line and let agents pay you directly — one-off payments and subscriptions, gasless. No KYB, no payments stack, live in minutes.',
     // secondary line — the marketplace reach, now a supporting beat (NOT the lead).
     secondary: 'And get recommended to millions of customers along the way.',
     chip: 'Sample receipt, real proof',
@@ -264,7 +267,7 @@ export const BUSINESS = {
   // agent renders this as a single eyebrow + line; no logo wall.
   integrations: {
     eyebrow: 'Plugs in anywhere',
-    line: '402-shaped — works with any site that can take a payment, built for the same standards as Stripe, Coinbase, and Google AP2.',
+    line: 'x402-compatible by design — works with any site that can take a payment, built for the same standards as Stripe, Coinbase, and Google AP2.',
   },
   // TRUSTED-BY moved HERE from the home (LOCKED: the rail is the merchant trust
   // signal). Title + the 12 funny placeholder names. TODO: PLACEHOLDER stub
@@ -272,26 +275,20 @@ export const BUSINESS = {
   // CloseBeat (BUSINESS.close.marquee) too; this block is the canonical source
   // a new "trusted" station can read as BUSINESS.trust.{marqueeTitle,marquee}.
   trust: {
-    marqueeTitle: 'Trusted by thousands',
-    marquee: [
-      'Globex',
-      'Initech',
-      'Hooli',
-      'Pied Piper',
-      'Acme',
-      'Soylent',
-      'Cyberdyne',
-      'Umbrella Corp',
-      'Massive Dynamic',
-      'Vandelay',
-      'Wonka',
-      'Stark Industries',
-    ],
+    // TRUSTED-BY emptied 2026-06-14 (owner): no fake company names ship — shipping
+    // Globex/Initech/etc as social proof is dishonest. Keys kept so BusinessBeats
+    // keeps resolving; an empty title + empty list render nothing. Restore ONLY
+    // with REAL customer logos.
+    marqueeTitle: '',
+    marquee: [],
   },
   // BEAT 0.5 — THE FACTORIO PAYMENT-LANE (owner-locked centerpiece). Concept:
   // agent payments are ALREADY streaming past on a conveyor/timeline; you plug
   // in one line and start pulling them into your balance. The business agent
   // reads this for the conveyor section head/sub/CTA.
+  //
+  // (the `integrations` block above renders the standards strip; the line is the
+  // x402-compatible-by-design claim, no platform names — claim ladder.)
   lane: {
     eyebrow: 'Already flowing',
     head: 'The money is already moving.',
@@ -302,7 +299,7 @@ export const BUSINESS = {
   charge: {
     eyebrow: 'One line, settled in seconds',
     head: 'Charge an agent. Get paid now.',
-    sub: 'Write the charge, read the receipt. USDC lands in seconds — one-off or a subscription that renews on its own.',
+    sub: 'Paste the line, read the receipt. USDC lands in seconds — every payment verifiable on-chain.',
     sampleTag: 'Your service, real settlement',
     cta: { label: 'Get paid by agents', href: LINKS.checkout },
   },
@@ -324,8 +321,8 @@ export const BUSINESS = {
       },
       {
         focal: '03',
-        title: 'Subscriptions renew themselves.',
-        note: 'Approved once, the agent pays every month on its own. You just get paid.',
+        title: 'Subscriptions, built in.',
+        note: 'Your customer approves once and pays every month on their own signature — nothing reaches into their account.',
       },
     ],
     cta: { label: 'Go live in minutes', href: LINKS.checkout },
@@ -336,57 +333,42 @@ export const BUSINESS = {
   // non-custodial. NO Deploy reference (Deploy is its own product page).
   proof: {
     eyebrow: 'Shown, not claimed',
-    head: 'One-off or monthly. Settled the same way.',
+    head: 'One-off or recurring. Settled the same way.',
     sub: 'Every charge lands in USDC in seconds, and the fee is printed right on the receipt — never a surprise. Funds settle to you on-chain; we never custody a cent.',
     facts: [
       ['Seconds', 'USDC settles on-chain, no payout wait'],
       ['On the receipt', 'every fee is printed, never a surprise'],
       ['Non-custodial', 'funds settle to you — we hold nothing'],
     ],
-    link: { label: 'See pricing →', href: '#/pricing' },
+    link: { label: 'See pricing →', href: '/pricing' },
     cta: { label: 'Watch it settle', href: LINKS.checkout },
   },
   // BEAT 4 — THE CLOSE. Urgency that's true, the back-bridge to PAY.
   close: {
-    // TRUSTED-BY marquee (owner-locked). Same "Trusted by thousands" title + the
-    // funny placeholder company names as the home trust zone. TODO: these are
-    // PLACEHOLDER stub logos/names — swap for real customer logos before launch.
-    marqueeTitle: 'Trusted by thousands',
-    marquee: [
-      'Globex',
-      'Initech',
-      'Hooli',
-      'Pied Piper',
-      'Acme',
-      'Soylent',
-      'Cyberdyne',
-      'Umbrella Corp',
-      'Massive Dynamic',
-      'Vandelay',
-      'Wonka',
-      'Stark Industries',
-    ],
-    // 402-shaped honesty line, surfaced plainly at the floor (NO "snippet is a
+    // TRUSTED-BY emptied 2026-06-14 (owner): no fake company names ship. Empty
+    // title + list render nothing; restore with REAL customer logos when we have them.
+    marqueeTitle: '',
+    marquee: [],
+    // claim-ladder honesty line, surfaced plainly at the floor (NO "snippet is a
     // preview / SDK not shipped" caveat — owner cut it; the JSX caveat is removed
     // by the business agent).
-    honest: '402-shaped, x402-compatible by design — the payer needs nothing Suize-specific.',
+    honest: 'Gasless, x402-compatible by design — the payer needs nothing Suize-specific.',
     // §6 locked close — a FOMO 2-liner, rendered as two floating serif lines.
     closer: ['Agents are already spending.', "Don't get left out."],
     cta: { label: 'Start accepting payments', href: LINKS.checkout },
-    bridge: { label: 'Want the assistant that pays for you? →', href: '#/' },
+    bridge: { label: 'Want the assistant that pays for you? →', href: '/' },
   },
 }
 
 // ============================================================================
 // PRICING (NEW data source — the /pricing page currently hardcodes its rows;
 // this is the canonical copy a build agent should render). The consumer wallet
-// is FREE to start; "Smarter AI" is a paid subscription. NO MODEL NAMES in
-// rendered copy (owner: never name the tech). The rail rows (send free, charge
-// 2%) are unchanged. FLAG: the Smarter-AI price is a PLACEHOLDER pending owner
-// sign-off — do not treat $9.99/mo as final.
+// is FREE — there is NO paid wallet tier (owner 2026-06-14: Haiku-only, no wallet
+// sub for now; the "$9.99 Smarter AI" placeholder is DELETED, never reintroduce
+// without owner sign-off). The rail rows (send free, charge 2%) are unchanged.
 // ============================================================================
 export const PRICING = {
-  // the consumer wallet subscription tiers
+  // the consumer wallet tiers — FREE only (no paid wallet sub for now).
   tiers: [
     {
       id: 'free',
@@ -397,22 +379,11 @@ export const PRICING = {
       blurb: 'The full AI wallet — talk to it, it remembers you, it pays. Free to start, no card.',
       cta: { label: 'Access your wallet', href: LINKS.start },
     },
-    {
-      id: 'smarter',
-      name: 'Smarter AI',
-      model: 'When you want more',
-      // FLAG: PLACEHOLDER price — owner to confirm before launch.
-      price: '$9.99',
-      per: '/mo',
-      placeholder: true,
-      blurb: 'A smarter AI that plans further, watches more services, and finds you more. Cancel anytime.',
-      cta: { label: 'Get the smarter AI', href: LINKS.start },
-    },
   ],
   // the rail rows (unchanged) — the one place a fee may appear as marketing copy.
   rows: [
     { k: 'Send / transfer money', v: 'Free', free: true },
-    { k: 'Get paid by an agent (Charge)', v: '2%' },
+    { k: 'Get paid by an agent (Charge)', v: '2% · 1¢ min' },
     { k: 'Setup / account', v: '$0' },
   ],
   close: 'No seats. No hidden fees. No sales call.',
@@ -426,11 +397,18 @@ export const PRICING = {
 // mechanics (402, USDC, MCP, Sui — sanctioned ON THIS PAGE ONLY) come second.
 //
 // HONESTY + VOCABULARY (non-negotiable, baked into the strings):
-//  · NO pricing numbers anywhere (no 2% / $0.50 / $X.XX) — the fee line is
-//    "the fee is printed on every receipt" + a link to #/pricing. The snippet
-//    price is the placeholder token '…', never a number.
+//  · NO Suize pricing numbers anywhere (no 2% / $0.50) — the fee line is
+//    "the fee is printed on every receipt" + a link to #/pricing. A MERCHANT's
+//    own example price (price: '0.10' in the snippet) IS allowed — it's their
+//    number, not a Suize fee.
 //  · Consumer words: "sub-account" / "allowance" — NEVER "leash" / "pot".
-//  · No testnet labels, no roadmap hedging — the product as it works.
+//  · No testnet labels. ZERO status-talk: a surface is documented as it works
+//    today (@suize/pay, the x402 402 loop, POST /verify + /settle, the hosted
+//    pay page, subscriptions), or it is ABSENT from the page — never "coming
+//    soon" / "rolling out" / "not yet".
+//  · NO webhooks, NO dashboard, NO sessions, NO API keys — they don't exist
+//    (deleted by design; the chain is the database). Settlement notice = your
+//    own /verify call, or reading the on-chain balance changes yourself.
 // ============================================================================
 export const DOCS = {
   hero: {
@@ -443,14 +421,15 @@ export const DOCS = {
   // high-level (no code) → low-level, each stating WHO it's for, WHAT YOU DO,
   // WHAT SUIZE DOES, and HOW YOU KNOW YOU'RE PAID. Tier 3 keeps the one-liner
   // snippet + the animated five-step 402 loop as its demo (approved — never
-  // touch the animation). LAW: NO platform names in Tier 4 until a plugin
-  // ships. Naming Stripe is allowed ONLY for coexistence (`coexist`), never as
-  // an integration claim.
+  // touch the animation). Naming Stripe is allowed ONLY for coexistence
+  // (`coexist`), never as an integration claim. ZERO status-talk: a tier is
+  // documented as it works today, or it is absent (platform plugins don't
+  // ship → no Tier 4).
   merchant: {
     marker: 'The onboarding ladder',
     eyebrow: 'For business',
     head: 'Get paid, whatever your stack.',
-    sub: 'Four ways in — from a link you paste to a line you ship. Every one lands on the same rail and prints the same receipt.',
+    sub: 'Three ways in — from a link you paste to a line you ship. Every one lands on the same rail and prints the same receipt.',
     // the three fact-column labels every tier renders
     labels: {
       you: 'What you do',
@@ -462,50 +441,44 @@ export const DOCS = {
         tier: 'Tier 1',
         title: 'No code — a pay-link.',
         who: 'For hosted stores, link-in-bio sellers — anyone.',
-        you: 'Create a link in your Suize dashboard and paste it anywhere: your site, your emails, your llms.txt.',
-        suize: 'Hosts the payment page — and it’s machine-readable, so an agent landing on it can read the terms and pay through the rail without a human.',
-        paid: 'A webhook fires, or you watch it land in your dashboard.',
+        you: 'A pay-link is just a URL carrying your address and your price — paste it anywhere: your site, your emails, your llms.txt.',
+        suize: 'Agents read the terms and pay through the rail without a human; humans tap to pay on the hosted pay page.',
+        paid: 'Check /verify — or read your payments straight off the chain. Your history is public cryptographic record.',
       },
       {
         tier: 'Tier 2',
-        title: 'One API call — a checkout session.',
-        who: 'For any backend, any language — PHP, Rails, Python, Node…',
-        you: 'Send one call — no API key, no signup; your address is your account. Then redirect the buyer, agent or human, to the session.',
-        code: 'POST api.suize.io/checkout { payTo, amount, memo }',
-        suize: 'Hosts the checkout, settles the payment, fires your webhook.',
-        paid: 'Your webhook fires with the receipt.',
-        note: 'The Stripe-Checkout shape every developer already knows.',
+        title: 'One call — POST /verify.',
+        who: 'For any backend, any language — it’s one plain HTTP call.',
+        you: 'Return 402 with your x402 payment terms. The agent pays gaslessly through Suize and retries with an X-PAYMENT header. You hand that to the facilitator and serve when it says paid.',
+        code: 'POST api.suize.io/verify  { paymentPayload, paymentRequirements }',
+        suize: 'Verifies the agent’s gasless payment against your own configured price and address, then settles it on-chain.',
+        paid: 'verify says valid — you serve. No webhook, no session, no key.',
+        note: 'amount is a decimal USDC string — your price. Your address is your account; no signup, no API key.',
       },
       {
         tier: 'Tier 3',
         title: 'One line — gate your API.',
         who: 'For API-first builders selling to agents programmatically.',
-        you: 'Paste the middleware.',
+        you: 'npm i @suize/pay, paste the middleware.',
         suize: 'Everything between “pay me” and “paid”.',
         paid: '/verify answers paid ✓ — then your code serves.',
-        // renders the one-liner snippet + the animated 402 loop beneath
+        note: 'Works in Bun, Hono, and Next (fetch-style) plus Express — any Node/Bun backend; any other language via the plain x402 HTTP flow.',
+        // renders the real @suize/pay snippet + the animated 402 loop beneath
         demo: true,
-      },
-      {
-        tier: 'Tier 4',
-        title: 'Your store platform — a plugin.',
-        who: 'Run a hosted store? For sellers on a commerce platform — no code at all.',
-        you: 'Add the gateway plugin and drop in your payout address.',
-        suize: 'Slots in as a payment method at your checkout — rolling out platform by platform.',
-        paid: 'Same webhook, same dashboard — paid orders land like any other.',
       },
     ],
     // the coexistence note — Stripe named for COEXISTENCE only, never as an
     // integration claim.
     coexist: {
       title: 'Already on Stripe?',
-      body: 'Keep it. Stripe serves your card customers; Suize adds the buyer they don’t — AI agents paying USDC. Our webhook events look like the payment events your fulfillment code already handles. One more payment method, not a migration.',
+      body: 'Keep it. Stripe serves your card customers; Suize adds the buyer they don’t — AI agents paying USDC. One verify call tells your fulfillment code a payment landed, and the settlement lives on-chain. One more payment method, not a migration.',
     },
     snippet: {
       file: 'your-server.js',
-      tag: '402-shaped',
-      // the copy-button payload — the price is a placeholder token, NOT a number
-      code: "app.use(suize({ to: '0xYOU', price: '…' }))",
+      tag: 'x402',
+      // the copy-button payload — the FULL real path (npm-published @suize/pay);
+      // the price is the MERCHANT's own example number, never a Suize fee.
+      code: "npm i @suize/pay\n\nimport { suize } from '@suize/pay'\napp.use(suize({ to: '0xYOU', price: '0.10' })) // your price, decimal USDC",
     },
     steps: [
       {
@@ -515,19 +488,19 @@ export const DOCS = {
       },
       {
         title: 'Your server answers 402',
-        desc: 'Your one line replies with a payment challenge: what to pay, in what, and where.',
-        tag: '402 Payment Required',
+        desc: 'Your one line replies with an x402 payment challenge: what to pay, in what, and where.',
+        tag: '402 · accepts[]',
         challenge: true,
       },
       {
         title: 'The agent pays through Suize',
-        desc: 'The charge settles in USDC on Sui, in seconds. A receipt is printed on-chain.',
+        desc: 'The agent signs a gasless USDC transfer and retries with an X-PAYMENT header. It settles on Sui in seconds.',
         tag: 'USDC · settled on Sui',
       },
       {
         title: 'Your snippet asks “did they?”',
-        desc: 'It checks /verify; Suize confirms the payment landed on the rail.',
-        tag: '/verify → paid ✓',
+        desc: 'It hands the payment to the facilitator’s verify; Suize confirms the payment landed on the rail.',
+        tag: 'verify → paid ✓',
       },
       {
         title: 'Content served',
@@ -535,15 +508,16 @@ export const DOCS = {
         tag: '200 OK',
       },
     ],
-    // the pretty 402 payment-challenge JSON rendered inside step 2
+    // the pretty x402 payment-challenge JSON rendered inside step 2 — the
+    // `accepts[0]` PaymentRequirements an agent reads (real x402 V2 shape).
     challenge: {
       status: '402 Payment Required',
       fields: [
-        ['amount', '…'],
-        ['currency', 'USDC'],
+        ['scheme', 'exact'],
+        ['network', 'sui'],
+        ['asset', 'USDC'],
         ['payTo', '0xYOU'],
-        ['paymentId', 'pay_8f3k…'],
-        ['payLink', 'suize.io/pay/8f3k…'],
+        ['amount', '…'],
       ],
     },
     caption:
@@ -560,7 +534,7 @@ export const DOCS = {
       {
         glyph: 'sign',
         title: 'It signs, we settle.',
-        body: 'Suize builds the transaction and covers the gas; the agent just signs it, and Suize submits and confirms it on-chain. For any agent with a key and zero blockchain skills.',
+        body: 'Suize builds the gasless transfer — no gas token needed; the agent just signs it, and Suize verifies and settles it on-chain. For any agent with a key and zero blockchain skills.',
       },
       {
         glyph: 'direct',
@@ -575,7 +549,7 @@ export const DOCS = {
     ],
     foot: 'Every payment lands on the same rail and prints the same receipt — the fee visible, the proof on-chain.',
     fee: 'The fee is printed on every receipt.',
-    pricing: { label: 'See pricing →', href: '#/pricing' },
+    pricing: { label: 'See pricing →', href: '/pricing' },
   },
 
   // SECTION 3 — the consumer half: the sub-account + the controls.
@@ -594,8 +568,8 @@ export const DOCS = {
         body: 'Confirm each payment, auto-approve under $X, or let it run — you pick how much autonomy it gets.',
       },
       {
-        title: 'Allowances',
-        body: 'Approve a merchant once with a cap — your AI handles that bill on its own, within the cap, forever revocable in one tap.',
+        title: 'Subscriptions',
+        body: 'Approve a recurring bill once. Each renewal is paid on your own signature — nobody reaches into your account — and cancel is deleting it on-chain.',
       },
       {
         title: 'The record',
@@ -608,17 +582,19 @@ export const DOCS = {
       toggle: 'Agent enabled',
       meter: { spent: 'spent', cap: 'your cap' },
       dial: ['Confirm each', 'Auto under $X', 'Full auto'],
-      allowance: { name: 'Music streaming', note: 'approved · within its cap' },
-      revoke: 'Revoke',
+      allowance: { name: 'Music streaming', note: 'subscription · renews on your signature' },
+      revoke: 'Cancel',
     },
   },
 
-  // SECTION 4 — the MCP door: quickstart for Claude / Codex users.
+  // SECTION 4 — the MCP door (the detached-agent surface: a SEPARATE funded
+  // address — a second Google sign-in — whose balance IS the cap; the human
+  // funds it and can sweep it. Present-tense, no status-talk).
   mcp: {
     marker: 'The MCP door',
     eyebrow: 'Bring your own assistant',
     head: 'Use it with Claude or Codex.',
-    sub: 'One command. Sign in with Google, fund your sub-account, and your assistant pays through the same rail, under the same dials.',
+    sub: 'One command. Sign in with Google to give your assistant its own funded account — its balance is the cap, fund it and sweep it back anytime — and it pays through the same rail, under the same dials.',
     command: 'claude mcp add suize',
     prompt: '$',
     tools: ['suize_pay', 'suize_balance', 'suize_receipts'],
@@ -628,9 +604,9 @@ export const DOCS = {
   // SECTION 5 — the close: two doors out.
   close: {
     head: 'That’s the whole machine.',
-    business: { label: 'Start accepting payments', href: '#/for-business' },
+    business: { label: 'Start accepting payments', href: '/business' },
     consumer: { label: 'Access your wallet', href: LINKS.start },
-    pricing: { label: 'Pricing →', href: '#/pricing' },
+    pricing: { label: 'Pricing →', href: '/pricing' },
   },
 }
 

@@ -266,6 +266,35 @@ export const resolveSuizeHandle = async (
   }
 }
 
+// ---- Coin balances (admin panel — read-only) -------------------------------
+// The admin balance tab reads the deploy service wallet's operational balances
+// straight from chain (public on-chain data). SUI (gas) + WAL (Walrus storage)
+// are what the owner must keep topped up so deploys + storage-extends keep
+// working. Returns base-unit bigints as strings (JSON-safe); the caller formats.
+
+export const SUI_COIN_TYPE = '0x2::sui::SUI'
+
+export interface CoinBalance {
+  /** Total balance in base units (MIST for SUI, FROST for WAL — both 9 decimals). */
+  totalBalance: string
+  /** Number of distinct coin objects of this type the address holds. */
+  coinObjectCount: number
+}
+
+// One coin type's total balance for `address`. Swallows nothing — the caller
+// shows a calm error state on failure (never a fake 0). `coinType` defaults to SUI.
+export const fetch_balance = async (
+  client: SuiJsonRpcClient,
+  address: string,
+  coinType: string = SUI_COIN_TYPE,
+): Promise<CoinBalance> => {
+  const b = await client.getBalance({ owner: address, coinType })
+  return {
+    totalBalance: b.totalBalance,
+    coinObjectCount: b.coinObjectCount,
+  }
+}
+
 // A typed "site object not on chain" error so the UI can show a calm 404 state.
 export class ChainNotFoundError extends Error {
   status = 404
