@@ -17,7 +17,7 @@ interface ImportMetaEnv {
   readonly VITE_GOOGLE_AGENT_CLIENT_ID?: string;
   /** Backend WebSocket URL (e.g. ws://localhost:8080/ws dev, wss://api.suize.io/ws prod). */
   readonly VITE_WS_URL?: string;
-  /** Backend HTTP base (x402 V2 facilitator) — used only by the /confirm SSO popup.
+  /** Backend HTTP base (x402 V2 facilitator) — used only by the /confirm-subscribe popup.
    * Unset => dev http://localhost:8099, prod https://api.suize.io. See env.ts API_BASE. */
   readonly VITE_SUIZE_API?: string;
   /**

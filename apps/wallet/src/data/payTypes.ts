@@ -168,6 +168,15 @@ export interface PayApi {
    */
   spendFromSubaccount(args: { multisig: MultiSigPublicKey; to: string; amountRaw: bigint }): Promise<string>;
 
+  /**
+   * Sign EXACT, already-built gasless payment bytes AS the agent's 1-of-2 multisig
+   * sub-account: the MAIN session member signs alone, then the signature is combined
+   * into the multisig signature (threshold 1). This is the agent's signer for x402
+   * spends whose bytes are built OFF-wallet (e.g. Deploy's facilitator `/build`) with
+   * SENDER = the sub-account. The caller proves the bytes safe/gasless first.
+   */
+  signBytesAsSubaccount(multisig: MultiSigPublicKey, bytes: string): Promise<{ signature: string }>;
+
   /** OWNER-signed `cancel`: stop + destroy a subscription by its object id. */
   cancelSubscription(subId: string): Promise<string>;
 

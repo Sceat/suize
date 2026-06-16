@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ConnectButton } from '@mysten/dapp-kit'
 import { useAuth } from './auth'
 import { useSuizeHandle } from './suins'
 import { DEPLOY_PACKAGE_PUBLISHED } from './config'
-import { SitesList } from './screens/SitesList'
-import { SiteDetail } from './screens/SiteDetail'
+import { ShowcaseGallery } from './screens/ShowcaseGallery'
+import { Dashboard } from './screens/Dashboard'
+import { SiteDossier } from './screens/SiteDossier'
 import { AgentsView } from './screens/AgentsView'
 import { AdminView } from './screens/AdminView'
 import { CustomCursor } from './CustomCursor'
@@ -17,17 +18,22 @@ import {
 } from './ui'
 
 // ============================================================================
-// THE DEPLOY DASHBOARD — Suize Deploy in the Crash-by-Suize palette.
-// AGENTS deploy sites (this is a B2A product); humans sign in to VIEW + manage
-// their agent-deployed sites. A tiny no-router SPA with views (list / detail /
-// agents / admin), an optional Suize-wallet (zkLogin) login that scopes "your
-// sites" by owner (the EXACT Crash Google flow), and a light/dark theme toggle.
-// The Agents view is the heart + the ONLY deploy path: copy-paste deploy-from-an-
-// agent instructions (curl / TS) — there is intentionally no human upload UI.
+// THE DEPLOY DASHBOARD — Suize Deploy in the IMPRINT editorial palette.
+// The front door is a PUBLIC SHOWCASE GALLERY of agent-deployed sites (live
+// Walrus previews) — anyone, signed in or not, sees the permanent agentic web.
+// Signing in (Google zkLogin) unlocks the CONSOLE: a professional dashboard
+// (overview · sites · analytics) scoped to your address (main ∪ agent
+// sub-accounts). Every site opens a permanence DOSSIER (live preview + the
+// Walrus/integrity anchors). A no-router SPA with a small View union + a
+// light/dark theme. Agents deploy over plain HTTP (the API · agents view spells
+// out the contract); humans browse + manage here.
 // ============================================================================
 
+type DashTab = 'overview' | 'sites' | 'analytics'
+
 type View =
-  | { kind: 'list' }
+  | { kind: 'explore' }
+  | { kind: 'dashboard'; tab: DashTab }
   | { kind: 'detail'; siteId: string }
   | { kind: 'agents' }
   | { kind: 'admin' }
@@ -47,7 +53,10 @@ export const App = () => {
   const handle = useSuizeHandle(auth.address)
   const { toasts, ok, err } = useToasts()
 
-  const [view, setView] = useState<View>({ kind: 'list' })
+  const [view, setView] = useState<View>({ kind: 'explore' })
+  // Where a detail / agents view returns to (the last list-like surface).
+  const backRef = useRef<View>({ kind: 'explore' })
+
   const [dark, setDark] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false
     const saved = window.localStorage.getItem(THEME_KEY)
@@ -60,12 +69,45 @@ export const App = () => {
     window.localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light')
   }, [dark])
 
-  const open = useCallback((siteId: string) => {
-    setView({ kind: 'detail', siteId })
-    window.scrollTo({ top: 0 })
+  // Remember the originating list view so detail/agents "back" returns there.
+  const recordBack = useCallback((v: View) => {
+    if (v.kind === 'explore' || v.kind === 'dashboard') backRef.current = v
   }, [])
 
-  const goList = useCallback(() => setView({ kind: 'list' }), [])
+  const open = useCallback(
+    (siteId: string) => {
+      setView(v => {
+        recordBack(v)
+        return { kind: 'detail', siteId }
+      })
+      window.scrollTo({ top: 0 })
+    },
+    [recordBack],
+  )
+
+  const goExplore = useCallback(() => setView({ kind: 'explore' }), [])
+  const goDash = useCallback(
+    (tab: DashTab = 'overview') => setView({ kind: 'dashboard', tab }),
+    [],
+  )
+  const goAgents = useCallback(() => {
+    setView(v => {
+      recordBack(v)
+      return { kind: 'agents' }
+    })
+    window.scrollTo({ top: 0 })
+  }, [recordBack])
+  const back = useCallback(() => setView(backRef.current), [])
+
+  // Signed out while on a private surface (console / admin) → fall back to the
+  // public gallery so we never strand the user on an empty owner-scoped page.
+  useEffect(() => {
+    if (!auth.address && (view.kind === 'dashboard' || view.kind === 'admin'))
+      setView({ kind: 'explore' })
+  }, [auth.address, view.kind])
+
+  const onDash = view.kind === 'dashboard'
+  const onExplore = view.kind === 'explore' || view.kind === 'detail'
 
   return (
     <div className="dx-app">
@@ -74,36 +116,43 @@ export const App = () => {
           <button
             type="button"
             className="dx-logo"
-            onClick={goList}
+            onClick={goExplore}
             aria-label="Suize Deploy home"
           >
             <span className="dx-logo__mark">Deploy</span>
             <span className="dx-logo__sub">· by suize</span>
           </button>
           <span className="dx-masthead__tag">
-            Static sites, permanent on Walrus
+            The permanent agentic web, on Walrus
           </span>
         </div>
 
         <nav className="dx-nav" aria-label="Primary">
           <button
             type="button"
-            className={`dx-navlink${
-              view.kind === 'list' || view.kind === 'detail'
-                ? ' is-current'
-                : ''
-            }`}
-            onClick={goList}
+            className={`dx-navlink${onExplore ? ' is-current' : ''}`}
+            onClick={goExplore}
+            title="Browse sites agents deployed to Walrus"
           >
-            Sites
+            Explore
           </button>
+          {auth.address && (
+            <button
+              type="button"
+              className={`dx-navlink${onDash ? ' is-current' : ''}`}
+              onClick={() => goDash('overview')}
+              title="Your deployments, storage + subscription"
+            >
+              Dashboard
+            </button>
+          )}
           <button
             type="button"
             className={`dx-navlink${
               view.kind === 'agents' ? ' is-current' : ''
             }`}
-            onClick={() => setView({ kind: 'agents' })}
-            title="Deploy from your agent (curl / TS / MCP)"
+            onClick={goAgents}
+            title="Deploy from your agent (the HTTP contract)"
           >
             API · agents
           </button>
@@ -172,36 +221,40 @@ export const App = () => {
           </div>
         )}
 
-        {view.kind === 'list' && (
-          <SitesList
-            owner={auth.address}
-            canSignIn={auth.enoki_enabled && !!auth.google_wallet}
-            connecting={auth.connecting}
-            onSignIn={auth.sign_in_google}
-            onOpen={open}
-            onAgents={() => setView({ kind: 'agents' })}
-          />
+        {view.kind === 'explore' && (
+          <ShowcaseGallery onOpen={open} onAgents={goAgents} />
         )}
+
+        {/* Console is owner-scoped: render only when signed in (the signed-out
+            effect above bounces here to explore, but guard defensively too). */}
+        {view.kind === 'dashboard' &&
+          (auth.address ? (
+            <Dashboard
+              owner={auth.address}
+              tab={view.tab}
+              onTab={t => setView({ kind: 'dashboard', tab: t })}
+              onOpen={open}
+              onAgents={goAgents}
+              onOk={ok}
+              onError={err}
+            />
+          ) : (
+            <ShowcaseGallery onOpen={open} onAgents={goAgents} />
+          ))}
 
         {view.kind === 'detail' && (
-          <SiteDetail
-            siteId={view.siteId}
-            viewerAddress={auth.address}
-            onBack={goList}
-            onLinked={ok}
-            onError={err}
-          />
+          <SiteDossier siteId={view.siteId} onBack={back} />
         )}
 
-        {view.kind === 'agents' && <AgentsView onBack={goList} />}
+        {view.kind === 'agents' && <AgentsView onBack={back} />}
 
-        {/* Admin is handle-gated: if the viewer is no longer the owner (signed out
-            / switched account), fall back to the agents view instead of a blank. */}
+        {/* Admin is handle-gated: if the viewer is no longer the owner (signed
+            out / switched account), fall back to the gallery instead of a blank. */}
         {view.kind === 'admin' &&
           (handle === ADMIN_HANDLE ? (
-            <AdminView onBack={goList} />
+            <AdminView onBack={goExplore} />
           ) : (
-            <AgentsView onBack={goList} />
+            <ShowcaseGallery onOpen={open} onAgents={goAgents} />
           ))}
       </main>
 

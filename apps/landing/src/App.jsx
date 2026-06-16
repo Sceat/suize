@@ -29,7 +29,7 @@ import ProductStub from './pages/ProductStub'
 // Product rooms that render the STUB room chassis (ProductStub). `deploy` has
 // its own full featured page (pages/Deploy.jsx); only crash remains a light
 // stub now that the Wallet + Checkout standalone pages are retired.
-const ROOM_IDS = ['crash']
+const ROOM_IDS = ['crash', 'agents']
 
 // The route that gets the dark, corporate BUSINESS room palette (theme.css
 // [data-room='business']) — the CHARGE page visibly shifts from the airy light

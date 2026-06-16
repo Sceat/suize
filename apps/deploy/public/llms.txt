@@ -3,7 +3,8 @@
 > POST a built static site, get a live hash-verified URL on decentralized
 > storage in seconds. Built for agents: one HTTP flow, no browser, no gas.
 > Deploy is a merchant on the Suize rail — every charge is paid in USDC over
-> x402, gaslessly, from your own Sui key. This file is your contract.
+> x402, gaslessly; the agent signs the payment itself with its own Sui key.
+> This file is your contract.
 
 What you get:
 
@@ -16,9 +17,10 @@ What you get:
 
 ## How you pay — one contract, every step
 
-There is one door: you speak the x402 contract directly against
-`https://api.suize.io`. No SDK, no Suize account, no API key — any Sui key
-holding USDC works, and **your address is the account**.
+You speak the x402 contract directly against `https://api.suize.io` and sign the
+payment **yourself** with your own Sui key — **your address is the account**: no
+SDK, no Suize account, no API key, no human, no pay-link. Bring USDC; you never
+need a gas token.
 
 Every paid step is the same three moves:
 
@@ -26,58 +28,91 @@ Every paid step is the same three moves:
    x402 V2 `PaymentRequired` challenge. Read the `exact` requirement on the Sui
    network: `payTo`, `asset` (USDC), `amount` (in atomic units, 6 dp), and
    `extra.outputs` — the exact balance-change set you must pay.
-2. Settle it **gaslessly**. Either let Suize build the transfer for you —
-   `POST /build { sender, payTo, amount }` → `{ bytes }` — and sign `bytes` with
-   your own key, or (if you're Sui-native) build and sign the same gasless
-   `send_funds` transfer yourself.
+2. Settle it **gaslessly**. Let Suize build the transfer for you —
+   `POST /build { sender, outputs }` (where `outputs` is the challenge's
+   `extra.outputs`, **verbatim**) → `{ bytes }` — then **sign `bytes` OPAQUELY**
+   with your own key (decode the base64 to raw bytes, sign those, re-encode the
+   signature; do **NOT** BCS-decode or re-serialize the bytes). Or, if you're
+   Sui-native, build + sign the same gasless `send_funds` transfer yourself.
 3. Retry the original request carrying `X-PAYMENT: <base64 x402 PaymentPayload>`.
 
 The payment carries no gas token, ever. The settlement's on-chain balance
-changes are your receipt — read them yourself; the rail fee, if any, is one of
-the declared outputs and visible there. Audit any digest via
+changes are your receipt — read them yourself; the rail fee is one of the
+declared outputs and visible there. Audit any digest via
 `GET https://api.suize.io/tx?digest=`.
 
-## No Sui key? Your human pays — get the result back with NO copy-paste
+## The `X-PAYMENT` wire — exact shape (no source-reading required)
 
-Every 402 challenge carries a `payLink` — a hosted pay page
-(`https://pay.suize.io?payTo=…&amount=…&mode=authorize`). Relay it to your human; they
-sign in with Google (or connect a wallet) and tap once to **authorize** the `$0.50`.
-Because the link is `mode=authorize` the page does NOT settle — it produces a
-**signed-but-unsettled** base64 x402 `PaymentPayload` (the EXACT value an `X-PAYMENT`
-header carries). You submit THAT on the upload (§1); the backend settles it during the
-deploy, **whoever paid owns the site**, and nothing is on-chain before the deploy (no
-replay; **one payment → one site**, enforced on-chain).
+`X-PAYMENT` is `base64( JSON.stringify(payload) )` — **standard base64, WITH
+padding** (not base64url, not padding-stripped). `payload` is the x402 V2
+`PaymentPayload`:
 
-The only question is how that payload gets from your human's browser back to you. DO
-THIS — it removes the copy-paste entirely whenever you run on the SAME machine as your
-human's browser (the usual case for a local/CLI agent):
+```json
+{
+  "x402Version": 2,
+  "accepted":   <the 402 challenge's accepts[0], echoed VERBATIM>,
+  "payload": {
+    "transaction": "<the base64 `bytes` from POST /build, passed through UNCHANGED>",
+    "signature":   "<your base64 signature over those raw bytes>"
+  },
+  "extensions":  <the 402 challenge's `extensions`, echoed VERBATIM (or {})>
+}
+```
 
-1. **Start a tiny local HTTP server** on `127.0.0.1` (bind to `127.0.0.1` ONLY, never
-   `0.0.0.0`) at an ephemeral port, listening on a SINGLE unguessable path you generate
-   per request — a random nonce. Example URL: `http://127.0.0.1:<port>/cb/<random-hex>`.
-2. **Append that exact URL to the `payLink` as a URL-ENCODED `returnUrl` query param.**
-   So the link you relay becomes:
-   `https://pay.suize.io?payTo=…&amount=…&mode=authorize&returnUrl=http%3A%2F%2F127.0.0.1%3A<port>%2Fcb%2F<random-hex>`
-   (`returnUrl` MUST be `http`/`https`; a `127.0.0.1` `http` URL is accepted. URL-encode
-   it — do not paste a raw `http://…` with unescaped `:` `/`.)
-3. **Relay the augmented link and WAIT** — poll your local server; ~5 min is a sensible
-   timeout. After your human authorizes, the page shows a **"Return to 127.0.0.1:<port>"**
-   button; one tap navigates their browser to
-   `http://127.0.0.1:<port>/cb/<random-hex>?payment=<base64 PaymentPayload>`.
-4. **Your server receives that GET.** Read the `payment` query param (your HTTP framework
-   URL-DECODES it for you → the raw base64 `PaymentPayload`). REJECT any request whose
-   path is not your exact nonce path. Reply with a plain "Done — you can close this tab."
-5. **Shut the server down** and use that `payment` value VERBATIM as the `X-PAYMENT`
-   header on the upload (§1). No copy-paste, no token on screen.
+Three rules that save a dozen probe round-trips:
 
-**Fallback — you have NO loopback (e.g. your human is on a DIFFERENT machine):** relay
-the BARE `payLink` (no `returnUrl`). The page shows a **"Copy authorization"** button;
-your human taps it and pastes the one value back to you — submit it as `X-PAYMENT`.
+- **`transaction` is the `/build` bytes byte-for-byte.** Decode them to raw bytes
+  ONLY to sign; never BCS-decode + re-serialize (a re-serialize with a skewed SDK
+  is exactly what makes `/verify` answer `Unknown TypeTag …`). Sign, don't re-pack.
+- **`signature`** = `base64( yourKeypair.signTransaction(rawBytes).signature )` —
+  the Sui SDK's `signTransaction` already returns the base64 signature; just embed it.
+- **`accepted` and `extensions`** are echoed from the 402 challenge unchanged — the
+  facilitator deep-equals `accepted` against the terms it issued and matches the
+  `payment-identifier` in `extensions`.
 
-## 1. Deploy a site — $0.50
+### A complete worked deploy (every step)
 
-`$0.50` (USDC) is the deploy contract amount. The deploy is **two requests**: an
-unpaid one to get the 402, then the paid multipart upload.
+```bash
+# 1 · discover the price (bare POST → 402)
+curl -s -X POST https://api.suize.io/deploy
+#   → {"x402Version":2,"accepts":[{ … ,"payTo":"0x…","amount":"500000",
+#        "extra":{"outputs":[{"to":"0x…","amount":"500000"}],"buildUrl":"https://api.suize.io/build"}}],
+#      "extensions":{"payment-identifier":{"info":{"id":"…"}}}}
+
+# 2 · build the gasless bytes — outputs = the challenge's extra.outputs, verbatim
+curl -s -X POST https://api.suize.io/build \
+  -H 'content-type: application/json' \
+  -d '{"sender":"0x<your-address>","outputs":[{"to":"0x…","amount":"500000"}]}'
+#   → {"bytes":"<base64 unsigned gasless tx>"}
+
+# 3 · SIGN opaquely (the one non-curl step, any Sui keypair / zkLogin session):
+#       sig = base64( keypair.signTransaction( fromBase64(bytes) ).signature )
+
+# 4 · X-PAYMENT = base64( JSON.stringify({
+#       x402Version: 2, accepted, payload: { transaction: bytes, signature: sig }, extensions
+#     }) )                                  // standard base64, with padding
+
+# 5 · upload the tar carrying X-PAYMENT (the SAME request as the 402; tar = ustar of your build dir)
+curl -s -X POST https://api.suize.io/deploy \
+  -H "X-PAYMENT: <the base64 payload from step 4>" \
+  -F name=my-site \
+  -F site.tar=@site.tar
+#   → {"siteId":"0x…","subdomain":"…","url":"https://….suize.site","version":1,"digest":"…"}
+```
+
+That's the entire contract — five steps, four of them plain `curl`, one local
+signature. No SDK is required beyond whatever signs a Sui transaction for you.
+
+## 1. Deploy a site — $0.50 ($0.10 for subscribers)
+
+`$0.50` (USDC) is the standard deploy amount. If the **paying account holds an active
+Deploy subscription** (stage 3), each deploy is **$0.10** instead. Two ways to use it:
+add `?sender=<your-address>` to the `POST /deploy` discovery shot and the 402 quotes
+your rate automatically; or just build a single `$0.10` (`100000`) output to the
+treasury. Either way the facilitator **re-checks your subscription against the chain at
+verify** — a non-subscriber presenting `$0.10` is rejected, and a subscriber may always
+pay the full `$0.50` too. The deploy is **two requests**: an unpaid one to get the 402,
+then the paid multipart upload.
 
 1. `POST /deploy` with no payment → **402**. Build + sign the payment with the moves
    above, but DO NOT settle it yourself — present the signed `PaymentPayload` on the
@@ -96,16 +131,23 @@ unpaid one to get the 402, then the paid multipart upload.
 
    → `{ siteId, subdomain, url, version, digest }`. Live at `url` immediately.
 
-No Sui key? Submit your human's authorized payload (from the pay-link door above) as
-the same `X-PAYMENT` header — identical path, and the human owns the site.
-
 **One payment mints one site, enforced on-chain.** A retry after a transient failure
 re-presents the same payment and re-mints (the site only consumes the payment when it
 actually mints); a second, distinct site needs a second payment. A double-submit of a
 payment that already minted a site is rejected (`409`).
 
 Read back: `GET /sites?owner=<address>` lists your sites; `GET /sites/<siteId>`
-returns one, including `expiresAtMs` (when its storage window lapses).
+returns one, including `expiresAtMs` + `storageEndEpoch` (when its storage window
+lapses, as both wall-clock ms and the Walrus end epoch).
+
+## Storage lifetime — a deploy lasts ~30 Walrus epochs
+
+A one-off deploy buys **~30 epochs** of Walrus storage (~1 month at testnet's
+~1-day epochs). The site is live at its URL for that window; after it, the storage
+lapses unless you **extend** it (stage 2) or hold a **subscription** that auto-renews
+it (stage 3). The exact end is on-chain — the binding blob's `storage.end_epoch`,
+returned as `storageEndEpoch` / `expiresAtMs` on `GET /sites/<siteId>`. Nothing is
+deleted server-side; permanence is the storage window you keep funded.
 
 ## 2. Extend storage — $0.50
 
@@ -126,7 +168,7 @@ is an on-chain subscription. A subscription is a standalone `Subscription` objec
 and it is **per-ACCOUNT, not per-site**: ONE active subscription owned by your address
 unlocks custom domains for **all** your sites (stage 4) and auto-renews **all** their
 Walrus storage so nothing ever lapses. The plan is unlimited sites, with one clause —
-up to **100 GB of total site storage** is auto-renewed (a generous safety ceiling on
+up to **100 GiB of total site storage** is auto-renewed (a generous safety ceiling on
 how much storage one plan keeps alive). The rail fee is carved on-chain inside each
 payment.
 

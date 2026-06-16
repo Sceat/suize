@@ -49,7 +49,8 @@ import {
   HandleError,
 } from "../handle";
 import { fetchMainBalanceUpdate } from "./balance";
-import { handleBrainChat } from "../brain";
+import { handleBrainChat, resolveBrainToolResult, brainAbort } from "../brain";
+import { delegateInfoFor } from "../memory";
 
 const SUI_ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/;
 
@@ -448,6 +449,25 @@ const route = async (ws: WsSocket, frame: ClientPacket): Promise<void> => {
       return;
     }
 
+    case "brainToolResult": {
+      // The wallet's result for an in-flight brainToolUse — resume the agentic
+      // loop. NOT rate-limited: it's a continuation of a turn, not a new spend.
+      // Bound to the VERIFIED ws.data.address (never a frame field) so one socket
+      // can never resolve another user's in-flight tool (F2); content is clamped
+      // server-side (F1).
+      resolveBrainToolResult(address, frame.data.toolUseId, frame.data.content, frame.data.isError);
+      return;
+    }
+
+    case "memwalDelegateRequest": {
+      // The wallet asks for its DERIVED MemWal delegate pubkey + the on-chain
+      // constants to run the one-time memory onboarding (createAccount +
+      // addDelegateKey). The delegate PRIVATE key stays server-side; identity is the
+      // verified ws.data.address (never a frame field). A cheap read — not rate-limited.
+      sendPacket(ws, { type: "memwalDelegateResponse", id, data: delegateInfoFor(address) });
+      return;
+    }
+
     default: {
       // Exhaustiveness guard — a new ClientPacket variant must be handled here.
       const _exhaustive: never = frame;
@@ -571,6 +591,12 @@ export const websocketHandler = {
     // socket closing is a no-op here (it was never registered) — it therefore can
     // never evict the authenticated incumbent's slot. This still guards the race
     // where a replaced socket's close fires after its successor took the slot.
-    if (sockets.get(address) === ws) sockets.delete(address);
+    if (sockets.get(address) === ws) {
+      sockets.delete(address);
+      // This socket was the live incumbent — unwind any in-flight brain turn it
+      // owned. Guarded by the same incumbent check so a replaced socket's late
+      // close can never abort the successor's turn.
+      brainAbort(address);
+    }
   },
 };

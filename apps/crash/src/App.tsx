@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   ConnectButton,
   useSignAndExecuteTransaction,
@@ -64,7 +65,6 @@ import { execute_sponsored, request_sponsorship } from './sponsor'
 import { connect_ws, disconnect_ws, register_signer } from './ws'
 import { CustomCursor } from './CustomCursor'
 import { CrashE05 } from './CrashE05'
-import { useHouse } from './useHouse'
 import type {
   CrashActions,
   CrashData,
@@ -444,6 +444,30 @@ const is_already_redeemed_error = (msg: string): boolean => {
     m.includes('dynamic field')
   )
 }
+
+// A TRANSIENT sponsorship/network failure (the WS reconnecting, a sponsor timeout,
+// a momentary backend hiccup) — NOT an on-chain abort. The auto-claim retries these
+// instead of surfacing a scary error and dropping the position: the claim never
+// landed, the winnings are still on-chain, and the redeem is idempotent (a stray
+// double-claim aborts as already-redeemed, handled separately). The caller checks
+// is_already_redeemed_error FIRST, so this never swallows a terminal outcome.
+const is_retryable_sponsor_error = (msg: string): boolean => {
+  const m = msg.toLowerCase()
+  return (
+    m.includes('sponsor') || // "Sponsorship unavailable / failed / timed out"
+    m.includes('not ready') ||
+    m.includes('timed out') ||
+    m.includes('timeout') ||
+    m.includes('network') ||
+    m.includes('websocket') ||
+    m.includes('connection') ||
+    m.includes('failed to fetch')
+  )
+}
+// Bound the silent auto-claim retry so a DURABLE sponsor outage eventually surfaces
+// the error rather than retrying forever; ~2.5s apart lets the WS reconnect between.
+const MAX_CLAIM_RETRIES = 5
+const CLAIM_RETRY_BACKOFF_MS = 2500
 
 // D3-ERROR — detect the "ask price out of bounds" outcome (predict abort code 7,
 // EAskPriceOutOfBounds). The side just left the mintable band: the executed ask
@@ -876,11 +900,10 @@ export function App() {
   const poll_gen = useRef(0)
 
   const [withdraw_open, set_withdraw_open] = useState(false)
-  // The bet and the house live on the SAME scrolling page. `house_view` is a
-  // pure presentation flag that smooth-scrolls the house section into focus (and
-  // dims the chart under it) — it drops NO feature; HouseMode mounts always so
-  // its TVL/position polls keep running whether it's in focus or not.
-  const [house_view, set_house_view] = useState(false)
+  // The House (PLP vault) now lives on its OWN /house tab (src/shell) — App is the
+  // Play screen only. The old in-page `house_view` smooth-scroll flag is gone; the
+  // shell router owns tab navigation. `goToMarkets` (below) routes to /markets.
+  const navigate = useNavigate()
   // The confirmed on-chain SINGLE position for the live round, or null.
   const [position, set_position] = useState<Position | null>(null)
   // Mirror of the latest confirmed position for synchronous reads in the serial
@@ -2233,8 +2256,15 @@ export function App() {
   // fresh fetch yet) — that case is NOT a terminal attempt, so the next poll must
   // be able to retry. A genuine win/loss/already-redeemed outcome is terminal.
   const claimed_ref = useRef<string | null>(null)
+  // Per-position transient-failure retry counter (keyed by the SAME identity string
+  // the auto-claim effect uses), so a sponsorship hiccup re-arms the claim a few
+  // times before the error ever surfaces. Cleared when the position resolves.
+  const claim_retries = useRef<Map<string, number>>(new Map())
   const claim = useCallback(async () => {
     if (!addr || !position || !manager_id) return
+    // The position identity — MUST match `position_identity` in the auto-claim
+    // effect (it keys both the single-attempt guard and the retry counter).
+    const pid = `${position.oracle_id}|${position.expiry_ms}|${position.strike_1e9}|U${position.up.quantity}|D${position.down.quantity}`
     // R2: take the GLOBAL WRITE LOCK SYNCHRONOUSLY here — BEFORE the first await
     // (the get_oracles fetch below) — so the on-load claim_all sweep (or another
     // write) cannot fire router::claim for this same settled position during that
@@ -2337,6 +2367,7 @@ export function App() {
       }
       // Log both sides' outcomes (winner + loser), then clear the whole position
       // (both buckets resolved at settlement).
+      claim_retries.current.delete(pid)
       log_both()
       set_position(null)
       set_cashout_bids({ up: null, down: null })
@@ -2356,11 +2387,37 @@ export function App() {
         // history row, transient double bump). The reload seed also backfills the
         // win from the PositionRedeemed events, so the row is never lost. We mirror
         // the sweep's silent continue. (HIGH 2a)
+        claim_retries.current.delete(pid)
         set_position(null)
         set_cashout_bids({ up: null, down: null })
         set_pending_bet(null)
         refresh_balances()
+      } else if (is_retryable_sponsor_error(msg)) {
+        // TRANSIENT sponsorship/network failure — the claim never landed and the
+        // winnings are still on-chain, so retry SILENTLY: keep the position, show
+        // NO error, and re-arm the auto-claim after a short backoff (long enough
+        // for the WS to reconnect). Bounded by MAX_CLAIM_RETRIES so a durable
+        // outage eventually surfaces the error instead of retrying forever.
+        const n = (claim_retries.current.get(pid) ?? 0) + 1
+        if (n <= MAX_CLAIM_RETRIES) {
+          claim_retries.current.set(pid, n)
+          set_error(null)
+          setTimeout(() => {
+            // re-arm ONLY if this is still the held settled position (not superseded)
+            if (claimed_ref.current === pid) claimed_ref.current = null
+          }, CLAIM_RETRY_BACKOFF_MS)
+          // NOTE: position is deliberately NOT cleared — the retry needs it.
+        } else {
+          // retries exhausted — surface the error and resolve terminally.
+          claim_retries.current.delete(pid)
+          set_error(`Auto-claim failed: ${msg}`)
+          set_position(null)
+          set_cashout_bids({ up: null, down: null })
+          set_pending_bet(null)
+          refresh_balances()
+        }
       } else {
+        claim_retries.current.delete(pid)
         set_error(`Auto-claim failed: ${msg}`)
         // Clear the position anyway so the effect can't re-loop on the same
         // settled position; the reconstruct re-reads truth on the next round.
@@ -2799,13 +2856,6 @@ export function App() {
       : 'UP'
     : null
 
-  // Smooth-scroll the HOUSE section into focus when the toggle flips it on (the
-  // house lives on the SAME page now, below the bet — not a separate view).
-  useEffect(() => {
-    const el = document.getElementById(house_view ? 'house-section' : 'bet-top')
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [house_view])
-
   // Countdown heartbeat: a subtle sub-pulse in the final 5s of a held round.
   const beat_ref = useRef(false)
   useEffect(() => {
@@ -2866,16 +2916,9 @@ export function App() {
     downQuoted: false,
   })
 
-  // ----- THE HOUSE (LP) LOGIC — headless hook; the ported e05 footer renders it.
-  // All vault data + the router::supply / redeem_lp write path live here exactly
-  // as before (extracted verbatim from the old HouseMode). signAndExecute is the
-  // SAME frozen gasless path; on_balance_change refreshes the shared bet balance.
-  const house = useHouse({
-    address: addr,
-    client,
-    signAndExecute,
-    on_balance_change: refresh_balances,
-  })
+  // THE HOUSE (PLP vault) LOGIC moved to the /house tab (src/shell), which owns
+  // `useHouse` directly — Play no longer renders or drives the vault. App is the
+  // pure bet + chart + cash-out screen now.
 
   // ----- "Sample bets" TAPE — ILLUSTRATIVE ticker (ZERO gameplay). No global
   // per-bet feed exists in the indexer yet, so this is SIMULATED client-side and
@@ -3225,27 +3268,7 @@ export function App() {
     // GAINS/LOSS results log (V) — most recent first, already capped.
     results,
 
-    house: {
-      tvlStr: house.vm.tvlStr,
-      sharePriceStr: house.vm.sharePriceStr,
-      shareChgStr: house.vm.shareChgStr,
-      yieldStr: house.vm.yieldStr,
-      yieldUnit: house.vm.yieldUnit,
-      projFromStr: house.vm.projFromStr,
-      projEarnStr: house.vm.projEarnStr,
-      projTierStr: house.vm.projTierStr,
-      utilizationStr: house.vm.utilizationStr,
-      yourStakeStr: house.vm.yourStakeStr,
-      ctaLabel: house.vm.ctaLabel,
-      hasPosition: house.vm.hasPosition,
-      walletDusdcUsd: house.vm.walletDusdcUsd,
-      positionValueStr: house.vm.positionValueStr,
-      supplyBusy: house.vm.supplyBusy,
-      redeemBusy: house.vm.redeemBusy,
-      canSupply: house.vm.canSupply,
-      error: house.vm.error,
-      supplyDoneAt: house.vm.supplyDoneAt,
-    },
+    // House (PLP vault) data moved to the /house tab — not in Play's CrashData.
 
     error,
     notice,
@@ -3308,25 +3331,7 @@ export function App() {
       if (tx_pending) return
       claim()
     },
-    becomeHouse: () => set_house_view(true),
-    // Wrap the house supply/redeem (router::supply / redeem_lp via useHouse) in
-    // the SAME global lock. They are async at runtime (typed as void); wrap in
-    // Promise.resolve so the finally fires on both the success and the
-    // internally-caught-error path.
-    supply: usd => {
-      if (tx_pending) return
-      set_tx_pending(true)
-      Promise.resolve(house.actions.supply(usd)).finally(() =>
-        set_tx_pending(false),
-      )
-    },
-    redeemHouse: () => {
-      if (tx_pending) return
-      set_tx_pending(true)
-      Promise.resolve(house.actions.redeem()).finally(() =>
-        set_tx_pending(false),
-      )
-    },
+    // House supply/redeem moved to the /house tab — not in Play's action surface.
     // "Withdraw" is a funnel to the Suize wallet, not an on-chain move: Crash is
     // testnet play-money, so funds management lives in the mainnet PAY wallet.
     // Opens wallet.suize.io in a new tab (keeps the Crash session/streak alive).
@@ -3334,7 +3339,11 @@ export function App() {
     addFunds: () => window.open(WALLET_URL, '_blank', 'noopener'),
     signInGoogle: () => sign_in_google(),
     signOut: () => sign_out(),
-    goToBet: () => set_house_view(false),
+    // The logo "back to bet" anchor: Play is the whole screen, so just scroll to
+    // top (the old house_view scroll target is gone).
+    goToBet: () => window.scrollTo({ top: 0, behavior: 'smooth' }),
+    // A LOCKED sibling market in Play's context strip → the Markets tab grid.
+    goToMarkets: () => navigate('/markets'),
   }
 
   return (

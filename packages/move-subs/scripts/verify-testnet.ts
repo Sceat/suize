@@ -37,6 +37,8 @@ import {
 const SUBS = PACKAGE_IDS.SUBS
 const PKG = SUBS.PACKAGE
 const CONFIG_ID = SUBS.CONFIG_OBJECT
+// VERSION-GATED (2026-06-15): create/renew/cancel each take `version: &Version` FIRST.
+const VERSION_ID = SUBS.VERSION_OBJECT
 const CLOCK_ID = '0x6'
 const AMOUNT = 50_000n // $0.05 — small enough that fee = the $0.01 floor (10_000)
 const EXPECTED_FEE = 10_000n // floor dominates 2% of $0.05 ($0.001)
@@ -163,6 +165,7 @@ async function main() {
       target: SUBS.TARGETS.CREATE,
       typeArguments: [USDC_TYPE],
       arguments: [
+        probe.object(VERSION_ID),
         probe.object(CONFIG_ID),
         probe.pure.address(merchant),
         probe.pure.u64(AMOUNT),
@@ -195,6 +198,7 @@ async function main() {
     target: SUBS.TARGETS.CREATE,
     typeArguments: [USDC_TYPE],
     arguments: [
+      createTx.object(VERSION_ID),
       createTx.object(CONFIG_ID),
       createTx.pure.address(merchant),
       createTx.pure.u64(AMOUNT),
@@ -366,6 +370,7 @@ async function main() {
     target: SUBS.TARGETS.CREATE,
     typeArguments: [USDC_TYPE],
     arguments: [
+      longCreate.object(VERSION_ID),
       longCreate.object(CONFIG_ID),
       longCreate.pure.address(merchant),
       longCreate.pure.u64(AMOUNT),
@@ -420,7 +425,7 @@ async function main() {
   cancelTx.moveCall({
     target: SUBS.TARGETS.CANCEL,
     typeArguments: [USDC_TYPE],
-    arguments: [cancelTx.object(subId)],
+    arguments: [cancelTx.object(VERSION_ID), cancelTx.object(subId)],
   })
   let cancelDigest = await trySponsor(cancelTx, SUBS_MOVE_TARGETS, 'cancel')
   const cancelSponsored = cancelDigest !== null
@@ -433,7 +438,7 @@ async function main() {
     tx2.moveCall({
       target: SUBS.TARGETS.CANCEL,
       typeArguments: [USDC_TYPE],
-      arguments: [tx2.object(subId)],
+      arguments: [tx2.object(VERSION_ID), tx2.object(subId)],
     })
     const res = await selfPaid(tx2)
     cancelDigest = res.digest
@@ -454,7 +459,7 @@ async function main() {
   cancelLong.moveCall({
     target: SUBS.TARGETS.CANCEL,
     typeArguments: [USDC_TYPE],
-    arguments: [cancelLong.object(longSubId)],
+    arguments: [cancelLong.object(VERSION_ID), cancelLong.object(longSubId)],
   })
   const longCancelRes = await selfPaid(cancelLong)
   await client.waitForTransaction({ digest: longCancelRes.digest })
@@ -480,6 +485,7 @@ function buildRenew(subId: string): Transaction {
     target: SUBS.TARGETS.RENEW,
     typeArguments: [USDC_TYPE],
     arguments: [
+      tx.object(VERSION_ID),
       tx.object(subId),
       tx.object(CONFIG_ID),
       tx.balance({ type: USDC_TYPE, balance: AMOUNT }),

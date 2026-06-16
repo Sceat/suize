@@ -1,0 +1,320 @@
+/* ==========================================================================
+   SITE DOSSIER — the Walrus PERMANENCE DOSSIER screen (apps/deploy/screens/
+   SiteDossier.tsx). Co-located, namespaced `.sx-*` ("site dossier"). TOKEN-ONLY:
+   every colour / border / shadow is a styles.css :root token, so the dark flip
+   re-skins for free. The dossier reuses the IMPRINT vocabulary (.dx-panel /
+   .dx-row / .dx-btn / .dx-hint / .dx-check / .dx-ssl) and only adds:
+     · the HERO — a live site preview framed as a browser viewport beside the
+       serif edition lockup;
+     · the Walrus / integrity ANCHOR rows;
+     · the storage EXPIRY pill + the deployed → expiry TIMELINE bar.
+   ========================================================================== */
+
+/* every dossier section animates in like the cards (staggered feel via order) */
+.sx-panel {
+  animation: ed-stream-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sx-panel {
+    animation: none;
+  }
+}
+
+/* the dossier panel titles carry a leading glyph (IconClock / IconBox / IconShield)
+   in front of the existing blue tick — keep the icon in the accent ink. */
+.sx-panel .dx-panel__title svg {
+  flex: 0 0 auto;
+  color: var(--blue);
+}
+
+/* ==========================================================================
+   HERO — the live site, framed as a browser viewport, beside the edition lockup.
+   On wide screens it's a two-column split (preview left, lockup right); it
+   collapses to a single stacked column under 860px.
+   ========================================================================== */
+.sx-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: clamp(20px, 3vw, 38px);
+  align-items: stretch;
+  margin-bottom: 26px;
+  padding-bottom: 26px;
+  border-bottom: 1px solid transparent;
+  border-image: var(--rule-fade) 1;
+}
+@media (max-width: 860px) {
+  .sx-hero {
+    grid-template-columns: 1fr;
+    gap: 22px;
+  }
+}
+
+/* ---- the browser viewport frame around the live preview ---- */
+.sx-viewport {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hair);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--card);
+  box-shadow:
+    inset 0 1px 0 rgba(var(--frost-rgb), 0.6),
+    0 26px 64px -38px rgba(10, 27, 46, 0.5);
+}
+/* the window-chrome strip — three quiet lamps + the live host */
+.sx-viewport__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 13px;
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--hair);
+}
+.sx-viewport__lamps {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.sx-viewport__lamps span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--hair-strong);
+}
+.sx-viewport__lamps span:first-child {
+  background: var(--blue);
+  opacity: 0.55;
+}
+.sx-viewport__host {
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+}
+/* the screen — the live preview fills it; the whole screen opens the site. */
+.sx-viewport__screen {
+  display: block;
+  position: relative;
+  text-decoration: none;
+  background: var(--paper-3);
+}
+/* a faint inner top-light so the framed page reads as inset glass */
+.sx-viewport__screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 1px 0 rgba(var(--frost-rgb), 0.5);
+}
+
+/* ---- the edition lockup beside the viewport ---- */
+.sx-lockup {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 0;
+  align-self: center;
+}
+.sx-title {
+  font-family: var(--serif);
+  font-size: clamp(26px, 3.4vw, 38px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.04;
+  color: var(--ink);
+  margin: 8px 0 0;
+  word-break: break-word;
+}
+/* the live URL — mono, an underlined-on-hover link, with the copy button beside */
+.sx-url {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  margin-top: 14px;
+  text-decoration: none;
+}
+.sx-url__text {
+  font-size: 13px;
+  color: var(--blue-deep);
+  word-break: break-all;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.16s ease;
+}
+.sx-url:hover .sx-url__text {
+  border-bottom-color: var(--hair-blue);
+}
+.sx-url__copy {
+  display: inline-flex;
+  margin-top: 8px;
+}
+/* the green integrity seal under the URL */
+.sx-hero__seal {
+  margin-top: 16px;
+}
+.sx-seal {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 100px;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--bull-ink);
+  border: 1px solid var(--bull-edge);
+  background: var(--bull-fill);
+}
+.sx-seal svg {
+  flex: 0 0 auto;
+}
+.sx-hero__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+/* ==========================================================================
+   STORAGE LIFETIME — the expiry pill + the deployed → expiry timeline.
+   ========================================================================== */
+.sx-expiry-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+/* the live-expiry pill — neutral by default, amber <14d, red <3d (token tones) */
+.sx-expiry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: 100px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: -0.01em;
+  border: 1px solid var(--hair);
+  color: var(--ink-2);
+  background: var(--paper-2);
+  white-space: nowrap;
+}
+.sx-expiry.is-ok {
+  color: var(--bull-ink);
+  border-color: var(--bull-edge);
+  background: var(--bull-fill);
+}
+.sx-expiry.is-amber {
+  color: var(--warn-ink);
+  border-color: var(--warn-edge);
+  background: var(--warn-fill);
+}
+.sx-expiry.is-red {
+  color: var(--bear-ink);
+  border-color: var(--bear-edge);
+  background: var(--bear-fill);
+}
+.sx-expiry.is-unknown {
+  color: var(--ink-3);
+}
+
+/* the timeline — a slim track with an elapsed-time fill, ends labelled in mono */
+.sx-timeline {
+  margin: 14px 0 2px;
+}
+.sx-timeline__track {
+  position: relative;
+  height: 6px;
+  border-radius: 100px;
+  background: var(--paper-3);
+  border: 1px solid var(--hair-2);
+  overflow: hidden;
+}
+.sx-timeline__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 100px;
+  background: var(--blue);
+  opacity: 0.85;
+}
+.sx-timeline__fill.is-ok {
+  background: var(--bull-ink);
+}
+.sx-timeline__fill.is-amber {
+  background: var(--warn-ink);
+}
+.sx-timeline__fill.is-red {
+  background: var(--bear-ink);
+}
+.sx-timeline__ends {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 7px;
+}
+.sx-timeline__end {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: -0.01em;
+  color: var(--ink-4);
+}
+
+/* ==========================================================================
+   INTEGRITY — the on-chain manifest-hash anchor block.
+   ========================================================================== */
+.sx-anchor {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--hair);
+  border-radius: 4px;
+  background: var(--paper-3);
+  box-shadow: inset 0 1px 0 rgba(var(--frost-rgb), 0.5);
+}
+.sx-anchor__k {
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  flex: 0 0 auto;
+}
+.sx-anchor__hash {
+  flex: 1 1 240px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ink);
+  word-break: break-all;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+/* the green integrity note + its seal glyph */
+.sx-integrity__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+.sx-integrity__seal {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: 50%;
+  color: var(--bull-ink);
+  border: 1px solid var(--bull-edge);
+  background: var(--bull-fill);
+}

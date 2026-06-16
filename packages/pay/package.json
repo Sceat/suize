@@ -1,6 +1,6 @@
 {
   "name": "@suize/pay",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Accept agent payments over HTTP 402 on Sui — one middleware, vanilla x402 V2, no keys, no signup. Your Sui address is your account.",
   "private": false,
   "type": "module",
@@ -9,7 +9,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./subs": "./src/subs.ts"
+    "./subs": "./src/subs.ts",
+    "./webhook": "./src/webhook.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

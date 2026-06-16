@@ -386,6 +386,20 @@ export function SendSheet({
               </>
             )}
           </div>
+
+          <div className="rd-rule" />
+
+          <div className="rd-sheet__soonrow">
+            <span className="rd-label">{ACTIONS.send.payoutsLabel}</span>
+            <div className="rd-sheet__soonchips">
+              {ACTIONS.send.payouts.map((s) => (
+                <span className="rd-chip rd-chip--soon" key={s}>
+                  {s}
+                  <span className="rd-soon">{ACTIONS.addFunds.soonTag}</span>
+                </span>
+              ))}
+            </div>
+          </div>
         </>
       )}
     </Sheet>

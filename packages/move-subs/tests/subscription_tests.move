@@ -23,7 +23,7 @@
 /// (`sub::ETooEarly`), so importing would only yield "unused alias" warnings.
 module subs::subscription_tests;
 
-use subs::subscription::{Self as sub, Subscription, SubsConfig, SubsAdminCap};
+use subs::subscription::{Self as sub, Subscription, SubsConfig, SubsAdminCap, Version};
 use sui::balance;
 use sui::clock::{Self, Clock};
 use sui::event;
@@ -102,9 +102,11 @@ fun set_treasury_as_admin(scenario: &mut Scenario, addr: address) {
 /// As OWNER, create a subscription paying the first period inline (push `amount`).
 fun create_as_owner(scenario: &mut Scenario, clock: &Clock, amount: u64, period_ms: u64) {
     scenario.next_tx(OWNER);
+    let version = scenario.take_shared<Version>();
     let config = scenario.take_shared<SubsConfig>();
-    sub::create<TUSD>(&config, MERCHANT, amount, period_ms, REF, pay(amount), clock, scenario.ctx());
+    sub::create<TUSD>(&version, &config, MERCHANT, amount, period_ms, REF, pay(amount), clock, scenario.ctx());
     ts::return_shared(config);
+    ts::return_shared(version);
 }
 
 /// As `who`, renew the OWNER's subscription (the object is single-owner Party →
@@ -112,9 +114,11 @@ fun create_as_owner(scenario: &mut Scenario, clock: &Clock, amount: u64, period_
 fun renew_as(scenario: &mut Scenario, who: address, clock: &Clock, amount: u64) {
     scenario.next_tx(who);
     let mut s = scenario.take_from_address<Subscription<TUSD>>(OWNER);
+    let version = scenario.take_shared<Version>();
     let config = scenario.take_shared<SubsConfig>();
-    sub::renew<TUSD>(&mut s, &config, pay(amount), clock, scenario.ctx());
+    sub::renew<TUSD>(&version, &mut s, &config, pay(amount), clock, scenario.ctx());
     ts::return_shared(config);
+    ts::return_shared(version);
     ts::return_to_address(OWNER, s);
 }
 
@@ -167,9 +171,11 @@ fun test_create_happy_and_event() {
 fun test_create_zero_amount_aborts() {
     let (mut scenario, clock) = begin();
     scenario.next_tx(OWNER);
+    let version = scenario.take_shared<Version>();
     let config = scenario.take_shared<SubsConfig>();
-    sub::create<TUSD>(&config, MERCHANT, 0, PERIOD_MS, REF, pay(0), &clock, scenario.ctx());
+    sub::create<TUSD>(&version, &config, MERCHANT, 0, PERIOD_MS, REF, pay(0), &clock, scenario.ctx());
     ts::return_shared(config);
+    ts::return_shared(version);
     cleanup(scenario, clock);
 }
 
@@ -179,9 +185,11 @@ fun test_create_zero_amount_aborts() {
 fun test_create_zero_period_aborts() {
     let (mut scenario, clock) = begin();
     scenario.next_tx(OWNER);
+    let version = scenario.take_shared<Version>();
     let config = scenario.take_shared<SubsConfig>();
-    sub::create<TUSD>(&config, MERCHANT, AMOUNT, 0, REF, pay(AMOUNT), &clock, scenario.ctx());
+    sub::create<TUSD>(&version, &config, MERCHANT, AMOUNT, 0, REF, pay(AMOUNT), &clock, scenario.ctx());
     ts::return_shared(config);
+    ts::return_shared(version);
     cleanup(scenario, clock);
 }
 
@@ -191,9 +199,11 @@ fun test_create_zero_period_aborts() {
 fun test_create_overpay_aborts() {
     let (mut scenario, clock) = begin();
     scenario.next_tx(OWNER);
+    let version = scenario.take_shared<Version>();
     let config = scenario.take_shared<SubsConfig>();
-    sub::create<TUSD>(&config, MERCHANT, AMOUNT, PERIOD_MS, REF, pay(AMOUNT + 1), &clock, scenario.ctx());
+    sub::create<TUSD>(&version, &config, MERCHANT, AMOUNT, PERIOD_MS, REF, pay(AMOUNT + 1), &clock, scenario.ctx());
     ts::return_shared(config);
+    ts::return_shared(version);
     cleanup(scenario, clock);
 }
 
@@ -203,9 +213,11 @@ fun test_create_overpay_aborts() {
 fun test_create_underpay_aborts() {
     let (mut scenario, clock) = begin();
     scenario.next_tx(OWNER);
+    let version = scenario.take_shared<Version>();
     let config = scenario.take_shared<SubsConfig>();
-    sub::create<TUSD>(&config, MERCHANT, AMOUNT, PERIOD_MS, REF, pay(AMOUNT - 1), &clock, scenario.ctx());
+    sub::create<TUSD>(&version, &config, MERCHANT, AMOUNT, PERIOD_MS, REF, pay(AMOUNT - 1), &clock, scenario.ctx());
     ts::return_shared(config);
+    ts::return_shared(version);
     cleanup(scenario, clock);
 }
 
@@ -216,10 +228,12 @@ fun test_create_underpay_aborts() {
 fun test_create_period_too_long_aborts() {
     let (mut scenario, clock) = begin();
     scenario.next_tx(OWNER);
+    let version = scenario.take_shared<Version>();
     let config = scenario.take_shared<SubsConfig>();
     // 10 years + 1ms — one past MAX_PERIOD_MS (315_360_000_000).
-    sub::create<TUSD>(&config, MERCHANT, AMOUNT, 315_360_000_001, REF, pay(AMOUNT), &clock, scenario.ctx());
+    sub::create<TUSD>(&version, &config, MERCHANT, AMOUNT, 315_360_000_001, REF, pay(AMOUNT), &clock, scenario.ctx());
     ts::return_shared(config);
+    ts::return_shared(version);
     cleanup(scenario, clock);
 }
 
@@ -232,9 +246,11 @@ fun test_create_wrong_coin_aborts() {
     pin_coin_as_admin<TUSD>(&mut scenario);
     // A WRONG-coin create (exact amount, so it passes EWrongAmount) must abort EWrongCoin.
     scenario.next_tx(OWNER);
+    let version = scenario.take_shared<Version>();
     let config = scenario.take_shared<SubsConfig>();
-    sub::create<WRONG>(&config, MERCHANT, AMOUNT, PERIOD_MS, REF, pay_wrong(AMOUNT), &clock, scenario.ctx());
+    sub::create<WRONG>(&version, &config, MERCHANT, AMOUNT, PERIOD_MS, REF, pay_wrong(AMOUNT), &clock, scenario.ctx());
     ts::return_shared(config);
+    ts::return_shared(version);
     cleanup(scenario, clock);
 }
 
@@ -485,8 +501,10 @@ fun test_cancel_emits_paid_until_and_destroys() {
     let sub_id;
     {
         let s = scenario.take_from_address<Subscription<TUSD>>(OWNER);
+        let version = scenario.take_shared<Version>();
         sub_id = object::id(&s);
-        sub::cancel<TUSD>(s, scenario.ctx());
+        sub::cancel<TUSD>(&version, s, scenario.ctx());
+        ts::return_shared(version);
     };
 
     let evs = event::events_by_type<sub::SubscriptionCancelled>();
@@ -534,6 +552,62 @@ fun test_set_fee_updates_config() {
         assert!(sub::fee_floor(&config) == 5_000, 1);
         ts::return_shared(config);
         scenario.return_to_sender(cap);
+    };
+    cleanup(scenario, clock);
+}
+
+// === VERSION GATE ===
+
+#[test]
+#[expected_failure(abort_code = sub::EWrongVersion)]
+/// After an emergency `freeze_all` (version → 0), EVERY user entry is fenced: a
+/// `create` aborts `EWrongVersion` at the `assert_latest` first line. The admin takes
+/// the cap + the shared `Version` and freezes; the subsequent create (via the helper,
+/// which now threads `&version`) aborts.
+fun test_create_aborts_when_frozen() {
+    let (mut scenario, clock) = begin();
+    scenario.next_tx(OWNER);
+    {
+        let cap = scenario.take_from_sender<SubsAdminCap>();
+        let mut version = scenario.take_shared<Version>();
+        sub::freeze_all(&cap, &mut version);
+        ts::return_shared(version);
+        scenario.return_to_sender(cap);
+    };
+    // Now frozen → this create aborts EWrongVersion.
+    create_as_owner(&mut scenario, &clock, AMOUNT, PERIOD_MS);
+    cleanup(scenario, clock);
+}
+
+#[test]
+#[expected_failure(abort_code = sub::EWrongVersion)]
+/// `migrate` aborts `EWrongVersion` when the shared `Version` is already at
+/// `PACKAGE_VERSION` (no double-migrate): at genesis the value is 1, so migrating
+/// asserts `value < PACKAGE_VERSION` and fails.
+fun test_migrate_rejects_when_current() {
+    let (mut scenario, clock) = begin();
+    scenario.next_tx(OWNER);
+    {
+        let cap = scenario.take_from_sender<SubsAdminCap>();
+        let mut version = scenario.take_shared<Version>();
+        sub::migrate(&cap, &mut version); // already at PACKAGE_VERSION (1) → EWrongVersion
+        ts::return_shared(version);
+        scenario.return_to_sender(cap);
+    };
+    cleanup(scenario, clock);
+}
+
+#[test]
+/// At genesis the shared `Version` is `PACKAGE_VERSION` (1): `assert_latest` passes and
+/// `version_value` reads 1.
+fun test_version_value_at_genesis() {
+    let (mut scenario, clock) = begin();
+    scenario.next_tx(OWNER);
+    {
+        let version = scenario.take_shared<Version>();
+        sub::assert_latest(&version);
+        assert!(sub::version_value(&version) == 1, 0);
+        ts::return_shared(version);
     };
     cleanup(scenario, clock);
 }

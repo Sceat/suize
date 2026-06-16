@@ -19,10 +19,9 @@
 //   separate deploy-auth nonce/signature: the payment's signature already proves who
 //   paid, and the RECOVERED PAYER becomes the on-chain `owner` (whoever pays, owns).
 //
-// The no-Sui-key door is the SAME path: pay.suize.io (mode=authorize) returns the
-// human's signed-but-UNSETTLED payload; the agent submits THAT as X-PAYMENT; the deploy
-// settles it here, owner = the human (the recovered payer). Nothing is public before the
-// deploy, so there is nothing to replay — no nonce, no digest-as-proof.
+// TWO DOORS, ONE WIRE: the agent signs the payment ITSELF — with its own Sui key (the
+// Sui-aware door) or its Suize zkLogin session via the MCP (the Suize door). Both submit
+// the SAME X-PAYMENT; owner = the recovered payer. There is NO human/relay path.
 //
 // ONE-SITE-PER-PAYMENT is ENFORCED ON-CHAIN: create_site records the settled payment
 // digest in a shared SiteDigestRegistry and aborts EDigestUsed on a duplicate (the
@@ -34,6 +33,7 @@
 // billing" mode. The moment the treasury resolves, the charge gate lights up.
 import {
   DEPLOY_CHARGE_AMOUNT,
+  DEPLOY_PREMIUM_CHARGE_AMOUNT,
   caip2,
   type SuiNetwork,
 } from "@suize/shared";
@@ -58,8 +58,14 @@ import { treasuryAddress, treasuryReady } from "../facilitator/fees";
 // ---------------------------------------------------------------------------
 
 const NETWORK: Network = caip2(config.suiNetwork as SuiNetwork);
-/** The deploy price as the x402 wire's decimal USDC string ("0.5" for 500_000). */
-const DEPLOY_PRICE_DECIMAL = formatUsdc(BigInt(DEPLOY_CHARGE_AMOUNT));
+/** An atomic USDC amount → the x402 wire's decimal string ("0.5" for 500_000). */
+const priceDecimal = (amount: number): string => formatUsdc(BigInt(amount));
+/** The STANDARD deploy price as the decimal wire string ("0.5" for 500_000). */
+const DEPLOY_PRICE_DECIMAL = priceDecimal(DEPLOY_CHARGE_AMOUNT);
+/** The PREMIUM (active-subscriber) deploy price ("0.1" for 100_000). */
+const DEPLOY_PREMIUM_PRICE_DECIMAL = priceDecimal(DEPLOY_PREMIUM_CHARGE_AMOUNT);
+const STD_AMOUNT_STR = BigInt(DEPLOY_CHARGE_AMOUNT).toString();
+const PREMIUM_AMOUNT_STR = BigInt(DEPLOY_PREMIUM_CHARGE_AMOUNT).toString();
 
 /** True once the Deploy merchant (= the treasury) is resolvable — the charge gate. */
 export const chargeGateReady = (): Promise<boolean> => treasuryReady();
@@ -92,30 +98,17 @@ const originOf = (requestUrl: string, forwardedProto?: string | null): string =>
     if (forwardedProto === "https" || !local) u.protocol = "https:";
     return u.origin;
   } catch {
-    return config.payPageUrl; // last-resort fallback (never hit in practice)
+    return "https://api.suize.io"; // last-resort fallback (never hit in practice)
   }
 };
 
-/** The deploy rider appended to the 402 body's error (the whoever-pays-owns contract).
- * Names BOTH doors — they are the SAME path: present a signed X-PAYMENT payload. */
+/** The deploy rider appended to the 402 body's error (the whoever-pays-owns contract). */
 const DEPLOY_RIDER =
   "Suize Deploy: the payment IS the authorization — whoever pays owns the site (the " +
-  "site's owner = the recovered payer). Retry as multipart/form-data with fields " +
-  "name + site.tar plus the X-PAYMENT header carrying the b64 PaymentPayload. No Sui " +
-  "key? Hand the payLink in this challenge to your human; it returns a SIGNED-UNSETTLED " +
-  "payload — submit THAT as X-PAYMENT and the human owns the site. One payment mints one site.";
-
-/** Build the hosted pay-page URL for the no-Sui-key door (pure string assembly — same
- * shape POST /checkout formats). `mode=authorize` tells the pay page to SIGN-but-NOT-
- * settle and hand the signed payload back (the agent submits it as X-PAYMENT, the deploy
- * settles it). No secret memo/nonce — nothing is on-chain before the deploy, so there is
- * nothing to replay. */
-const deployPayLink = (merchant: string): string =>
-  `${config.payPageUrl}?${new URLSearchParams({
-    payTo: merchant,
-    amount: DEPLOY_PRICE_DECIMAL,
-    mode: "authorize",
-  }).toString()}`;
+  "site's owner = the recovered payer). Sign the gasless payment yourself — with your " +
+  "own Sui key, or your Suize session via the MCP — and retry as multipart/form-data " +
+  "with fields name + site.tar plus the X-PAYMENT header carrying the b64 PaymentPayload. " +
+  "One payment mints one site.";
 
 /**
  * Mint the x402 V2 PaymentRequired POST /deploy answers when unpaid. The merchant
@@ -126,14 +119,18 @@ const deployPayLink = (merchant: string): string =>
 export const deployRequirements = async (
   requestUrl: string,
   forwardedProto?: string | null,
-): Promise<(PaymentRequired & { error: string; payLink: string }) | null> => {
+  /** Quote the discounted $0.10 rate (the caller resolved the payer is a Deploy
+   * subscriber, e.g. from a `?sender=` hint). The verify still RE-checks premium —
+   * this only makes the challenge self-describing. */
+  premium = false,
+): Promise<(PaymentRequired & { error: string }) | null> => {
   const merchant = await deployMerchant();
   if (!merchant) return null; // gate off — caller falls through to un-gated deploy
   const origin = originOf(requestUrl, forwardedProto);
   const body = mintPaymentRequired(
     {
       to: merchant,
-      price: DEPLOY_PRICE_DECIMAL,
+      price: premium ? DEPLOY_PREMIUM_PRICE_DECIMAL : DEPLOY_PRICE_DECIMAL,
       facilitator: origin,
       network: NETWORK,
     },
@@ -141,12 +138,8 @@ export const deployRequirements = async (
     // NOTE: no `outputs` → mintPaymentRequired builds the single full-amount output
     // (first-party). The fee /terms tier is intentionally skipped here.
   );
-  // The NO-SUI-KEY door: hand the human the pay-link (mode=authorize). The page returns
-  // a SIGNED-UNSETTLED payload the agent submits as X-PAYMENT — the SAME door as a
-  // Sui-aware agent. No secret nonce: nothing is public before the deploy.
   return {
     ...body,
-    payLink: deployPayLink(merchant),
     error: `payment required. ${DEPLOY_RIDER}`,
   };
 };
@@ -209,16 +202,17 @@ const deepEqual = (a: unknown, b: unknown): boolean => {
 };
 
 /** Build the requirement WE expect the payer to have accepted (the single full-amount
- * output to the resolved Deploy treasury). The presented `accepted` must deep-equal it. */
-const expectedRequirement = (merchant: string): PaymentRequirements =>
+ * output to the resolved Deploy treasury, for the given decimal price). The presented
+ * `accepted` must deep-equal it. */
+const expectedRequirement = (merchant: string, price: string): PaymentRequirements =>
   mintPaymentRequired(
-    { to: merchant, price: DEPLOY_PRICE_DECIMAL, network: NETWORK },
+    { to: merchant, price, network: NETWORK },
     { paymentId: "pay_" + "0".repeat(32) }, // id is NOT compared (stripped below)
   ).accepts[0];
 
-/** The single declared output (full amount to the Deploy treasury). */
-const deployOutputs = (merchant: string): Output[] => [
-  { to: merchant, amount: BigInt(DEPLOY_CHARGE_AMOUNT).toString() },
+/** The single declared output (the chosen amount to the Deploy treasury). */
+const deployOutputs = (merchant: string, amountStr: string): Output[] => [
+  { to: merchant, amount: amountStr },
 ];
 
 /** A verified (NOT-yet-settled) deploy payment — the payer the recovered signature
@@ -245,6 +239,10 @@ export interface VerifiedDeployPayment {
  */
 export const gateDeployPayment = async (
   headerValue: string,
+  /** Resolve whether a payer holds an active Deploy subscription (→ may pay the
+   * discounted $0.10 rate). Default: never premium (the extend route keeps the flat
+   * $0.50). The main deploy route passes `hasValidDeploySub`. */
+  isPremium: (payer: string) => Promise<boolean> = async () => false,
 ): Promise<VerifiedDeployPayment> => {
   const merchant = await deployMerchant();
   if (!merchant) throw new DeployPaymentError(chargeGateReason(), 503);
@@ -254,15 +252,48 @@ export const gateDeployPayment = async (
     throw new DeployPaymentError("malformed X-PAYMENT payload", 402, true);
   }
 
-  // The presented `accepted` must match OUR terms on the LOAD-BEARING fields:
-  // scheme/network/asset/payTo/amount + the declared outputs (the single full-amount
-  // output to the Deploy treasury). A tampered split is rejected before any chain
-  // read. The advisory fields (extra.buildUrl, the payment-identifier extension) are
-  // NOT compared — they don't affect settlement, and the buildUrl legitimately
-  // varies by origin (the challenge self-targets the request host).
-  const expected = expectedRequirement(merchant);
+  // Recover the payer FIRST — the allowed price depends on whether THIS payer is a
+  // Deploy subscriber. The recovered payer is BOTH the deploy authorization (the
+  // payload is the private signed authorization) AND the on-chain owner.
+  let payer: string;
+  try {
+    payer = await recoverPayer(payload.payload.transaction, payload.payload.signature);
+  } catch {
+    throw new DeployPaymentError("unrecoverable payment signature", 402, true);
+  }
+
+  // Which price did the payer present, and are they ALLOWED it? The standard $0.50 is
+  // always allowed; the discounted $0.10 requires an active Deploy subscription (read
+  // from chain). We only pay the premium-check RPC when the discounted amount is
+  // presented — a plain $0.50 deploy skips it.
   const accepted = payload.accepted as PaymentRequirements | undefined;
-  const ours = deployOutputs(merchant);
+  const amountStr = accepted?.amount;
+  if (amountStr === PREMIUM_AMOUNT_STR) {
+    if (!(await isPremium(payer))) {
+      throw new DeployPaymentError(
+        "the $0.10 rate requires an active Deploy subscription on the paying account",
+        402,
+        true,
+      );
+    }
+  } else if (amountStr !== STD_AMOUNT_STR) {
+    throw new DeployPaymentError(
+      "presented amount is not a deploy price ($0.50, or $0.10 for subscribers)",
+      402,
+      true,
+    );
+  }
+
+  // The presented `accepted` must match OUR terms (rebuilt for the chosen amount) on
+  // the LOAD-BEARING fields: scheme/network/asset/payTo/amount + the single declared
+  // output to the Deploy treasury. A tampered split is rejected before any chain read.
+  // The advisory fields (extra.buildUrl, the payment-identifier extension) are NOT
+  // compared — they don't affect settlement, and the buildUrl varies by origin.
+  // amountStr is already proven to be exactly STD or PREMIUM, so pick its decimal
+  // constant directly (no bigint→Number→string laundering).
+  const priceStr = amountStr === PREMIUM_AMOUNT_STR ? DEPLOY_PREMIUM_PRICE_DECIMAL : DEPLOY_PRICE_DECIMAL;
+  const expected = expectedRequirement(merchant, priceStr);
+  const ours = deployOutputs(merchant, amountStr);
   const termsMatch =
     !!accepted &&
     accepted.scheme === expected.scheme &&
@@ -275,20 +306,11 @@ export const gateDeployPayment = async (
     throw new DeployPaymentError("presented terms do not match the Deploy quote", 402, true);
   }
 
-  // Recover the payer from the signature — this is BOTH the deploy authorization
-  // (the payload is the private signed authorization) AND the on-chain owner.
-  let payer: string;
-  try {
-    payer = await recoverPayer(payload.payload.transaction, payload.payload.signature);
-  } catch {
-    throw new DeployPaymentError("unrecoverable payment signature", 402, true);
-  }
-
   // The requirements the facilitator core verifies against (the single declared
   // output — the source of truth for the exact-fee check).
   const requirements: PaymentRequirements = {
     ...expected,
-    extra: { ...expected.extra, outputs: deployOutputs(merchant) },
+    extra: { ...expected.extra, outputs: ours },
   };
 
   // VERIFY (simulate-only) — exact split + recovered signer == simulated sender +

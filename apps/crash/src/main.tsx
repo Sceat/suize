@@ -11,7 +11,9 @@ import { Analytics } from '@vercel/analytics/react'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { App } from './App'
 import { Shell } from './shell/Shell'
-import { Markets, House, Portfolio, Leaderboard, Agent } from './shell/pages'
+import { Markets, House, Portfolio } from './shell/pages'
+import { Leaderboard } from './screens/Leaderboard'
+import { AgentScreen } from './screens/AgentScreen'
 import './styles.css'
 import { CRASH_NETWORK, RPC_URL } from './config'
 import { setup_enoki } from './enoki'
@@ -45,7 +47,7 @@ const router = createBrowserRouter([
       { path: '/house', element: <House /> },
       { path: '/portfolio', element: <Portfolio /> },
       { path: '/leaderboard', element: <Leaderboard /> },
-      { path: '/agent', element: <Agent /> },
+      { path: '/agent', element: <AgentScreen /> },
       { path: '*', element: <App /> },
     ],
   },

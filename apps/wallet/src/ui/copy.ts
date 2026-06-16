@@ -273,6 +273,10 @@ export const ACTIONS = {
     claimBase: 'wallet.suize.io/claim/',
     claimNote: 'Anyone with this link can claim the money — share it however you like.',
     sent: 'Sent',
+    /** off-ramp destinations — DETECTED roadmap, shown as quiet "Soon" chips so the
+     *  user knows cash-out is coming (consumer words, no tech names). */
+    payoutsLabel: 'Cash out',
+    payouts: ['To bank account', 'To credit card'],
   },
   topUp: {
     title: 'Top up sub-account',
@@ -322,7 +326,37 @@ export const CONSOLE = {
     { id: 'overview', label: 'Overview' },
     { id: 'revenue', label: 'Revenue' },
     { id: 'subscriptions', label: 'Subscriptions' },
+    { id: 'profile', label: 'Profile' },
   ] as const,
+  /** PROFILE — the public brand identity (a Business Profile NFT). Its logo + name show
+   *  in the agents directory; the full card (banner + description + site) runs your ads. */
+  profile: {
+    eyebrow: 'Public brand',
+    title: 'Your business profile',
+    blurb:
+      'One identity, reused everywhere agents see you — your logo and name in the directory, your full card on any ad you run.',
+    fields: {
+      name: { label: 'Business name', placeholder: 'Acme AI' },
+      website: { label: 'Website', placeholder: 'https://acme.ai' },
+      imageUrl: { label: 'Logo image URL', placeholder: 'https://…/logo.png' },
+      bannerUrl: { label: 'Banner image URL', placeholder: 'https://…/banner.png' },
+      description: {
+        label: 'Description',
+        placeholder: 'What you sell to agents — one or two lines.',
+        fromSite: 'Pulled from your website',
+        fetching: 'Reading your website…',
+        empty: "Add your website above — we'll use its description.",
+        noneFound: 'No description found on that site.',
+      },
+    },
+    mint: 'Create profile · $0.10',
+    edit: 'Save changes · $0.10',
+    feeNote: 'A one-time $0.10, paid from your wallet — keeps the directory clean.',
+    minting: 'Signing…',
+    nameRequired: 'Add a business name first.',
+    livePreview: 'Directory preview',
+    mintedNote: 'Live — your profile is on-chain and already powering your directory row.',
+  },
   balance: {
     label: 'Available to spend',
     amount: 4250.0,
@@ -433,9 +467,9 @@ export const BUSINESS = {
     'Nothing to report yet — the moment an agent pays you, I can break it all down here.',
 } as const;
 
-// ── THE SSO CONFIRM POPUP (/confirm) — the suite's money gate ──────────────────
-// Opened by other *.suize.io products (pay.suize.io) via the bridge; this window
-// builds-what-it-displays and signs locally. Strings only — flow in bridge/ConfirmPay.
+// ── THE SUBSCRIBE CONFIRM POPUP (/confirm-subscribe) — the suite's recurring gate ─
+// Opened by other *.suize.io products via the bridge; this window builds-what-it-
+// displays and signs locally. Strings only — flow in bridge/ConfirmSubscribe.
 
 export const CONFIRM = {
   label: 'Payment request',

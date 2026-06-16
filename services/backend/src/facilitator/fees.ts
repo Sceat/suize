@@ -3,19 +3,20 @@
 // New architecture (vanilla x402, account.move DEAD): the fee is NOT taken on-chain.
 // The facilitator DECLARES a fee split in PaymentRequirements.extra.outputs, the
 // payer's gasless send_funds PTB must credit each leg EXACTLY (assertOutputsExact
-// in @suize/x402 enforces it), and a single-output payment (no merchant in the
-// registry) is the FREE tier. So this module owns two things:
+// in @suize/x402 enforces it). NO FREE TIER (owner law 2026-06-14: the fee is NEVER
+// waived) — EVERY payment carries the fee: an unregistered merchant pays the default
+// 2%, and the registry only customizes the rate. So this module owns two things:
 //   (1) WHO is the treasury — RESOLVED LIVE from `treasury@suize` (the single source
 //       of truth), cached + fail-closed. No hardcoded address anywhere (owner law
 //       2026-06-14: "fees go to whatever treasury.suize.sui resolves to; we abstract");
-//   (2) the SPLIT for a fee-tier merchant — outputsFor(payTo, amount): the
-//       [merchant net, treasury fee] legs, with the 2% + $0.01-floor math and the
-//       same-address MERGE that keeps the outputs exact-matchable.
+//   (2) the SPLIT for EVERY merchant — outputsFor(payTo, amount): the [merchant net,
+//       treasury fee] legs, with the 2% + $0.01-floor math and the same-address MERGE
+//       that keeps the outputs exact-matchable. The only single-output results are
+//       structural (merchant==treasury, or a sub-unit amount), never a free tier.
 //
 // FAIL-CLOSED: if `treasury@suize` can't be resolved (a SuiNS miss, or no record yet)
-// the treasury is "" — we REFUSE to mint fee-tier terms (a fee with an unknown
-// recipient would silently burn the rake) and the deploy charge gate stays off.
-// Free-tier (single-output) verify/settle never touch this.
+// the treasury is "" — we REFUSE to mint terms (a fee with an unknown recipient would
+// silently burn the rake) and the deploy charge gate stays off.
 //
 // TRADEOFF (owner decision 2026-06-14, reversing 2026-06-12): runtime SuiNS resolution
 // reopens the attack surface (a hijacked `treasury@suize` redirects fees). Accepted for
@@ -47,10 +48,10 @@ export type FeeOutput = { to: string; amount: string };
 type MerchantTerms = { feeBps: bigint };
 
 // ── merchant registry — env-driven, parsed once ──────────────────────────────
-// SUIZE_MERCHANTS is a JSON map { "0x<addr>": { "feeBps": 200 }, … }. ONLY the
-// addresses in this map are fee-tier merchants; every other payTo is free tier
-// (single output, no rake). A malformed entry is skipped loudly (logged), never
-// fatal — a bad env line must not take the whole facilitator down.
+// SUIZE_MERCHANTS is a JSON map { "0x<addr>": { "feeBps": 250 }, … } of CUSTOM rate
+// overrides. A payTo NOT in the map pays the DEFAULT 2% — there is NO free tier (owner
+// law 2026-06-14: the fee is never waived). A malformed entry is skipped loudly (logged),
+// never fatal — a bad env line must not take the whole facilitator down.
 const parseMerchants = (raw: string | undefined): Map<string, MerchantTerms> => {
   const map = new Map<string, MerchantTerms>();
   if (!raw || !raw.trim()) return map;
@@ -83,7 +84,8 @@ const parseMerchants = (raw: string | undefined): Map<string, MerchantTerms> => 
 
 const MERCHANTS = parseMerchants(config.suizeMerchants);
 
-/** Whether `payTo` is a registered fee-tier merchant (else it is free tier). */
+/** Whether `payTo` has a CUSTOM rate override in the registry. (Every merchant pays the
+ * fee now — an unregistered one just pays the default; this only flags a custom rate.) */
 export const isFeeTierMerchant = (payTo: string): boolean =>
   MERCHANTS.has(payTo.trim().toLowerCase());
 
@@ -126,35 +128,31 @@ export const treasuryReady = async (): Promise<boolean> => Boolean(await treasur
 /**
  * The declared output split for paying `payTo` a gross of `amountAtomic`.
  *
- * Returns `null` for the FREE tier — when `payTo` is NOT a registered merchant,
- * OR the amount is too small for a non-degenerate split (< 2× the floor, i.e. the
- * fee would meet/exceed the net). A null result means "single output, no rake":
- * the caller declares one output of the full amount to the merchant.
- *
- * For a fee-tier merchant: fee = min(max(amount·bps/10_000, $0.01), amount), and
- * the outputs are [{merchant, amount−fee}, {treasury, fee}]. CRITICAL: when the
- * merchant IS the treasury the two legs are MERGED into ONE output of the full
- * amount — duplicate addresses break assertOutputsExact's exact-match by
- * construction (each address must appear at most once in the declared outputs).
+ * NO FREE TIER (owner law 2026-06-14: the fee is NEVER waived). EVERY payment carries
+ * the fee: an UNREGISTERED merchant pays the DEFAULT 2%, and the `SUIZE_MERCHANTS`
+ * registry only CUSTOMIZES the rate (it never makes a merchant free). The outputs are
+ * [{merchant, amount−fee}, {treasury, fee}] with fee = min(max(amount·bps/10_000,
+ * $0.01), amount−1). The ONLY single-output results are structural, NOT a free tier:
+ * (a) merchant IS the treasury (first-party, e.g. the deploy charge — the two legs MERGE,
+ * since duplicate addresses break assertOutputsExact), and (b) a sub-unit amount where no
+ * fee can be carved (see splitOutputs). Throws (fail-closed) if `treasury@suize` is
+ * unresolved — a hard refusal, never a silent free pass.
  */
 export const outputsFor = async (
   payTo: string,
   amountAtomic: bigint,
-): Promise<FeeOutput[] | null> => {
+): Promise<FeeOutput[]> => {
+  // Unregistered merchant → DEFAULT fee; registry entry → its custom rate. No null/free path.
   const terms = MERCHANTS.get(payTo.trim().toLowerCase());
-  if (!terms) return null; // free tier — not a registered merchant
-
-  // A split is only meaningful when the net stays positive after a floored fee.
-  // Below 2× the floor the fee would be ≥ the net — collapse to free tier.
-  if (amountAtomic < FEE_FLOOR * 2n) return null;
+  const feeBps = terms ? terms.feeBps : FEE_BPS;
 
   const treasury = await treasuryAddress();
   if (!treasury) {
-    // FAIL-CLOSED: a fee-tier merchant but `treasury@suize` is unresolved → refuse to
-    // mint a split that would burn the rake. The caller surfaces a 503/loud error.
-    throw new Error("treasury@suize unresolved — refusing to mint a fee-tier split");
+    // FAIL-CLOSED: `treasury@suize` unresolved → refuse to mint a split that would burn
+    // the rake. The caller surfaces a 503/loud error — a hard refusal, not a free tier.
+    throw new Error("treasury@suize unresolved — refusing to mint a split");
   }
-  return splitOutputs(payTo, treasury, amountAtomic, terms.feeBps);
+  return splitOutputs(payTo, treasury, amountAtomic, feeBps);
 };
 
 /**
@@ -162,7 +160,9 @@ export const outputsFor = async (
  * client). fee = min(max(amount·bps/10_000, $0.01), amount−1); outputs are
  * [{merchant, net}, {treasury, fee}] — UNLESS merchant === treasury, in which case
  * the two legs collapse to ONE full-amount output (duplicate addresses break
- * assertOutputsExact's exact-match by construction). Assumes amount ≥ 2× the floor.
+ * assertOutputsExact's exact-match by construction). Works for ANY amount ≥ 2 units
+ * (the floor clamps to amount−1, so the net stays ≥ 1); a sub-2-unit amount where no
+ * fee can be carved collapses to a single output (the only physically-unavoidable case).
  */
 export const splitOutputs = (
   payTo: string,
@@ -175,6 +175,11 @@ export const splitOutputs = (
   if (fee >= amountAtomic) fee = amountAtomic - 1n; // clamp strictly below gross
   const net = amountAtomic - fee;
 
+  // A sub-unit amount (≤ 1) can't carry a fee without a zero/negative leg — the only
+  // physically-unavoidable single-output case (not a tier; a 1-unit payment is $0.000001).
+  if (fee <= 0n || net <= 0n) {
+    return [{ to: payTo, amount: amountAtomic.toString() }];
+  }
   // MERGE same-address legs: payer/payTo/treasury must each appear at most once.
   if (treasury.toLowerCase() === payTo.toLowerCase()) {
     return [{ to: payTo, amount: amountAtomic.toString() }];
@@ -185,11 +190,11 @@ export const splitOutputs = (
   ];
 };
 
-/** The fee bps a merchant is charged (for the informational `extra.feeBps`), or 0
- * when free tier. */
+/** The fee bps a merchant is charged (for the informational `extra.feeBps`): a custom
+ * rate from the registry, else the DEFAULT 2% — every merchant pays (no free tier). */
 export const feeBpsFor = (payTo: string): number => {
   const terms = MERCHANTS.get(payTo.trim().toLowerCase());
-  return terms ? Number(terms.feeBps) : 0;
+  return Number(terms ? terms.feeBps : FEE_BPS);
 };
 
 /** Boot diagnostics (mirrors sponsorInfo / facilitatorInfo). */

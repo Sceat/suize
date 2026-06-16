@@ -277,10 +277,11 @@ hardcodes the rail rows and predates the tier config — reconcile the render to
 **`public/llms.txt` — rewritten to the x402 V2 rail (the rail contract: the x402
 V2 `PaymentRequired` challenge anatomy, the pay / get-paid doors, `@suize/pay`,
 `/verify` + `/settle`, push-not-pull subscriptions) and **deployed at
-`suize.io/llms.txt`**. Pay links point at the canonical `pay.suize.io`; zero
-"coming soon"/status talk (the no-status-in-docs law — an unbuilt surface
-answers at runtime instead). It is the hub every per-product llms.txt links
-back to.
+`suize.io/llms.txt`**. The agent pays the merchant's own x402 endpoint directly
+(presenting the `X-PAYMENT` header) — a Sui-aware agent signs with its own Sui
+key, a Suize agent signs via the `@suize/mcp`; zero "coming soon"/status talk
+(the no-status-in-docs law — an unbuilt surface answers at runtime instead). It
+is the hub every per-product llms.txt links back to.
 
 ---
 

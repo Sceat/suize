@@ -1,8 +1,8 @@
 /**
  * /confirm-subscribe — the suite's RECURRING money gate: a visible, top-level
  * wallet-origin popup other *.suize.io products open to set up (or cancel) a
- * subscription against the signed-in Suize session. Mirrors `ConfirmPay` exactly:
- * same BRIDGE_V, same origin-pinning + `ready` beacon — for the `SubscribeTerms`
+ * subscription against the signed-in Suize session. Uses the bridge handshake:
+ * BRIDGE_V, origin-pinning + the `ready` beacon — for the `SubscribeTerms`
  * pair (defined in `@suize/shared/bridge`). Signed-out sign-in opens the Enoki
  * OAuth popup; this window stays open and its session updates reactively.
  *

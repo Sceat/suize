@@ -55,33 +55,21 @@ const INVALID_PARAMS = -32602
 
 // ── The wallet tools — descriptions ARE the docs the assistant reads ─────────
 
-const CUSTODY_LINE =
-  'Custody: fully non-custodial — all signing happens locally with the Enoki zkLogin session, ' +
-  "keys never leave the user's machine, and Suize's servers never sign for the user."
-
 const TOOLS = [
   {
     name: 'authenticate',
     description:
-      "Connect a Suize agent wallet to this assistant. Opens the user's browser to the Suize wallet, " +
-      'where they sign in with Google (zkLogin); the address you get is your AGENT\'s own address (the ' +
-      'wallet asks the user to paste + fund it). The signing session is delivered ONLY to a one-shot ' +
-      'listener on 127.0.0.1 and stored at ~/.suize/session.json (0600). Run this first, and again ' +
-      'whenever a tool says the session expired. The call blocks until sign-in completes (up to 5 min). ' +
-      CUSTODY_LINE,
+      'Connect your Suize wallet to this assistant — opens your browser for a one-time Google sign-in. ' +
+      'Run this first; run it again only if a tool reports the session expired.',
     inputSchema: { type: 'object' as const, properties: {}, additionalProperties: false },
   },
   {
     name: 'suize_pay',
     description:
-      'Pay in USDC from the connected agent wallet — gas-free, two shapes. (A) Pay an HTTP 402 resource: ' +
-      'pass { url } (with optional method/body) and this tool requests it, settles the x402 payment, and ' +
-      'returns the served body + the settlement digest. (B) A direct transfer: pass { payTo, amount } to ' +
-      'send USDC to any Sui address. Depending on the user\'s confirm policy (SUIZE_CONFIRM: each | ' +
-      'auto_under_<x> | auto; default each) this tool may first return "CONFIRMATION REQUIRED" instead of ' +
-      'paying — show it to the user, then call again with the SAME arguments plus confirm:true. A second ' +
-      '402 after payment is REPORTED, never re-paid. ' +
-      CUSTODY_LINE,
+      'Pay USDC from your Suize wallet, gas-free. (A) Pay an HTTP 402 resource: pass { url } (optional ' +
+      'method/body); returns the served body + the settlement digest. (B) Send USDC: pass { payTo, amount }. ' +
+      'If this returns "CONFIRMATION REQUIRED", show it to the user, then call again with the same ' +
+      'arguments plus confirm:true.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -104,17 +92,13 @@ const TOOLS = [
   {
     name: 'suize_balance',
     description:
-      "Read the connected agent wallet's USDC balance and its OWN address (a direct on-chain read; nothing " +
-      'is signed). Returns { address, network, usdc } — lead with the address when the user needs to fund the agent. ' +
-      CUSTODY_LINE,
+      "Read your Suize wallet's USDC balance and address. Returns { address, network, usdc }.",
     inputSchema: { type: 'object' as const, properties: {}, additionalProperties: false },
   },
   {
     name: 'suize_receipts',
     description:
-      "List the connected agent wallet's recent USDC payments (outgoing transfers), newest first, each row " +
-      '{ digest, time, amount }. A direct on-chain read of the wallet\'s own transaction history; nothing is signed. ' +
-      CUSTODY_LINE,
+      "List your Suize wallet's recent USDC payments, newest first — each row { digest, time, amount }.",
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -126,20 +110,14 @@ const TOOLS = [
   {
     name: 'suize_subscriptions',
     description:
-      "List the connected agent wallet's on-chain subscriptions — each { subscriptionId, merchant, amount, " +
-      'periodMs, paidUntil, isActive }. A direct on-chain read; nothing is signed. ' +
-      CUSTODY_LINE,
+      "List your Suize wallet's subscriptions — each { subscriptionId, merchant, amount, periodMs, paidUntil, isActive }.",
     inputSchema: { type: 'object' as const, properties: {}, additionalProperties: false },
   },
   {
     name: 'suize_kill',
     description:
-      "EMERGENCY KILL: sweep the agent wallet's ENTIRE USDC balance back to the user's main wallet in one " +
-      'gasless transfer, then disarm the agent (the local session is cleared so it can no longer spend). ' +
-      'Destination is the main wallet captured when connecting; if none was captured, pass { to } (the ' +
-      "user's main 0x…64-hex address) — ONLY after confirming it is their own wallet. Idempotent (an empty " +
-      'wallet is a clean no-op). Returns { swept, digest, destination }. ' +
-      CUSTODY_LINE,
+      "Sweep your wallet's entire USDC balance back to your main wallet and disarm it (clears the local " +
+      'session). Returns { swept, digest, destination }. Pass { to } only if no main wallet was set when connecting.',
     inputSchema: {
       type: 'object' as const,
       properties: {

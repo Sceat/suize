@@ -9,19 +9,20 @@
 // sub-account MultiSig — the multisig address is recovered), so a detached-agent deploy
 // paying FROM a sub-account is owned BY that sub-account.
 //
-// The no-Sui-key door is the SAME path: pay.suize.io (mode=authorize) hands the human's
-// SIGNED-UNSETTLED payload back; the agent submits THAT as X-PAYMENT; owner = the human.
+// TWO DOORS, ONE WIRE: the agent signs the payment itself — with its own Sui key (the
+// Sui-aware door) or its Suize zkLogin session via the MCP (the Suize door). Both submit
+// the SAME X-PAYMENT; owner = the recovered payer. There is NO human/relay path.
 //
 // A deployer POSTs a built static site as a tar (+ the X-PAYMENT header); this module:
 //   0. VERIFIES the X-PAYMENT pays the exact $0.50 to the Deploy treasury and recovers
 //      the payer (→ `owner`); there is no client-claimed `owner` and no service-wallet
 //      fallback,
 //   1. unpacks the tar in-memory, enforcing size + file-count caps,
-//   2. uploads ALL files as ONE Walrus quilt via the HTTP publisher (the publisher
-//      pays WAL; the deploy wallet only pays the on-chain create_site gas),
-//   3. builds a manifest JSON (path -> {patch, sha256, ct, size}), stores it as a
-//      Walrus blob, computes its sha256,
-//   4. SETTLES the verified payment (keyless gRPC), then mints a FRESH on-chain
+//   2. SETTLES the verified payment (keyless gRPC) BEFORE any Walrus spend,
+//   3. uploads ALL files as ONE Walrus quilt via the HTTP publisher (the publisher
+//      pays WAL; the deploy wallet only pays the on-chain create_site gas) + a manifest
+//      JSON (path -> {patch, sha256, ct, size}) stored as a Walrus blob,
+//   4. mints a FRESH on-chain
 //      `deploy_sui::site::Site` (signed by the deploy service wallet — NOT
 //      Enoki-sponsored; the agent signs nothing), with the recovered payer as `owner`
 //      and the settled payment digest recorded in the on-chain SiteDigestRegistry (the
@@ -72,7 +73,7 @@ import {
   type VerifiedDeployPayment,
 } from "./payment";
 import { extendOnce, storageEndForSite, epochToMs } from "./extend";
-import { deploySubs, isValidDeploySub } from "./subs-state";
+import { deploySubs, isValidDeploySub, hasValidDeploySub } from "./subs-state";
 import { handleSubscribeBuild, handleSubscribeSubmit } from "./subscribe";
 import {
   cloudflareEnabled,
@@ -426,10 +427,24 @@ const handleDeploy = async (req: Request, origin: string | null, server?: Server
   const gateLive = await chargeGateReady();
   const proto = req.headers.get("x-forwarded-proto");
 
+  // PREMIUM QUOTE: an agent may hint its paying address via `?sender=` so the 402
+  // self-describes the discounted $0.10 rate when that address holds an active Deploy
+  // subscription. Advisory only — gateDeployPayment RE-checks premium against the
+  // RECOVERED payer, so this quote can never under-bill a non-subscriber.
+  let premiumQuote = false;
+  try {
+    const senderHint = new URL(req.url).searchParams.get("sender");
+    if (senderHint && SUI_ADDRESS_RE.test(senderHint)) {
+      premiumQuote = await hasValidDeploySub(senderHint);
+    }
+  } catch {
+    premiumQuote = false;
+  }
+
   // Answer the x402 V2 402 with the PaymentRequired body + the PAYMENT-REQUIRED
   // header. Returns null when the treasury is unresolved (caller stays un-gated).
   const challenge402 = async (errorOverride?: string): Promise<Response | null> => {
-    const body = await deployRequirements(req.url, proto);
+    const body = await deployRequirements(req.url, proto, premiumQuote);
     if (!body) return null;
     if (errorOverride) body.error = errorOverride;
     return json(body, 402, origin, {
@@ -437,10 +452,11 @@ const handleDeploy = async (req: Request, origin: string | null, server?: Server
     });
   };
 
-  // The signed gasless payment (b64 PaymentPayload) — the deploy's sole authorization.
-  // Absent on the discovery shot. The no-Sui-key door submits the SAME header (the
-  // human's signed-unsettled payload, handed back by pay.suize.io mode=authorize).
-  const payHeader = (req.headers.get("X-PAYMENT") ?? req.headers.get("PAYMENT-SIGNATURE") ?? "").trim();
+  // The signed gasless x402 payment (b64 PaymentPayload) — the deploy's SOLE
+  // authorization. Absent on the discovery shot. The agent signs it ITSELF: with its
+  // own Sui key (the Sui-aware door) or its Suize zkLogin session via the MCP (the Suize
+  // door). There is no human/relay path — whoever signs the payment owns the site.
+  let payHeader = (req.headers.get("X-PAYMENT") ?? req.headers.get("PAYMENT-SIGNATURE") ?? "").trim();
 
   // ── PAYMENT GATE, leg 1: presence — public price discovery ───────────────────
   // A payment-less POST /deploy answers 402 (the zero-shot entry point), not a 400.
@@ -483,7 +499,9 @@ const handleDeploy = async (req: Request, origin: string | null, server?: Server
   let verifiedPayment: VerifiedDeployPayment | null = null;
   if (gateLive) {
     try {
-      verifiedPayment = await gateDeployPayment(payHeader);
+      // Pass hasValidDeploySub → a subscriber's payment may carry the $0.10 rate
+      // (verified against their on-chain sub); everyone else pays the flat $0.50.
+      verifiedPayment = await gateDeployPayment(payHeader, hasValidDeploySub);
     } catch (err) {
       if (err instanceof DeployPaymentError) {
         if (err.challenge) {
@@ -570,10 +588,24 @@ const handleDeploy = async (req: Request, origin: string | null, server?: Server
       };
     }
 
+    // ── 0. SETTLE the payment FIRST — before ANY Walrus spend ───────────────────
+    // Settle the verified payment (keyless gRPC, idempotent by digest) BEFORE the Walrus
+    // upload, so an unsettled/failed payment never burns WAL. A settle that succeeds but
+    // then fails at the Walrus/mint steps retries idempotently (the SAME X-PAYMENT
+    // re-settles from chain; EDigestUsed has NOT fired, since no Site minted yet). The
+    // settled digest threads into create_site's on-chain one-site-per-payment registry.
+    // Un-gated mode (no payment) keys the registry on a fresh per-deploy salt.
+    const tStart = Date.now();
+    const paymentDigest = verifiedPayment
+      ? await settleDeployPayment(verifiedPayment)
+      : `ungated-${Date.now()}-${randomBytes(8).toString("hex")}`;
+    const tSettle = Date.now();
+
     // ── 1. upload ALL files as one quilt ────────────────────────────────────────
     // The Blob OBJECT is transferred to the service wallet (send_object_to) so the
     // storage extender can later `extend_blob` it; its id is recorded on the Site.
     const { quiltId, patchIds, quiltBlobObject } = await storeQuilt(quiltInputs, serviceAddress());
+    const tQuilt = Date.now();
 
     // ── 2. build the manifest (SPEC §4) ─────────────────────────────────────────
     const manifestFiles: Record<
@@ -599,20 +631,9 @@ const handleDeploy = async (req: Request, origin: string | null, server?: Server
       manifestBytes,
       serviceAddress(),
     );
+    const tManifest = Date.now();
 
-    // ── 4. SETTLE the payment, then mint the on-chain Site ──────────────────────
-    // Settle the verified payment NOW (keyless gRPC, idempotent by digest) so the
-    // settled digest threads into create_site's on-chain one-site-per-payment registry.
-    // Settlement is deferred to here (not the auth block) so the Walrus work happens on
-    // a VERIFIED-but-unsettled payment — and a re-presented payment re-settles
-    // idempotently; the on-chain EDigestUsed (→ 409) is what blocks a second Site, not
-    // an in-process map (THE PRINCIPLE: the chain is the database, multi-replica-safe).
-    // When the gate is OFF (un-gated mode) there is no payment — key the registry on a
-    // fresh per-deploy salt so create_site still records SOMETHING unique.
-    const paymentDigest = verifiedPayment
-      ? await settleDeployPayment(verifiedPayment)
-      : `ungated-${Date.now()}-${randomBytes(8).toString("hex")}`;
-
+    // ── 4. mint the on-chain Site ───────────────────────────────────────────────
     // size_bytes/file_count are the real bundle metrics (computed above when we
     // validated the caps) — recorded on-chain so the read endpoints don't return 0.
     // `paymentDigest` is the one-site-per-payment key: a duplicate aborts EDigestUsed
@@ -628,6 +649,12 @@ const handleDeploy = async (req: Request, origin: string | null, server?: Server
       totalBytes,
       files.length,
       paymentDigest,
+    );
+    // Phase timing — surfaces WHERE a slow deploy spends its seconds (Walrus testnet
+    // writes are the usual culprit). One line per deploy; cheap + always on.
+    const t = (a: number, b: number) => `${((b - a) / 1000).toFixed(1)}s`;
+    console.log(
+      `[deploy] ${siteId} timing — settle ${t(tStart, tSettle)} · quilt ${t(tSettle, tQuilt)} · manifest ${t(tQuilt, tManifest)} · mint ${t(tManifest, Date.now())} · total ${t(tStart, Date.now())}`,
     );
 
     // ── 5. respond ──────────────────────────────────────────────────────────────
@@ -1615,7 +1642,16 @@ const handleExtendSite = async (
 const handleWalletAddress = (req: Request, origin: string | null, server?: Server<unknown>): Response => {
   if (!DEPLOY_ENABLED) return notConfigured(origin);
   if (!takeToken(getIp(req, server))) return json({ error: "too many requests" }, 429, origin, { "Retry-After": "1" });
-  return json({ address: serviceAddress(), walCoinType: config.walCoinType }, 200, origin);
+  // The dashboard's read-only admin panel reads this address's SUI + WAL balances
+  // directly from chain; it only needs `address` + `walCoinType`.
+  return json(
+    {
+      address: serviceAddress(),
+      walCoinType: config.walCoinType,
+    },
+    200,
+    origin,
+  );
 };
 
 // ---------------------------------------------------------------------------

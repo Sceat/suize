@@ -22,7 +22,8 @@ export const LINKS = {
   // separate quickstart link.
   checkout: '/docs',
   deploy: 'https://deploy.suize.io',
-  crash: 'https://crash.suize.io',
+  crash: 'https://polysui.suize.io',
+  agents: 'https://agents.suize.io',
   docs: '/docs',
   llms: '/llms.txt',
   // primary CTA — start the onboarding at the wallet.
@@ -32,8 +33,8 @@ export const LINKS = {
 // NAV — the persistent header. Labels + links live here (LOCKED #14: never
 // hardcode a label or URL in the component). The header is: two AUDIENCE entries
 // (For users → the PAY home · For business → the CHARGE page), a Products
-// dropdown (the ADDITIONAL products only — Deploy + Crash; Wallet & Charge are
-// the two audience pages, never repeated as products), then Pricing.
+// dropdown (the ADDITIONAL products only — Deploy + PolySui + Agents; Wallet &
+// Charge are the two audience pages, never repeated as products), then Pricing.
 //
 // Docs left the navbar (owner cut it) — #/docs stays reachable from every
 // business-page CTA (LINKS.checkout) and the footer Learn column (LINKS.docs).
@@ -45,12 +46,12 @@ export const NAV = {
     { label: 'For users', href: '/' },
     { label: 'For business', href: '/business' },
   ],
-  // the Products dropdown — ADDITIONAL products only (Deploy + Crash). Wallet &
-  // Charge are covered by the For users / For business audience pages, so they
-  // are intentionally NOT here. `routes` are the in-app product detail pages.
+  // the Products dropdown — ADDITIONAL products only (Deploy + PolySui + Agents).
+  // Wallet & Charge are covered by the For users / For business audience pages,
+  // so they are intentionally NOT here. `routes` are the in-app detail pages.
   products: {
     label: 'Products',
-    routes: ['deploy', 'crash'],
+    routes: ['deploy', 'crash', 'agents'],
   },
   // Pricing — its own top-level link, rendered last.
   pricing: { label: 'Pricing', href: '/pricing' },
@@ -403,9 +404,10 @@ export const PRICING = {
 //    number, not a Suize fee.
 //  · Consumer words: "sub-account" / "allowance" — NEVER "leash" / "pot".
 //  · No testnet labels. ZERO status-talk: a surface is documented as it works
-//    today (@suize/pay, the x402 402 loop, POST /verify + /settle, the hosted
-//    pay page, subscriptions), or it is ABSENT from the page — never "coming
-//    soon" / "rolling out" / "not yet".
+//    today (@suize/pay, the x402 402 loop, POST /verify + /settle,
+//    subscriptions), or it is ABSENT from the page — never "coming
+//    soon" / "rolling out" / "not yet". (The hosted pay page / human pay-link
+//    is DELETED — agents self-sign; there is no human-relay door.)
 //  · NO webhooks, NO dashboard, NO sessions, NO API keys — they don't exist
 //    (deleted by design; the chain is the database). Settlement notice = your
 //    own /verify call, or reading the on-chain balance changes yourself.
@@ -417,19 +419,30 @@ export const DOCS = {
     sub: 'One payment rail. Agents pay businesses; humans give their AI money it can’t overspend. Here’s the whole machine.',
   },
 
-  // SECTION 1 — the onboarding ladder (THE centerpiece): four precise tiers,
-  // high-level (no code) → low-level, each stating WHO it's for, WHAT YOU DO,
-  // WHAT SUIZE DOES, and HOW YOU KNOW YOU'RE PAID. Tier 3 keeps the one-liner
-  // snippet + the animated five-step 402 loop as its demo (approved — never
-  // touch the animation). Naming Stripe is allowed ONLY for coexistence
+  // SECTION 1 — the onboarding ladder (THE centerpiece): two precise tiers,
+  // plain HTTP (any language) → one npm line, each stating WHO it's for, WHAT
+  // YOU DO, WHAT SUIZE DOES, and HOW YOU KNOW YOU'RE PAID. Tier 2 keeps the
+  // one-liner snippet + the animated five-step 402 loop as its demo (approved
+  // — never touch the animation). Naming Stripe is allowed ONLY for coexistence
   // (`coexist`), never as an integration claim. ZERO status-talk: a tier is
-  // documented as it works today, or it is absent (platform plugins don't
-  // ship → no Tier 4).
+  // documented as it works today, or it is absent (there is NO no-code/hosted
+  // tier — the agent pays your OWN endpoint; no platform plugins ship → no
+  // Tier 3).
   merchant: {
     marker: 'The onboarding ladder',
     eyebrow: 'For business',
     head: 'Get paid, whatever your stack.',
-    sub: 'Three ways in — from a link you paste to a line you ship. Every one lands on the same rail and prints the same receipt.',
+    sub: 'Two ways in — a plain HTTP call from any language, or one line you ship on Node. Both land on the same rail and print the same receipt.',
+    // the premise beat — answers "how do I onboard?" BEFORE the ladder: there is
+    // nothing to sign up for. Renders editorial (mono kicker + big serif
+    // statement + body + a quiet mono ledger of what you DON'T need), breathing
+    // wide above the rungs. NOT a glass card.
+    premise: {
+      kicker: 'Before you write a line',
+      statement: 'Your address is your account.',
+      body: 'There is no Suize signup, no API key, no dashboard to manage. The Sui address where you want your USDC to land is the whole account. Choose it, return a 402 from your own server, and you are a merchant.',
+      ledger: ['no signup', 'no API key', 'no dashboard', 'no KYB'],
+    },
     // the three fact-column labels every tier renders
     labels: {
       you: 'What you do',
@@ -439,26 +452,28 @@ export const DOCS = {
     tiers: [
       {
         tier: 'Tier 1',
-        title: 'No code — a pay-link.',
-        who: 'For hosted stores, link-in-bio sellers — anyone.',
-        you: 'A pay-link is just a URL carrying your address and your price — paste it anywhere: your site, your emails, your llms.txt.',
-        suize: 'Agents read the terms and pay through the rail without a human; humans tap to pay on the hosted pay page.',
-        paid: 'Check /verify — or read your payments straight off the chain. Your history is public cryptographic record.',
+        title: 'Any language — answer 402, call verify.',
+        who: 'Any backend, in any language: Python, Ruby, Go, PHP, Rust, even a shell script. If it speaks HTTP, you are in — Node is not required.',
+        you: 'Reply 402 with your x402 terms. The agent pays gaslessly and retries with an X-PAYMENT header. You POST that to the facilitator to verify, then settle, and serve the moment it says valid.',
+        suize: 'Verifies the gasless payment against your own price and address, then settles it on-chain.',
+        paid: 'verify answers valid — you serve. No webhook, no session, no key.',
+        // a real, language-agnostic example: the whole Suize-specific step is
+        // one HTTP POST. The 402 challenge shape itself is shown in the loop below.
+        example: {
+          file: 'any language · just HTTP',
+          code:
+            '# an agent paid and retried with an X-PAYMENT header.\n' +
+            '# ask the facilitator, then serve. any language, just HTTP:\n\n' +
+            'curl -X POST https://api.suize.io/verify \\\n' +
+            "  -H 'content-type: application/json' \\\n" +
+            '  -d \'{ "paymentPayload": …, "paymentRequirements": … }\'\n\n' +
+            '# → { "isValid": true }   then POST /settle the same body, and serve.',
+        },
       },
       {
         tier: 'Tier 2',
-        title: 'One call — POST /verify.',
-        who: 'For any backend, any language — it’s one plain HTTP call.',
-        you: 'Return 402 with your x402 payment terms. The agent pays gaslessly through Suize and retries with an X-PAYMENT header. You hand that to the facilitator and serve when it says paid.',
-        code: 'POST api.suize.io/verify  { paymentPayload, paymentRequirements }',
-        suize: 'Verifies the agent’s gasless payment against your own configured price and address, then settles it on-chain.',
-        paid: 'verify says valid — you serve. No webhook, no session, no key.',
-        note: 'amount is a decimal USDC string — your price. Your address is your account; no signup, no API key.',
-      },
-      {
-        tier: 'Tier 3',
-        title: 'One line — gate your API.',
-        who: 'For API-first builders selling to agents programmatically.',
+        title: 'On Node? One line does all of it.',
+        who: 'For API-first builders on Node or Bun who want the whole loop handled for them.',
         you: 'npm i @suize/pay, paste the middleware.',
         suize: 'Everything between “pay me” and “paid”.',
         paid: '/verify answers paid ✓ — then your code serves.',
@@ -524,27 +539,22 @@ export const DOCS = {
       'Your code never touches a wallet. It says “pay me”, then asks “did they?”. Suize does everything between.',
   },
 
-  // SECTION 2 — three doors onto the same rail.
+  // SECTION 2 — the two canonical payer doors (own Sui key / Suize MCP).
   ways: {
-    marker: 'Three doors, one rail',
+    marker: 'Two doors, one rail',
     eyebrow: 'Any agent can pay',
-    head: 'Three ways an agent pays.',
-    sub: 'Blockchain-fluent or not — every agent has a door onto the rail.',
+    head: 'Two doors onto the rail.',
+    sub: 'Your agent brings its own Sui key, or it borrows one from Suize. Either way it signs the payment itself — there is no human in the loop.',
     cards: [
       {
         glyph: 'sign',
-        title: 'It signs, we settle.',
-        body: 'Suize builds the gasless transfer — no gas token needed; the agent just signs it, and Suize verifies and settles it on-chain. For any agent with a key and zero blockchain skills.',
+        title: 'It has its own Sui key.',
+        body: 'The agent signs the gasless payment itself — letting Suize build the transaction, or building its own if it already speaks Sui. No gas token, no Suize login: your address is the account.',
       },
       {
-        glyph: 'direct',
-        title: 'It pays directly.',
-        body: 'An agent that already speaks Sui pays the rail itself. Suize indexes the receipt.',
-      },
-      {
-        glyph: 'human',
-        title: 'It asks its human.',
-        body: 'The agent hands its user a pay-link. One tap on the confirm page settles it.',
+        glyph: 'key',
+        title: 'It borrows one from Suize.',
+        body: 'No Sui key? Give your assistant the Suize MCP — one install, a Google sign-in, and it pays from a local session. Keys never leave your machine. Set it up below.',
       },
     ],
     foot: 'Every payment lands on the same rail and prints the same receipt — the fee visible, the proof on-chain.',
@@ -591,14 +601,14 @@ export const DOCS = {
   // address — a second Google sign-in — whose balance IS the cap; the human
   // funds it and can sweep it. Present-tense, no status-talk).
   mcp: {
-    marker: 'The MCP door',
-    eyebrow: 'Bring your own assistant',
+    marker: 'Set up the MCP wallet',
+    eyebrow: 'Door 2 · bring your own assistant',
     head: 'Use it with Claude or Codex.',
     sub: 'One command. Sign in with Google to give your assistant its own funded account — its balance is the cap, fund it and sweep it back anytime — and it pays through the same rail, under the same dials.',
-    command: 'claude mcp add suize',
+    command: 'claude mcp add suize -- npx -y @suize/mcp',
     prompt: '$',
-    tools: ['suize_pay', 'suize_balance', 'suize_receipts'],
-    note: 'Your assistant gets three tools — pay, check the balance, read the receipts. Same rail, same controls, same record.',
+    tools: ['suize_pay', 'suize_balance', 'suize_receipts', 'suize_subscriptions', 'suize_kill'],
+    note: 'Sign in with Google once, then your assistant has a full wallet — pay, balances, receipts, subscriptions, and a one-tap kill. Same rail, same controls, same record.',
   },
 
   // SECTION 5 — the close: two doors out.
@@ -723,7 +733,8 @@ export const LOCKED_RECORD_TIP =
 
 // Per-room accent token overrides — the "four rooms" of one house. Each detail
 // page sets these CSS vars so the whole chassis re-tints to that product's
-// temperature within the blue family (Crash = the sanctioned green pulse).
+// temperature within the blue family (PolySui — keyed `crash` — = the sanctioned
+// green pulse).
 export const ROOM_ACCENTS = {
   wallet: {
     '--room-accent': '#4da2ff',
@@ -759,19 +770,19 @@ export const ROOM_ACCENTS = {
   },
 }
 
-// The ADDITIONAL products — the two beyond the audience pages. Wallet (PAY) and
-// Charge (CHARGE) are NOT here: they ARE the For users / For business pages, so
-// listing them again would double up. These are the extra products an agent can
-// pay for ON the rail. `route` opens the in-app detail page; `external` opens
-// the live product. `tint` drives the per-room accent (Crash = the sanctioned
-// status-green exception).
+// The ADDITIONAL products beyond the audience pages. Wallet (PAY) and Charge
+// (CHARGE) are NOT here: they ARE the For users / For business pages, so listing
+// them again would double up. These are the extra products an agent can pay for
+// ON the rail. `route` opens the in-app detail page; `external` opens the live
+// product. `tint` drives the per-room accent (PolySui — internal id `crash` — is
+// the sanctioned status-green exception). No `side` tag — the CHARGE/PAY split
+// is jargon to a visitor, so the dropdown shows name + desc only.
 export const PRODUCTS = [
   {
     id: 'deploy',
     name: 'Deploy',
-    side: 'CHARGE',
     verb: 'BUILD · SHIP · RENEW',
-    desc: 'Let your agent put your website on the blockchain — live in seconds.',
+    desc: 'Put any website online in seconds — hosted on-chain, no server to run.',
     route: '/deploy',
     external: LINKS.deploy,
     tint: 'rgba(139,148,255,0.5)',
@@ -780,14 +791,24 @@ export const PRODUCTS = [
   },
   {
     id: 'crash',
-    name: 'Crash',
-    side: 'CHARGE',
-    verb: 'PLAY · SETTLE · EARN',
-    desc: 'One tap: call Bitcoin up or down, live.',
+    name: 'PolySui',
+    verb: 'PREDICT · TRADE · CASH OUT',
+    desc: 'Call Bitcoin up or down and cash out live — prediction markets on Sui.',
     route: '/crash',
     external: LINKS.crash,
     tint: 'rgba(52,211,153,0.5)',
     tintFg: '#34d399',
     tintEdge: 'rgba(52,211,153,0.34)',
+  },
+  {
+    id: 'agents',
+    name: 'Agents',
+    verb: 'WATCH · RANK · BID',
+    desc: 'Watch agents pay merchants in real time — the live market of agent commerce.',
+    route: '/agents',
+    external: LINKS.agents,
+    tint: 'rgba(245,158,66,0.5)',
+    tintFg: '#f59e42',
+    tintEdge: 'rgba(245,158,66,0.34)',
   },
 ]

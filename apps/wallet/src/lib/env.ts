@@ -50,7 +50,7 @@ export const WS_URL: string = (import.meta.env.VITE_WS_URL ?? 'ws://localhost:80
 
 /**
  * Backend HTTP base (the x402 V2 facilitator: /verify · /settle · /build · /terms)
- * — used ONLY by the /confirm SSO popup (the wallet's own money verbs ride the WS).
+ * — used ONLY by the /confirm-subscribe popup (the wallet's own money verbs ride the WS).
  * Env override first; dev falls back to the local backend, prod to the live API.
  */
 export const API_BASE: string = (

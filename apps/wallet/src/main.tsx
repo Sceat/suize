@@ -3,20 +3,16 @@ import { createRoot } from 'react-dom/client';
 import { Analytics } from '@vercel/analytics/react';
 import { AppProviders } from './app/providers';
 import { App } from './app/App';
-import { ConfirmPay } from './bridge/ConfirmPay';
 import { ConfirmSubscribe } from './bridge/ConfirmSubscribe';
 import { AgentConnect, hasPendingAgentConnect } from './bridge/AgentConnect';
 import './styles/index.css';
 
-// The SSO money gates other *.suize.io products open as a popup:
-//   /confirm           — a one-off payment (bridge/ConfirmPay).
-//   /confirm-subscribe — set up / cancel a subscription (bridge/ConfirmSubscribe).
-// Sign-in inside these popups is the Enoki SDK's OWN popup — the window stays
-// open and its session updates reactively, so there is no /enoki round-trip to
-// resume here.
+// The visible popup Deploy opens to set up / cancel a storage subscription:
+//   /confirm-subscribe — bridge/ConfirmSubscribe. Sign-in inside the popup is the
+// Enoki SDK's OWN popup — the window stays open and its session updates reactively,
+// so there is no /enoki round-trip to resume here.
 const isPath = (p: string) => typeof window !== 'undefined' && window.location.pathname.startsWith(p);
 
-const showConfirm = isPath('/confirm') && !isPath('/confirm-subscribe');
 const showSubscribe = isPath('/confirm-subscribe');
 // /agent-connect — the agent sign-in door (in-app `?arm=1` + the MCP `?cb=&tok=`).
 // Its OAuth reuses the registered `/enoki` redirect URI, so the agent return lands
@@ -46,8 +42,6 @@ createRoot(document.getElementById('root')!).render(
         <AgentConnect />
       ) : showSubscribe ? (
         <ConfirmSubscribe />
-      ) : showConfirm ? (
-        <ConfirmPay />
       ) : (
         <App />
       )}

@@ -80,6 +80,11 @@ const EInvalidRate: u64 = 3;
 /// subscription paid in any OTHER coin — a worthless token posing as a real payment —
 /// aborts here. Append-only (4); never renumber.
 const EWrongCoin: u64 = 4;
+/// The shared `Version` doesn't match this published code — a STALE package version (after
+/// an upgrade, pre-`migrate`) or a frozen module (value 0). Every user entry
+/// (`create`/`renew`/`cancel`) asserts `assert_latest` FIRST, so old code paths are fenced.
+/// The 100-band marks an infra/version error vs the 0–4 domain errors. Append-only.
+const EWrongVersion: u64 = 100;
 
 // === Constants ===
 
@@ -101,6 +106,10 @@ const BPS_DENOMINATOR: u64 = 10_000;
 /// a near-`u64::MAX` period can't overflow `now + period_ms` — it aborts cleanly as
 /// `EBadTerms` instead. Renewals reuse the fixed `period_ms`, so the cap is enforced once.
 const MAX_PERIOD_MS: u64 = 315_360_000_000; // 10 * 365 * 24 * 60 * 60 * 1000
+/// The package version this published code expects. Bump on every upgrade that changes
+/// version-gated behavior, then `migrate` to lift the shared `Version`. v1 = this gated
+/// republish (the prior un-gated subs publish is abandoned).
+const PACKAGE_VERSION: u64 = 1;
 
 // === Structs ===
 
@@ -132,6 +141,15 @@ public struct SubsConfig has key {
 /// and NO `ENotAdmin` code: you simply cannot call an admin fn without the cap.
 public struct SubsAdminCap has key, store {
     id: UID,
+}
+
+/// The single shared version gate. Every user entry (`create`, `renew`, `cancel`) takes
+/// `&Version` and calls `assert_latest()` first, so a stale package version (after an
+/// upgrade, pre-`migrate`) — or a frozen module (value 0) — is locked out. Created +
+/// shared once at `init`; lifted by the `SubsAdminCap`-gated `migrate`.
+public struct Version has key {
+    id: UID,
+    value: u64,
 }
 
 /// A live subscription. PARTY-OWNED (single-owner = the user) + SOULBOUND: `key`
@@ -206,7 +224,33 @@ fun init(_otw: SUBSCRIPTION, ctx: &mut TxContext) {
         // merchant gate is the live defense; this on-chain pin is the second wall).
         coin_type: option::none(),
     });
+    transfer::share_object(Version { id: object::new(ctx), value: PACKAGE_VERSION });
     transfer::transfer(SubsAdminCap { id: object::new(ctx) }, ctx.sender());
+}
+
+// === Version gate (SubsAdminCap-gated lifecycle) ===
+
+/// First line of every version-gated entry. Aborts `EWrongVersion` when the shared value
+/// doesn't match this published code (a stale upgrade awaiting `migrate`, or a freeze).
+public fun assert_latest(self: &Version) {
+    assert!(self.value == PACKAGE_VERSION, EWrongVersion);
+}
+
+/// The live version value (off-chain inspection / tests).
+public fun version_value(self: &Version): u64 { self.value }
+
+/// Lift the shared `Version` to `PACKAGE_VERSION` after an upgrade. Asserts the stored
+/// value is strictly older — no double-migrate. Possession of `&SubsAdminCap` is auth.
+public fun migrate(_cap: &SubsAdminCap, version: &mut Version) {
+    assert!(version.value < PACKAGE_VERSION, EWrongVersion);
+    version.value = PACKAGE_VERSION;
+}
+
+/// Emergency freeze: zero the version so EVERY gated entry aborts at once. Reversible by
+/// `migrate` alone (0 < PACKAGE_VERSION lifts it back) — no permanent brick; a real code
+/// upgrade bumps PACKAGE_VERSION first. Possession of `&SubsAdminCap` is auth.
+public fun freeze_all(_cap: &SubsAdminCap, version: &mut Version) {
+    version.value = 0;
 }
 
 // === Admin — fee policy (SubsAdminCap-gated) ===
@@ -247,6 +291,7 @@ public fun set_coin_type<T>(config: &mut SubsConfig, _cap: &SubsAdminCap) {
 /// Aborts: `EBadTerms` (zero amount or zero period) before any money moves;
 /// `EWrongAmount` (in `settle`) if `payment != amount`.
 public fun create<T>(
+    version: &Version,
     config: &SubsConfig,
     merchant: address,
     amount: u64,
@@ -256,6 +301,7 @@ public fun create<T>(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    version.assert_latest();
     assert!(amount > 0 && period_ms > 0 && period_ms <= MAX_PERIOD_MS, EBadTerms);
 
     let fee = settle(config, merchant, amount, payment);
@@ -304,12 +350,14 @@ public fun create<T>(
 ///
 /// Aborts: `ETooEarly` (too far ahead of paid-through); `EWrongAmount` (in `settle`).
 public fun renew<T>(
+    version: &Version,
     sub: &mut Subscription<T>,
     config: &SubsConfig,
     payment: Balance<T>,
     clock: &Clock,
     ctx: &TxContext,
 ) {
+    version.assert_latest();
     let now = clock.timestamp_ms();
     assert!(now + RENEW_WINDOW_MS >= sub.paid_until_ms, ETooEarly);
 
@@ -335,7 +383,8 @@ public fun renew<T>(
 /// Party). Emits `SubscriptionCancelled` carrying `paid_until_ms` — a merchant MAY
 /// honor the remaining paid-through time. No fee, no refund: nothing is custodied,
 /// so there is nothing to return.
-public fun cancel<T>(sub: Subscription<T>, ctx: &TxContext) {
+public fun cancel<T>(version: &Version, sub: Subscription<T>, ctx: &TxContext) {
+    version.assert_latest();
     let Subscription { id, merchant, amount: _, period_ms: _, paid_until_ms, ref } = sub;
 
     event::emit(SubscriptionCancelled {

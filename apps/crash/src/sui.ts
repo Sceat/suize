@@ -228,6 +228,13 @@ export type RedeemedEvent = {
   quantity: string
   payout: string
   is_settled: boolean
+  // The settling tx digest + its wall-clock ms, carried straight off the event
+  // envelope (id.txDigest / timestampMs) so a history row can deep-link to
+  // SuiVision and sort/label by the real settle time. Optional: a pre-existing
+  // consumer (gather_realized_results_from_events) simply ignores them, and a
+  // sparse/old event without an envelope just renders with no link.
+  digest?: string
+  ts?: number
 }
 export type MintedEvent = {
   manager_id: string
@@ -262,7 +269,13 @@ const MAX_EVENT_PAGES = 10
 const query_events = async <T>(
   client: ReadClient,
   move_event_type: string,
-  map: (j: Record<string, unknown>) => T | null,
+  // The mapper also receives the event ENVELOPE (its tx digest + wall-clock ms)
+  // so a row can deep-link to SuiVision and label by real settle time. parsedJson
+  // carries no digest — only the envelope does — hence the second arg.
+  map: (
+    j: Record<string, unknown>,
+    env: { digest?: string; ts?: number },
+  ) => T | null,
   cap = 200,
 ): Promise<T[]> => {
   const out: T[] = []
@@ -280,7 +293,11 @@ const query_events = async <T>(
       for (const e of page.data) {
         const j = e.parsedJson
         if (j && typeof j === 'object') {
-          const row = map(j as Record<string, unknown>)
+          const ts = e.timestampMs ? Number(e.timestampMs) : undefined
+          const row = map(j as Record<string, unknown>, {
+            digest: e.id?.txDigest,
+            ts: Number.isFinite(ts) ? ts : undefined,
+          })
           if (row) out.push(row)
         }
       }
@@ -301,7 +318,7 @@ export const fetch_redeemed_events = (
   query_events<RedeemedEvent>(
     client,
     EVENT_POSITION_REDEEMED,
-    j => {
+    (j, env) => {
       if (ev_str(j, 'manager_id') !== manager_id) return null
       return {
         manager_id,
@@ -312,6 +329,8 @@ export const fetch_redeemed_events = (
         quantity: ev_str(j, 'quantity'),
         payout: ev_str(j, 'payout'),
         is_settled: ev_bool(j, 'is_settled'),
+        digest: env.digest,
+        ts: env.ts,
       }
     },
   )
@@ -334,6 +353,109 @@ export const fetch_minted_events = (
         expiry: ev_str(j, 'expiry'),
         quantity: ev_str(j, 'quantity'),
         cost: ev_str(j, 'cost'),
+      }
+    },
+  )
+
+// ============================================================================
+// GLOBAL LEADERBOARD FEED — every trader's realized history (no manager filter)
+// ----------------------------------------------------------------------------
+// The per-manager feeds above scope to ONE manager_id. The Leaderboard ranks
+// EVERY trader, so it pages PositionRedeemed GLOBALLY (no client-side manager
+// filter) and groups by the event's `owner` (the real Sui address that signed
+// the bet — what a judge clicks through to). The ranked metric is WIN-RATE over
+// SETTLED positions, which is computable from THIS ONE feed alone (a settled row
+// with payout>0 is a win, payout==0 a loss; an early cash-out, is_settled=false,
+// is neither). We DELIBERATELY do NOT compute net P&L here: that needs the mint
+// `cost`, and the redeemed/minted feeds page DIFFERENT time slices, so a "payout
+// minus cost" across two truncated windows over-credits payout — a fabricated
+// number. Win-rate from one self-consistent feed is the honest metric.
+//
+// Because there is no per-row drop, a global walk is dense: testnet volume is
+// thin, so `hasNextPage` ends the walk in a handful of pages. We bound it at
+// GLOBAL_MAX_PAGES × 50 anyway so a future busy mainnet never walks unbounded.
+// NEVER invents rows — fewer real rows beats many fake ones; a sparse chain
+// renders a sparse board, honestly.
+// ============================================================================
+
+// One realized cash-out/settle row, carrying the OWNER address + the wall-clock
+// timestamp so the aggregator can order by recency for the streak read.
+export type GlobalRedeemedRow = {
+  owner: string
+  manager_id: string
+  oracle_id: string
+  is_up: boolean
+  strike: string
+  expiry: string
+  quantity: string
+  payout: string // dUSDC base units (1e6) actually received
+  is_settled: boolean // true = settlement claim (won/lost), false = early cash-out
+  ts: number // event timestampMs (0 when absent)
+}
+
+// Page a global MoveEventType feed DESC (newest first), mapping each (parsedJson,
+// timestampMs) via `map`. Mirrors query_events but (a) NO manager filter — every
+// row is kept — and (b) threads the event timestamp into the row so the caller
+// can order by recency. Best-effort: returns whatever was gathered on any error.
+const GLOBAL_MAX_PAGES = 24 // 24 × 50 = up to 1200 recent events scanned
+const query_events_global = async <T>(
+  client: ReadClient,
+  move_event_type: string,
+  map: (j: Record<string, unknown>, ts: number) => T | null,
+  cap = 1000,
+): Promise<T[]> => {
+  const out: T[] = []
+  let cursor: { txDigest: string; eventSeq: string } | null = null
+  let pages = 0
+  try {
+    while (out.length < cap && pages < GLOBAL_MAX_PAGES) {
+      pages++
+      const page = await client.queryEvents({
+        query: { MoveEventType: move_event_type },
+        cursor,
+        limit: 50,
+        order: 'descending',
+      })
+      for (const e of page.data) {
+        const j = e.parsedJson
+        if (j && typeof j === 'object') {
+          const ts = Number(e.timestampMs ?? 0) || 0
+          const row = map(j as Record<string, unknown>, ts)
+          if (row) out.push(row)
+        }
+      }
+      if (!page.hasNextPage || !page.nextCursor) break
+      cursor = page.nextCursor
+    }
+  } catch {
+    // best-effort — return what we have
+  }
+  return out
+}
+
+// Every trader's PositionRedeemed rows (newest first). Drops only rows missing
+// the load-bearing `owner` address — a row a judge couldn't click through to is
+// useless on a leaderboard.
+export const fetch_redeemed_events_global = (
+  client: ReadClient,
+): Promise<GlobalRedeemedRow[]> =>
+  query_events_global<GlobalRedeemedRow>(
+    client,
+    EVENT_POSITION_REDEEMED,
+    (j, ts) => {
+      const owner = ev_str(j, 'owner')
+      if (!owner) return null
+      return {
+        owner,
+        manager_id: ev_str(j, 'manager_id'),
+        oracle_id: ev_str(j, 'oracle_id'),
+        is_up: ev_bool(j, 'is_up'),
+        strike: ev_str(j, 'strike'),
+        expiry: ev_str(j, 'expiry'),
+        quantity: ev_str(j, 'quantity'),
+        payout: ev_str(j, 'payout'),
+        is_settled: ev_bool(j, 'is_settled'),
+        ts,
       }
     },
   )

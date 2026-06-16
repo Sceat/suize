@@ -15,7 +15,9 @@
 //      header. The single accepted requirement declares the fee split in
 //      `extra.outputs` (merchant-absorbed 2% with a $0.01 floor — fetched from the
 //      facilitator's /terms) and the idempotency id in the `payment-identifier`
-//      extension. A vanilla single-output (no fee leg) is the FREE tier.
+//      extension. A single-output requirement is STRUCTURAL (merchant == treasury,
+//      e.g. the deploy charge) — NOT a free tier: the facilitator recomputes + enforces
+//      the fee at verify, so a fee-free payment is rejected on settle.
 //   2. A retry carrying the payer's signed tx in `PAYMENT-SIGNATURE` (or the spec
 //      alias `X-PAYMENT`) → SYNCHRONOUS denies (the presented `accepted` must
 //      deep-equal OUR minted terms incl. outputs; its payment-identifier id must
@@ -160,8 +162,6 @@ const MAX_TIMEOUT_SECONDS = 120;
 
 const DEFAULT_FACILITATOR = "https://api.suize.io";
 const DEFAULT_NETWORK: Network = "sui:testnet";
-/** The hosted human pay page (the payLink fallback for a browser caller). */
-const DEFAULT_PAY_PAGE = "https://pay.suize.io";
 
 const USDC_DECIMALS = 6;
 const USDC_UNIT = 10n ** BigInt(USDC_DECIMALS);
@@ -179,8 +179,6 @@ export interface SuizeConfig {
   facilitator?: string;
   /** The chain tag stamped into the requirement ("sui:testnet" / "sui:mainnet"). */
   network?: Network;
-  /** The hosted pay page base URL (human fallback link in the 402 body). */
-  payPage?: string;
 }
 
 /** A fetch-style handler: (Request, ...anything) → Response. The extra args are
@@ -316,16 +314,29 @@ const mergeOutputs = (outputs: Output[]): Output[] => {
   return order.map((to) => ({ to, amount: sum.get(to)!.toString() }));
 };
 
+/** Thrown by suize()'s resolveOutputs when the canonical fee split can't be obtained
+ * (a cold-start /terms miss with no cached split). FAIL-CLOSED: the serve path turns it
+ * into a transient 503 — Suize is NOT a free facilitator, so we refuse to mint a
+ * fee-free challenge rather than serve a sale the facilitator would reject anyway. */
+class TermsUnavailable extends Error {
+  constructor(detail: string) {
+    super(`fee terms unavailable: ${detail}`);
+    this.name = "TermsUnavailable";
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // mintPaymentRequired — PURE + exported. The ONE x402 V2 402-body home.
 // `outputs` is the resolved fee split (caller passes the /terms result, or omits
-// it for a vanilla single-output free-tier requirement). `paymentId` lets a
+// it for a STRUCTURAL single-output requirement — merchant == treasury, e.g. the deploy
+// charge). `paymentId` lets a
 // stateful caller (suize()) pin the id it will track; omit it and one is minted.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface MintOptions {
-  /** The resolved fee split (from {facilitator}/terms). Omitted/empty → vanilla
-   * single-output (the merchant gets the whole `price` — the FREE tier). */
+  /** The resolved fee split (from {facilitator}/terms). Omitted/empty → a STRUCTURAL
+   * single output (the whole `price` to the merchant) — used ONLY when merchant ==
+   * treasury, e.g. the deploy charge. NOT a free tier: the facilitator enforces the fee. */
   outputs?: Output[];
   /** The payment-identifier id to stamp (a tracking caller pins it). Defaults to a
    * fresh `pay_…` id. */
@@ -346,7 +357,8 @@ export const mintPaymentRequired = (config: SuizeConfig, opts: MintOptions = {})
   const id = opts.paymentId ?? mintPaymentId();
 
   // The fee split: the resolved /terms outputs (same-address legs merged), or a
-  // vanilla single output paying the merchant the whole price (the free tier).
+  // STRUCTURAL single output (the whole price to the merchant — used when merchant ==
+  // treasury, e.g. the deploy charge; the facilitator enforces the fee at verify).
   const declared = opts.outputs && opts.outputs.length ? mergeOutputs(opts.outputs) : [{ to, amount: total.toString() }];
 
   const requirement: PaymentRequirements = {
@@ -402,31 +414,40 @@ export const suize = (config: SuizeConfig) => {
   const inflight = new Set<string>(); // tx (base64) currently being verified/settled
   let terms: { outputs: Output[]; at: number } | null = null; // cached fee split
 
-  /** Fetch the fee split from {facilitator}/terms (5-min TTL). FAIL-OPEN ON THE
-   * FEE, NEVER THE SALE: a fetch failure → vanilla single-output (the merchant
-   * just absorbs no fee that period rather than refusing to serve). The TERMS
-   * endpoint answers `{ outputs: [{ to, amount }, …] }` for THIS merchant+price. */
-  const resolveOutputs = async (): Promise<Output[] | undefined> => {
+  /** Fetch the canonical fee split from {facilitator}/terms (5-min TTL). FAIL-CLOSED:
+   * Suize is NOT a free facilitator — the facilitator ENFORCES the fee at verify (it
+   * recomputes the split), so a fee-free payment is rejected on settle. If we can't get a
+   * split we REFUSE to mint a challenge (throw → the serve path answers a transient 503)
+   * rather than serve fee-free. A transient miss keeps the last-good split; a cold-start
+   * miss throws. Answers `{ outputs: [{ to, amount }, …] }`. */
+  const resolveOutputs = async (): Promise<Output[]> => {
     const now = Date.now();
     if (terms && now - terms.at < TERMS_TTL_MS) return terms.outputs;
     try {
       const res = await fetch(
         `${facilitator}/terms?` + new URLSearchParams({ payTo: to, amount: price }),
       );
-      if (!res.ok) return terms?.outputs; // keep a stale split over none; else free-tier
-      const body = (await res.json()) as { outputs?: unknown };
-      const raw = Array.isArray(body.outputs) ? body.outputs : [];
-      const outputs: Output[] = raw
-        .filter((o): o is Output => !!o && typeof (o as Output).to === "string" && typeof (o as Output).amount === "string")
-        .map((o) => ({ to: o.to, amount: o.amount }));
-      // ⚠️ merge same-address legs (a colliding split would never deep-equal a
-      // single on-chain credit) — also done in mintPaymentRequired, belt+braces.
-      const merged = mergeOutputs(outputs);
-      terms = { outputs: merged, at: now };
-      return merged;
+      if (res.ok) {
+        const body = (await res.json()) as { outputs?: unknown };
+        const raw = Array.isArray(body.outputs) ? body.outputs : [];
+        const outputs: Output[] = raw
+          .filter((o): o is Output => !!o && typeof (o as Output).to === "string" && typeof (o as Output).amount === "string")
+          .map((o) => ({ to: o.to, amount: o.amount }));
+        // ⚠️ merge same-address legs (a colliding split would never deep-equal a
+        // single on-chain credit) — also done in mintPaymentRequired, belt+braces.
+        const merged = mergeOutputs(outputs);
+        if (merged.length) {
+          terms = { outputs: merged, at: now };
+          return merged;
+        }
+      }
     } catch {
-      return terms?.outputs; // fail-open: stale split if we have one, else free-tier
+      // network error — fall through to the fail-closed path below.
     }
+    // FAIL-CLOSED: a last-good split survives a transient miss; otherwise refuse to mint
+    // a fee-free challenge (the serve path turns this into a transient 503).
+    if (terms) return terms.outputs;
+    throw new TermsUnavailable(`${facilitator}/terms for ${to} @ ${price}`);
   };
 
   /** Mint a fresh tracked `PaymentRequired` for this route (and remember its id). */
@@ -569,8 +590,26 @@ export const suize = (config: SuizeConfig) => {
 
   // ── Response builders ──────────────────────────────────────────────────────
 
+  // Suize is NOT a free facilitator: when the fee split can't be resolved we REFUSE to
+  // mint a challenge and answer a transient 503 (retry) — never a fee-free sale.
+  const TERMS_UNAVAILABLE_BODY = {
+    error: "payment terms temporarily unavailable",
+    retry: "retry shortly",
+  };
+  const termsUnavailable = (): Response =>
+    new Response(JSON.stringify(TERMS_UNAVAILABLE_BODY, null, 2), {
+      status: 503,
+      headers: { "Content-Type": "application/json", "Retry-After": "2" },
+    });
+
   const challengeResponse = async (resourceUrl: string, error?: string): Promise<Response> => {
-    const body = await challenge(resourceUrl);
+    let body: PaymentRequired;
+    try {
+      body = await challenge(resourceUrl);
+    } catch (e) {
+      if (e instanceof TermsUnavailable) return termsUnavailable();
+      throw e;
+    }
     if (error) body.error = error;
     return new Response(JSON.stringify(body, null, 2), {
       status: 402,
@@ -648,6 +687,23 @@ export const suize = (config: SuizeConfig) => {
     const host = req.get?.("host") ?? first(req.headers.host) ?? "localhost";
     const url = `${req.protocol ?? "http"}://${host}${req.originalUrl ?? req.url ?? "/"}`;
 
+    // Mint a 402 challenge, or a transient 503 if the fee split can't be resolved
+    // (fail-closed — never a fee-free challenge).
+    const denyOrTerms = async (reason: string): Promise<void> => {
+      let body: PaymentRequired;
+      try {
+        body = await challenge(url);
+      } catch (e) {
+        if (e instanceof TermsUnavailable) {
+          res.status(503).set({ "Retry-After": "2" }).json(TERMS_UNAVAILABLE_BODY);
+          return;
+        }
+        throw e;
+      }
+      body.error = reason;
+      res.status(402).set({ [PAYMENT_REQUIRED_HEADER]: b64json(body) }).json(body);
+    };
+
     const inspected = await inspect(raw);
     if (inspected.kind === "transient") {
       res.status(503).set({ "Retry-After": "2" }).json(TRANSIENT_BODY);
@@ -658,9 +714,7 @@ export const suize = (config: SuizeConfig) => {
       return;
     }
     if (inspected.kind === "deny") {
-      const body = await challenge(url);
-      body.error = inspected.reason;
-      res.status(402).set({ [PAYMENT_REQUIRED_HEADER]: b64json(body) }).json(body);
+      await denyOrTerms(inspected.reason);
       return;
     }
     const settled = await settle(inspected.payload);
@@ -669,9 +723,7 @@ export const suize = (config: SuizeConfig) => {
       return;
     }
     if (settled.kind === "deny") {
-      const body = await challenge(url);
-      body.error = settled.reason;
-      res.status(402).set({ [PAYMENT_REQUIRED_HEADER]: b64json(body) }).json(body);
+      await denyOrTerms(settled.reason);
       return;
     }
     const value = b64json(settled.receipt);
@@ -685,6 +737,3 @@ export const suize = (config: SuizeConfig) => {
 };
 
 export default suize;
-
-// Re-export the human pay-page default so a caller can build a fallback link.
-export { DEFAULT_PAY_PAGE as PAY_PAGE };

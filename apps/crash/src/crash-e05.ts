@@ -70,7 +70,11 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   .e05 {
     --e05-pad: clamp(14px, 2.6vw, 30px);
     --e05-col: min(640px, 88vw);
-    --e05-footer-h: clamp(146px, 21vh, 188px);
+    /* The House lives on its OWN tab now (src/shell). Play is PURE bet + chart +
+       cash-out, so there is no bottom footer band to reserve — the centre column,
+       tape, and toasts sit at the true bottom. Kept as a token (set to 0) so the
+       existing "bottom: var(--e05-footer-h)" math collapses cleanly with no gap. */
+    --e05-footer-h: 0px;
     /* Boxicons bxs-trophy (MIT), URL-encoded for a CSS mask. Used by the WIN
        toast ::before so the icon paints in currentColor (the green bull ink). */
     --e05-trophy: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M21 4h-3V3a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1v1H3a1 1 0 0 0-1 1v3c0 4.31 1.8 6.91 4.82 7A6 6 0 0 0 11 17.91V20H9v2h6v-2h-2v-2.09A6 6 0 0 0 17.18 15c3-.1 4.82-2.7 4.82-7V5a1 1 0 0 0-1-1zM4 8V6h2v6.83C4.22 12.08 4 9.3 4 8zm14 4.83V6h2v2c0 1.3-.22 4.08-2 4.83z'/%3E%3C/svg%3E");
@@ -417,12 +421,96 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     padding-bottom: clamp(18px, 3.4vh, 34px);
   }
 
+  /* ===== ASSET / MARKET CONTEXT STRIP — Play is multi-market-ready =====
+     A centered, single editorial row pinned above the masthead. BTC is the live
+     market (the lone blue accent here: an underline + live spot in Martian Mono);
+     ETH/SOL/SUI are HONEST locked cards (desaturated, "In Markets", a → glyph that
+     routes to the Markets tab) — never fake odds, never "coming soon". Flat 2px
+     radius (no pills), hairline borders (no glow), no live diode. */
+  .e05 .e05-markets {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: clamp(14px, 2.2vh, 30px);
+    z-index: 3;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: clamp(6px, 1vw, 10px);
+    max-width: min(560px, 84vw);
+  }
+  .e05 .e05-mkt {
+    appearance: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    background: var(--paper-2);
+    border: 1px solid var(--hair);
+    border-radius: 2px;
+    padding: 7px clamp(9px, 1.4vw, 13px) 6px;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+  }
+  .e05 .e05-mkt-sym {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--ink);
+    line-height: 1;
+  }
+  .e05 .e05-mkt-spot {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--blue-deep);
+    line-height: 1.1;
+  }
+  .e05 .e05-mkt-tag {
+    font-family: var(--sans);
+    font-size: 8.5px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    line-height: 1.1;
+  }
+  /* the LIVE market: the lone blue accent — a 2px under-rule + a live spot. */
+  .e05 .e05-mkt.is-live {
+    background: var(--blue-wash);
+    border-color: var(--hair-blue);
+    position: relative;
+  }
+  .e05 .e05-mkt.is-live::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: -1px;
+    height: 2px;
+    background: var(--blue);
+  }
+  .e05 .e05-mkt.is-live .e05-mkt-tag { color: var(--blue-deep); }
+  .e05 .e05-mkt.is-live:hover { border-color: var(--blue); }
+  /* LOCKED siblings: desaturated, a → glyph in muted ink, route to Markets. */
+  .e05 .e05-mkt.is-locked { opacity: 0.62; }
+  .e05 .e05-mkt.is-locked .e05-mkt-sym { color: var(--ink-2); }
+  .e05 .e05-mkt.is-locked:hover { opacity: 0.92; border-color: var(--hair-strong); }
+  .e05 .e05-mkt-lock {
+    display: inline-flex;
+    align-items: center;
+    color: var(--ink-4);
+    height: 11px;
+  }
+  .e05 .e05-mkt-lock svg { width: 1em; height: 1em; }
+  .e05 .e05-mkt:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
   /* ===== COUNTDOWN MASTHEAD — the nameplate + the big urgency clock ===== */
   .e05 .e05-masthead {
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    top: clamp(54px, 8.4vh, 96px);
+    top: clamp(94px, 13vh, 150px);
     width: var(--e05-col);
     text-align: center;
     pointer-events: none;
@@ -855,11 +943,7 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   .e05.e05-is-pending .e05-bet,
   .e05.e05-is-pending .e05-chip,
   .e05.e05-is-pending .e05-chip-max,
-  .e05.e05-is-pending .e05-pos-cta,
-  .e05.e05-is-pending .e05-cta,
-  .e05.e05-is-pending .e05-house-withdraw,
-  .e05.e05-is-pending .e05-sheet-cta,
-  .e05.e05-is-pending .e05-cashout {
+  .e05.e05-is-pending .e05-pos-cta {
     pointer-events: none;
     cursor: not-allowed;
     opacity: 0.5;
@@ -1137,318 +1221,7 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   /* every row stays in normal ink — the .e05-tape top fade-mask is the ONLY
      ageing cue, so older rows are never half-greyed and stay fully legible. */
 
-  /* ================================================================= */
-  /*  THE HOUSE FOOTER BAND — full-width, paper-2, top hairline.        */
-  /* ================================================================= */
-  .e05 .e05-footer {
-    position: absolute;
-    left: 0; right: 0; bottom: 0;
-    height: var(--e05-footer-h);
-    background: var(--paper-2);
-    border-top: 1px solid var(--hair);
-    padding: 0 clamp(20px, 3.4vw, 48px);
-    display: grid;
-    grid-template-columns:
-      minmax(248px, 1.05fr)
-      minmax(190px, 0.78fr)
-      minmax(150px, 0.62fr)
-      auto;
-    align-items: center;
-    gap: clamp(22px, 3.6vw, 52px);
-  }
-  .e05 .e05-house-yield,
-  .e05 .e05-house-mid {
-    position: relative;
-  }
-  .e05 .e05-house-yield::before,
-  .e05 .e05-house-mid::before {
-    content: '';
-    position: absolute;
-    left: calc(-1 * clamp(11px, 1.8vw, 26px));
-    top: 50%;
-    transform: translateY(-50%);
-    width: 1px;
-    height: 64%;
-    background: linear-gradient(180deg, transparent, var(--hair) 22%, var(--hair) 78%, transparent);
-  }
-  .e05 .e05-footer::before {
-    content: '';
-    position: absolute;
-    left: 0; right: 0; top: -1px;
-    height: 1px;
-    background: var(--rule-fade);
-  }
-
-  /* -- column 1: the TVL hero (the dominant number on the page) -- */
-  .e05 .e05-house-hero { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-  .e05 .e05-house-eyebrow {
-    display: flex;
-    align-items: baseline;
-    gap: 9px;
-  }
-  .e05 .e05-house-eyebrow .e05-house-tag {
-    font-family: var(--serif);
-    font-weight: 600;
-    font-size: 11px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--ink-2);
-  }
-  .e05 .e05-house-eyebrow .e05-house-lbl {
-    font-family: var(--sans);
-    font-size: 9px;
-    font-weight: 500;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    color: var(--ink-3);
-  }
-  .e05 .e05-tvl {
-    font-family: var(--mono);
-    font-weight: 700;
-    font-size: clamp(42px, 6vw, 72px);
-    /* line-height 1.02 reserves the full glyph box so the share-price line below
-       can never ride up into the big number (the old 0.9 cropped the box and let
-       the spark overlap). */
-    line-height: 1.02;
-    color: var(--blue-deep);
-    white-space: nowrap;
-    margin-top: 1px;
-  }
-  /* TVL band: just the big number + label + a live share-price line (no chart).
-     Sits clearly BELOW the TVL with its own breathing room at any width. */
-  .e05 .e05-house-spark {
-    display: flex;
-    align-items: center;
-    margin-top: 6px;
-  }
-  .e05 .e05-house-chg {
-    font-family: var(--mono);
-    font-size: 11px;
-    font-weight: 600;
-    line-height: 1.3;
-    color: var(--blue-bright);
-    white-space: nowrap;
-  }
-
-  /* -- column 2: the YIELD register — "what would I earn?" (BLUE ink) -- */
-  .e05 .e05-house-yield {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    min-width: 0;
-  }
-  .e05 .e05-yield-eyebrow {
-    font-family: var(--sans);
-    font-size: 9px;
-    font-weight: 500;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: var(--ink-3);
-  }
-  .e05 .e05-yield-apy {
-    display: flex;
-    align-items: baseline;
-    gap: 7px;
-    white-space: nowrap;
-  }
-  .e05 .e05-yield-apy .e05-yield-num {
-    font-family: var(--mono);
-    font-weight: 700;
-    /* MORE PROMINENT yield (UX item #6) — a touch larger so the real all-time
-       return reads as a hero figure of the house panel. */
-    font-size: clamp(30px, 3.8vw, 46px);
-    line-height: 0.92;
-    color: var(--blue-deep);
-  }
-  /* HOLDER: the user's REAL stake, prominent + labeled "Your stake" (UX item #6).
-     This REPLACES the deposit projection while a position is held — the prominent
-     house number for a holder is their stake value, never the betting wallet. */
-  .e05 .e05-yield-stake {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    margin-top: 2px;
-  }
-  .e05 .e05-yield-stake:empty { display: none; }
-  .e05 .e05-yield-stake .e05-yield-stake-lbl {
-    font-family: var(--sans);
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--ink-3);
-  }
-  .e05 .e05-yield-stake .e05-yield-stake-val {
-    font-family: var(--mono);
-    font-weight: 700;
-    font-size: clamp(18px, 2.2vw, 24px);
-    line-height: 1;
-    color: var(--blue-deep);
-  }
-  .e05 .e05-yield-apy .e05-yield-unit {
-    font-family: var(--sans);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--blue);
-  }
-  .e05 .e05-yield-proj {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    margin-top: 1px;
-  }
-  .e05 .e05-proj {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    font-size: 12px;
-    line-height: 1.25;
-    white-space: nowrap;
-    color: var(--ink-2);
-  }
-  .e05 .e05-proj .e05-proj-from {
-    font-family: var(--mono);
-    font-weight: 500;
-    color: var(--ink-2);
-    flex: 0 0 auto;
-  }
-  .e05 .e05-proj .e05-proj-arrow {
-    display: inline-flex; align-items: center;
-    color: var(--ink-4);
-    flex: 0 0 auto;
-  }
-  .e05 .e05-proj .e05-proj-earn {
-    font-family: var(--mono);
-    font-weight: 700;
-    color: var(--blue-deep);
-    flex: 0 0 auto;
-  }
-  .e05 .e05-proj .e05-proj-per {
-    font-family: var(--sans);
-    font-size: 10px;
-    letter-spacing: 0.04em;
-    color: var(--ink-3);
-    flex: 0 0 auto;
-  }
-  .e05 .e05-proj--tier { color: var(--ink-3); }
-  .e05 .e05-proj--tier .e05-proj-from { color: var(--ink-3); }
-  .e05 .e05-proj--tier .e05-proj-earn { color: var(--blue); }
-
-  /* -- column 3: the reframe + dotted-leader stats -- */
-  .e05 .e05-house-mid { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-  .e05 .e05-reframe {
-    font-family: var(--serif);
-    font-size: clamp(14px, 1.7vw, 17px);
-    font-weight: 500;
-    line-height: 1.2;
-    color: var(--ink);
-  }
-  .e05 .e05-stats { display: flex; flex-direction: column; gap: 5px; }
-  .e05 .e05-stat {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    font-size: 11px;
-    color: var(--ink-2);
-  }
-  .e05 .e05-stat .e05-stat-k {
-    font-family: var(--sans);
-    font-size: 9.5px;
-    font-weight: 500;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--ink-3);
-    flex: 0 0 auto;
-  }
-  .e05 .e05-stat .e05-leader {
-    flex: 1 1 auto;
-    height: 0;
-    border-bottom: 1px dotted var(--hair-strong);
-    transform: translateY(-3px);
-  }
-  .e05 .e05-stat .e05-stat-v {
-    font-family: var(--mono);
-    flex: 0 0 auto;
-    color: var(--ink);
-  }
-  .e05 .e05-stat .e05-stat-v.is-blue { color: var(--blue-deep); }
-
-  /* -- column 4: the deposit CTA (BLUE — never green/red) -- */
-  .e05 .e05-house-cta-wrap { display: flex; flex-direction: column; align-items: stretch; gap: 7px; }
-  .e05 .e05-cta {
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 9px;
-    max-width: 100%;
-    min-width: 0;
-    background: var(--blue-wash);
-    border: 1px solid var(--hair-blue);
-    border-radius: 3px;
-    color: var(--blue-deep);
-    font-family: var(--sans);
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    padding: 13px clamp(14px, 3vw, 22px);
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-  }
-  /* the CTA label ellipsizes instead of widening the button past its column */
-  .e05 .e05-cta > [data-cta-label] {
-    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .e05 .e05-cta .e05-cta-caret { flex: 0 0 auto; }
-  .e05 .e05-cta:hover { background: rgba(30, 127, 214, 0.12); border-color: var(--blue); }
-  .e05 .e05-cta:active { transform: translateY(1px); }
-  .e05 .e05-cta:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-  .e05 .e05-cta:disabled { opacity: 0.5; cursor: not-allowed; }
-  .e05 .e05-cta .e05-cta-caret { display: inline-flex; align-items: center; color: var(--blue-bright); transition: transform 0.2s ease; }
-  .e05 .e05-cta:hover .e05-cta-caret { transform: translateY(-2px); }
-  .e05 .e05-disclaimer {
-    font-family: var(--sans);
-    font-size: 9px;
-    line-height: 1.4;
-    letter-spacing: 0.02em;
-    color: var(--ink-3);
-    max-width: 220px;
-    text-align: center;
-  }
-  /* WITHDRAW FROM HOUSE — lives in the house section (UX item I). A secondary,
-     subordinate action under the primary "Add to the house" CTA. BLUE chrome to
-     match the house language (never green/red). */
-  .e05 .e05-house-withdraw {
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    max-width: 100%;
-    min-width: 0;
-    background: transparent;
-    border: 1px solid var(--hair-blue);
-    border-radius: 3px;
-    color: var(--blue-deep);
-    font-family: var(--sans);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    padding: 9px clamp(12px, 2.6vw, 18px);
-    cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-  }
-  .e05 .e05-house-withdraw:hover { background: rgba(30, 127, 214, 0.08); border-color: var(--blue); }
-  .e05 .e05-house-withdraw:active { transform: translateY(1px); }
-  .e05 .e05-house-withdraw:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-  .e05 .e05-house-withdraw:disabled { opacity: 0.5; cursor: not-allowed; }
+  /* THE HOUSE FOOTER BAND moved to its OWN /house tab (src/shell). */
 
   /* ===== OUTCOME FLASH on settle — single eased opacity wash ===== */
   .e05 .e05-flash { position: absolute; inset: 0; z-index: 4; pointer-events: none; opacity: 0; }
@@ -1462,154 +1235,7 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   }
   @keyframes e05-flash { 0% { opacity: 0; } 18% { opacity: 1; } 100% { opacity: 0; } }
 
-  /* ===== DEPOSIT SHEET — slides UP over a --scrim-dimmed live surface ===== */
-  .e05 .e05-scrim {
-    position: absolute; inset: 0; z-index: 6;
-    background: var(--scrim);
-    opacity: 0; pointer-events: none;
-    transition: opacity 0.28s ease;
-  }
-  .e05 .e05-scrim.is-open { opacity: 1; pointer-events: auto; }
-  .e05 .e05-sheet {
-    position: absolute;
-    left: 50%; bottom: 0;
-    z-index: 7;
-    width: min(560px, 94vw);
-    transform: translate(-50%, 100%);
-    background: var(--card);
-    border: 1px solid var(--hair);
-    border-bottom: 0;
-    border-radius: 3px 3px 0 0;
-    padding: 18px var(--e05-pad) calc(var(--e05-pad) + 4px);
-    pointer-events: none;
-    transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
-    box-shadow: 0 -24px 60px -34px rgba(10, 27, 46, 0.4);
-  }
-  .e05 .e05-sheet.is-open { transform: translate(-50%, 0); pointer-events: auto; }
-  .e05 .e05-sheet-top {
-    display: flex; align-items: baseline; justify-content: space-between;
-    gap: 12px; margin-bottom: 6px;
-  }
-  .e05 .e05-sheet-kicker {
-    font-family: var(--serif);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--blue-deep);
-  }
-  .e05 .e05-back {
-    appearance: none; background: transparent; border: 0;
-    display: inline-flex; align-items: center; gap: 4px;
-    color: var(--ink-3);
-    font-family: var(--sans);
-    font-size: 10px; font-weight: 500;
-    letter-spacing: 0.18em; text-transform: uppercase;
-    cursor: pointer; transition: color 0.15s ease;
-  }
-  .e05 .e05-back:hover { color: var(--ink); }
-  .e05 .e05-back:focus-visible { outline: 1px solid var(--blue); outline-offset: 2px; }
-  .e05 .e05-sheet-reframe {
-    font-family: var(--serif);
-    font-size: clamp(18px, 2.6vw, 22px);
-    font-weight: 500;
-    line-height: 1.16;
-    color: var(--ink);
-    margin: 2px 0 12px;
-  }
-  .e05 .e05-share {
-    font-family: var(--mono);
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--blue-deep);
-    margin-bottom: 12px;
-  }
-  .e05 .e05-share .e05-share-tail { font-family: var(--sans); color: var(--ink-2); font-weight: 400; }
-  .e05 .e05-sheet-stats { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; }
-  .e05 .e05-sheet-stat {
-    display: flex; align-items: baseline; gap: 8px;
-    font-size: 11px; color: var(--ink-2);
-  }
-  .e05 .e05-sheet-stat .e05-ss-k {
-    font-family: var(--sans);
-    font-size: 9.5px; font-weight: 500;
-    letter-spacing: 0.16em; text-transform: uppercase;
-    color: var(--ink-3); flex: 0 0 auto;
-  }
-  .e05 .e05-sheet-stat .e05-ss-lead {
-    flex: 1 1 auto; height: 0;
-    border-bottom: 1px dotted var(--hair-strong);
-    transform: translateY(-3px);
-  }
-  .e05 .e05-sheet-stat .e05-ss-v { font-family: var(--mono); flex: 0 0 auto; color: var(--ink); }
-  .e05 .e05-sheet-stat .e05-ss-v.is-blue { color: var(--blue-deep); }
-  .e05 .e05-sheet-stat .e05-ss-hint { font-family: var(--sans); color: var(--ink-3); }
-  .e05 .e05-field {
-    display: flex; align-items: center; gap: 9px;
-    border-bottom: 1px solid var(--hair-strong);
-    padding: 6px 2px 8px; margin-bottom: 14px;
-  }
-  .e05 .e05-field .e05-field-cur {
-    font-family: var(--mono); font-size: 22px; font-weight: 600; color: var(--ink-3);
-  }
-  .e05 .e05-field input {
-    flex: 1 1 auto; appearance: none; background: transparent; border: 0; outline: none;
-    color: var(--ink);
-    font-family: var(--mono); font-size: 22px; font-weight: 600;
-    font-variant-numeric: tabular-nums; min-width: 0; padding: 0;
-  }
-  .e05 .e05-field input::-webkit-outer-spin-button,
-  .e05 .e05-field input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-  .e05 .e05-field input::placeholder { color: var(--ink-4); }
-  .e05 .e05-field-presets { display: flex; gap: 5px; flex: 0 0 auto; }
-  .e05 .e05-fp {
-    appearance: none; background: var(--paper-3);
-    border: 1px solid var(--hair); border-radius: 2px;
-    color: var(--ink-2);
-    font-family: var(--mono); font-size: 11px;
-    padding: 3px 8px; cursor: pointer;
-    transition: color 0.15s ease, border-color 0.15s ease;
-  }
-  .e05 .e05-fp:hover { color: var(--ink); border-color: var(--hair-strong); }
-  .e05 .e05-fp:disabled { opacity: 0.5; cursor: not-allowed; }
-  .e05 .e05-sheet-cta {
-    appearance: none; width: 100%;
-    display: flex; align-items: center; justify-content: center; gap: 9px;
-    background: var(--blue);
-    border: 1px solid var(--blue-deep); border-radius: 3px;
-    color: #fff;
-    font-family: var(--sans); font-size: 13px; font-weight: 600;
-    letter-spacing: 0.14em; text-transform: uppercase;
-    padding: 13px; cursor: pointer;
-    transition: background-color 0.15s ease, transform 0.15s ease;
-  }
-  .e05 .e05-sheet-cta:hover { background: var(--blue-deep); }
-  .e05 .e05-sheet-cta:active { transform: translateY(1px); }
-  .e05 .e05-sheet-cta:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-  .e05 .e05-sheet-cta:disabled { opacity: 0.5; cursor: not-allowed; }
-  .e05 .e05-sheet-foot {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; margin-top: 11px;
-  }
-  .e05 .e05-variance {
-    font-family: var(--sans);
-    font-size: 10px; line-height: 1.4;
-    color: var(--ink-3); letter-spacing: 0.01em;
-    max-width: 60%;
-    text-decoration: none;
-  }
-  .e05 .e05-cashout {
-    appearance: none; background: transparent; border: 0;
-    display: inline-flex; align-items: center; gap: 4px;
-    font-family: var(--sans);
-    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--ink-2); text-decoration: none;
-    border-bottom: 1px solid var(--hair);
-    white-space: nowrap; cursor: pointer;
-    transition: color 0.15s ease, border-color 0.15s ease;
-  }
-  .e05 .e05-cashout:hover { color: var(--blue-deep); border-color: var(--hair-blue); }
-  .e05 .e05-cashout:disabled { opacity: 0.5; cursor: not-allowed; }
+  /* DEPOSIT SHEET moved to the /house tab (src/shell). */
 
   /* ===== TOASTS — thin frameless lines =====
      Anchored to the bottom-RIGHT seam above the footer (mirroring the bet-tape
@@ -1693,10 +1319,9 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
 
   /* ---------- reduced motion ---------- */
   @media (prefers-reduced-motion: reduce) {
-    .e05 .e05-bet, .e05 .e05-cta, .e05 .e05-sheet, .e05 .e05-scrim,
-    .e05 .e05-lockbar i, .e05 .e05-bet-double, .e05 .e05-cta .e05-cta-caret { transition: none; }
+    .e05 .e05-bet,
+    .e05 .e05-lockbar i, .e05 .e05-bet-double { transition: none; }
     .e05 .e05-flash.is-up, .e05 .e05-flash.is-down { animation: none; }
-    .e05 .e05-sheet { transition: transform 0.001s linear; }
     /* loader degrades to a centered segment doing a gentle opacity pulse */
     .e05 .e05-load > i {
       animation: e05-load-pulse 1.4s ease-in-out infinite;
@@ -1715,29 +1340,8 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   /*  house footer band, toast. Tested at ~375 / ~768 / ~1440.            */
   /* ==================================================================== */
 
-  /* ---- DESKTOP-DOWN: collapse the footer's 4th editorial column ---- */
-  @media (max-width: 980px) {
-    .e05 .e05-footer {
-      grid-template-columns:
-        minmax(220px, 1fr)
-        minmax(180px, 0.8fr)
-        auto;
-      gap: clamp(18px, 3vw, 36px);
-    }
-    .e05 .e05-house-mid { display: none; }
-    .e05 .e05-house-mid::before { display: none; }
-  }
-
-  /* ---- TABLET (~768px): two-column footer, trim the acct cluster ---- */
+  /* ---- TABLET (~768px): trim the acct cluster ---- */
   @media (max-width: 720px) {
-    .e05 { --e05-footer-h: clamp(168px, 28vh, 216px); }
-    .e05 .e05-footer {
-      grid-template-columns: 1fr auto;
-      gap: 14px;
-      row-gap: 8px;
-    }
-    .e05 .e05-house-yield::before { display: none; }
-    .e05 .e05-yield-proj .e05-proj--tier { display: none; }
     /* trim the cluster: drop "Add funds" (it lives in the deposit sheet too) so
        the header stays one tidy line. The separator goes with it (only Sign out
        remains in the actions half, so the hairline would be redundant). */
@@ -1745,7 +1349,6 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     .e05 .e05-acct-actions::before { display: none; }
     .e05 .e05-acct-actions .e05-link:first-child { display: none; }
     .e05 .e05-tape { width: min(220px, 52vw); }
-    .e05 .e05-disclaimer { display: none; }
     /* the acct cluster narrows so it can't collide with the centred masthead */
     .e05 .e05-acct { max-width: 62vw; gap: 12px; }
     .e05 .e05-acct-bal .e05-bal-val { font-size: 17px; }
@@ -1832,13 +1435,29 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     /* results log stays hidden on phones (session still records settles) */
     .e05 .e05-results { display: none; }
 
+    /* MARKET CONTEXT STRIP — in flow under the header, horizontally scrollable so
+       the four cards never overrun a narrow phone (no wrap, no clip). */
+    .e05 .e05-markets {
+      position: static;
+      top: auto; left: auto;
+      transform: none;
+      max-width: 100%;
+      margin-top: clamp(14px, 3.5vh, 26px);
+      justify-content: flex-start;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .e05 .e05-markets::-webkit-scrollbar { display: none; }
+    .e05 .e05-mkt { flex: 0 0 auto; }
+
     /* MASTHEAD — countdown clock, in flow under the header. */
     .e05 .e05-masthead {
       position: static;
       top: auto; left: auto;
       transform: none;
       width: 100%;
-      margin-top: clamp(18px, 5vh, 40px);
+      margin-top: clamp(14px, 4vh, 32px);
     }
     /* the masthead frost quad assumed an absolute parent; neutralise it. */
     .e05 .e05-masthead::before { display: none; }
@@ -1881,29 +1500,6 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     }
     /* settle flash covers the visible viewport, not the tall scroll page. */
     .e05 .e05-flash { position: fixed; }
-
-    /* HOUSE FOOTER — now a normal stacked, OPAQUE band at the BOTTOM of the
-       column (reachable by scrolling), single-column rows, no fixed height. The
-       opaque --paper-2 background (set on the base rule) covers the fixed chart
-       behind it. Negative side margins reclaim .e05-fg's horizontal padding so
-       the band runs full-bleed to the screen edges, with its own top hairline. */
-    .e05 .e05-footer {
-      position: static;
-      left: auto; right: auto; bottom: auto;
-      height: auto;
-      grid-template-columns: 1fr;
-      align-content: center;
-      gap: 10px;
-      margin: clamp(20px, 5vh, 40px)
-              calc(-1 * (env(safe-area-inset-right, 0px) + var(--e05-pad)))
-              0
-              calc(-1 * (env(safe-area-inset-left, 0px) + var(--e05-pad)));
-      padding: 22px clamp(16px, 4vw, 24px)
-               calc(env(safe-area-inset-bottom, 0px) + 28px);
-    }
-    .e05 .e05-house-yield { display: none; }
-    .e05 .e05-house-yield::before { display: none; }
-    .e05 .e05-house-cta-wrap { align-items: stretch; }
   }
 
   /* ---- SMALL PHONE (≤480px): drop the densest chrome ---- */
@@ -2017,6 +1613,34 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
          cluster / sign-out. Rows rendered live from host.data.results. -->
     <div class="e05-results" data-results aria-live="polite"></div>
 
+    <!-- ASSET / MARKET CONTEXT — Play is multi-market-READY. BTC is the one live
+         market (active, blue, live spot); the siblings are HONEST locked cards
+         (no fake odds, no "coming soon") — the full grid lives in the Markets tab.
+         A tap on a locked card routes to Markets; the BTC card is the current
+         context. Numerals = Martian Mono; the lone blue accent = the live market. -->
+    <div class="e05-markets" role="tablist" aria-label="Market">
+      <button type="button" class="e05-mkt is-live" data-mkt="BTC" role="tab" aria-selected="true">
+        <span class="e05-mkt-sym">BTC</span>
+        <span class="e05-mkt-spot tnum" data-mkt-spot>—</span>
+        <span class="e05-mkt-tag">Live · 15-min rounds</span>
+      </button>
+      <button type="button" class="e05-mkt is-locked" data-mkt-locked="ETH" role="tab" aria-selected="false" aria-label="Ethereum — opens when DeepBook lists it">
+        <span class="e05-mkt-sym">ETH</span>
+        <span class="e05-mkt-lock">${ico('right', 0.82)}</span>
+        <span class="e05-mkt-tag">Not yet listed</span>
+      </button>
+      <button type="button" class="e05-mkt is-locked" data-mkt-locked="SOL" role="tab" aria-selected="false" aria-label="Solana — opens when DeepBook lists it">
+        <span class="e05-mkt-sym">SOL</span>
+        <span class="e05-mkt-lock">${ico('right', 0.82)}</span>
+        <span class="e05-mkt-tag">Not yet listed</span>
+      </button>
+      <button type="button" class="e05-mkt is-locked" data-mkt-locked="SUI" role="tab" aria-selected="false" aria-label="Sui — opens when DeepBook lists it">
+        <span class="e05-mkt-sym">SUI</span>
+        <span class="e05-mkt-lock">${ico('right', 0.82)}</span>
+        <span class="e05-mkt-tag">Not yet listed</span>
+      </button>
+    </div>
+
     <div class="e05-masthead" aria-live="polite">
       <div class="e05-kicker">Today's Round</div>
       <div class="e05-kicker-rule"></div>
@@ -2108,129 +1732,8 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
 
     <div class="e05-flash" data-flash></div>
 
-    <footer class="e05-footer">
-      <div class="e05-house-hero">
-        <div class="e05-house-eyebrow">
-          <span class="e05-house-tag">The House</span>
-          <span class="e05-house-lbl">Total Pool · TVL</span>
-        </div>
-        <div class="e05-tvl tnum" data-tvl>…</div>
-        <div class="e05-house-spark">
-          <span class="e05-house-chg tnum" data-chg></span>
-        </div>
-      </div>
-
-      <div class="e05-house-yield">
-        <span class="e05-yield-eyebrow">Yield · paid by the bets</span>
-        <span class="e05-yield-apy">
-          <span class="e05-yield-num tnum" data-yield-num>—</span>
-          <span class="e05-yield-unit" data-yield-unit>all-time</span>
-        </span>
-        <!-- HOLDER: the user's REAL stake, prominent + labeled "Your stake". -->
-        <div class="e05-yield-stake" data-stake-block hidden>
-          <span class="e05-yield-stake-lbl">Your stake</span>
-          <span class="e05-yield-stake-val tnum" data-stake-val>$0</span>
-        </div>
-        <!-- NON-HOLDER: a clearly-labeled projection of DEPOSITABLE funds. -->
-        <div class="e05-yield-proj" data-proj-block>
-          <span class="e05-proj">
-            <span class="e05-proj-from tnum" data-proj-from>Deposit $0</span>
-            <span class="e05-proj-arrow">${ico('right', 0.9)}</span>
-            <span class="e05-proj-earn tnum" data-proj-earn>+$0</span>
-            <span class="e05-proj-per">projected · at current rate</span>
-          </span>
-          <span class="e05-proj e05-proj--tier">
-            <span class="e05-proj-from tnum">Deposit $1,000</span>
-            <span class="e05-proj-arrow">${ico('right', 0.9)}</span>
-            <span class="e05-proj-earn tnum" data-proj-tier>+$0</span>
-            <span class="e05-proj-per">projected · at current rate</span>
-          </span>
-        </div>
-      </div>
-
-      <div class="e05-house-mid">
-        <div class="e05-reframe">Every bet pays the house. Own a slice of it.</div>
-        <div class="e05-stats">
-          <div class="e05-stat">
-            <span class="e05-stat-k">Utilization</span>
-            <span class="e05-leader"></span>
-            <span class="e05-stat-v tnum" data-util>—</span>
-          </div>
-          <div class="e05-stat">
-            <span class="e05-stat-k">Share price</span>
-            <span class="e05-leader"></span>
-            <span class="e05-stat-v is-blue tnum" data-shareprice>—</span>
-          </div>
-          <div class="e05-stat" data-yourstake-row hidden>
-            <span class="e05-stat-k">Your stake</span>
-            <span class="e05-leader"></span>
-            <span class="e05-stat-v is-blue tnum" data-yourstake></span>
-          </div>
-        </div>
-      </div>
-
-      <div class="e05-house-cta-wrap">
-        <button type="button" class="e05-cta e05-hit" data-house aria-label="Become the house">
-          <span data-cta-label>Become the house</span>
-          <span class="e05-cta-caret">${ico('up', 0.9)}</span>
-        </button>
-        <!-- UX item I: the WITHDRAW control lives IN the house section (not just
-             in the deposit sheet), visible whenever a position is held. -->
-        <button type="button" class="e05-house-withdraw e05-hit" data-house-withdraw aria-label="Withdraw from house" hidden>
-          Withdraw from house
-        </button>
-        <span class="e05-disclaimer">You take the other side of every bet: you earn when players lose, but lose when they win. The house edge is statistical, not guaranteed. Withdraw anytime.</span>
-      </div>
-    </footer>
-
-    <div class="e05-scrim" data-scrim></div>
-    <div class="e05-sheet" data-sheet role="dialog" aria-modal="false" aria-label="Become the house">
-      <div class="e05-sheet-top">
-        <span class="e05-sheet-kicker">Be the house</span>
-        <button type="button" class="e05-back" data-back>${ico('down', 0.9)} back to the bet</button>
-      </div>
-      <div class="e05-sheet-reframe">Every bet pays the house.<br>Own a slice of it.</div>
-      <div class="e05-share">
-        <span data-sheet-share>$1.0000</span> <span class="e05-share-tail">per PLP share · live</span>
-      </div>
-      <div class="e05-sheet-stats">
-        <div class="e05-sheet-stat">
-          <span class="e05-ss-k">Pool · TVL</span>
-          <span class="e05-ss-lead"></span>
-          <span class="e05-ss-v is-blue tnum" data-sheet-tvl>…</span>
-        </div>
-        <div class="e05-sheet-stat">
-          <span class="e05-ss-k">Your stake</span>
-          <span class="e05-ss-lead"></span>
-          <span class="e05-ss-v tnum" data-sheet-stake>—</span>
-        </div>
-        <div class="e05-sheet-stat">
-          <span class="e05-ss-k">All-time yield</span>
-          <span class="e05-ss-lead"></span>
-          <span class="e05-ss-v is-blue tnum" data-sheet-yield>—</span>
-        </div>
-      </div>
-      <div class="e05-field">
-        <span class="e05-field-cur">$</span>
-        <input type="number" inputmode="decimal" min="0" step="any" placeholder="0" data-dep-input aria-label="Deposit amount" />
-        <span class="e05-field-presets">
-          <button type="button" class="e05-fp tnum" data-dep-preset="100">100</button>
-          <button type="button" class="e05-fp tnum" data-dep-preset="500">500</button>
-          <button type="button" class="e05-fp tnum" data-dep-preset="1000">1k</button>
-          <button type="button" class="e05-fp tnum" data-dep-max hidden>MAX</button>
-        </span>
-      </div>
-      <button type="button" class="e05-sheet-cta" data-dep-cta>
-        <span data-dep-cta-label>Become the house</span>
-      </button>
-      <div class="e05-sheet-foot">
-        <span class="e05-variance" data-variance>
-          Win USDC every time a player loses a bet. Withdraw anytime.
-        </span>
-        <button type="button" class="e05-cashout" data-addfunds hidden>Add funds ${ico('right', 0.9)}</button>
-        <button type="button" class="e05-cashout" data-redeem hidden>Cash out of the house</button>
-      </div>
-    </div>
+    <!-- The House (TVL/yield/deposit) + its deposit sheet live on the /house
+         tab now (src/shell). Play is pure bet + chart + cash-out. -->
 
     <div class="e05-toast" data-toast hidden></div>
   `
@@ -2242,6 +1745,7 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   const $ = <T extends Element = HTMLElement>(sel: string): T =>
     fg.querySelector(sel) as T
   const acctEl = $('[data-acct]') as HTMLElement
+  const mktSpotEl = $('[data-mkt-spot]')
   const cdEyebrowEl = $('[data-cd-eyebrow]')
   const cdMmEl = $('[data-cd-mm]')
   const cdSsEl = $('[data-cd-ss]')
@@ -2284,37 +1788,8 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   const posUpRefs = posRefs('up')
   const posDownRefs = posRefs('down')
 
-  const tvlEl = $('[data-tvl]')
-  const chgEl = $('[data-chg]')
-  const yieldNumEl = $('[data-yield-num]')
-  const yieldUnitEl = $('[data-yield-unit]')
-  const projBlockEl = $('[data-proj-block]') as HTMLElement
-  const stakeBlockEl = $('[data-stake-block]') as HTMLElement
-  const stakeValEl = $('[data-stake-val]')
-  const projFromEl = $('[data-proj-from]')
-  const projEarnEl = $('[data-proj-earn]')
-  const projTierEl = $('[data-proj-tier]')
-  const utilEl = $('[data-util]')
-  const sharePriceEl = $('[data-shareprice]')
-  const yourStakeRow = $('[data-yourstake-row]') as HTMLElement
-  const yourStakeEl = $('[data-yourstake]')
-
-  const houseBtn = $('[data-house]') as HTMLButtonElement
-  const houseWithdrawBtn = $('[data-house-withdraw]') as HTMLButtonElement
-  const ctaLabelEl = $('[data-cta-label]')
-  const scrimEl = $('[data-scrim]') as HTMLElement
-  const sheetEl = $('[data-sheet]') as HTMLElement
-  const backBtn = $('[data-back]') as HTMLButtonElement
-  const sheetShareEl = $('[data-sheet-share]')
-  const sheetTvlEl = $('[data-sheet-tvl]')
-  const sheetStakeEl = $('[data-sheet-stake]')
-  const sheetYieldEl = $('[data-sheet-yield]')
-  const depInput = $('[data-dep-input]') as HTMLInputElement
-  const depMaxBtn = $('[data-dep-max]') as HTMLButtonElement
-  const depCta = $('[data-dep-cta]') as HTMLButtonElement
-  const depCtaLabel = $('[data-dep-cta-label]')
-  const redeemBtn = $('[data-redeem]') as HTMLButtonElement
-  const addFundsBtn = $('[data-addfunds]') as HTMLButtonElement
+  // House (TVL / yield / deposit sheet) lives on the /house tab now — no house
+  // selectors here. Play is pure bet + chart + cash-out.
   const toastEl = $('[data-toast]') as HTMLElement
 
   const winUp = $('[data-win-up]')
@@ -2339,12 +1814,7 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   // ---------------------------------------------------------------- //
   //  5) interaction state
   // ---------------------------------------------------------------- //
-  let sheetOpen = false
   let customOpen = false
-  // Tracks the last supplyDoneAt epoch we acted on, so a SUCCESSFUL supply closes
-  // the deposit sheet exactly once (UX item I) — no success toast; the house
-  // section below reflects the new position + WITHDRAW button.
-  let lastSupplyDone = 0
 
   // ---------------------------------------------------------------- //
   //  7) controls -> host.actions
@@ -2439,6 +1909,13 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     host.actions.goToBet()
   })
 
+  // MARKET CONTEXT — the live BTC card is the current context (no-op tap); a
+  // LOCKED sibling routes to the Markets tab where the full grid + real next-open
+  // countdowns live (never fake odds, never "coming soon" here).
+  fg.querySelectorAll('[data-mkt-locked]').forEach(btn => {
+    btn.addEventListener('click', () => host.actions.goToMarkets())
+  })
+
   // ---------------------------------------------------------------- //
   //  7b) DARK / LIGHT THEME — toggle, persist, apply on load.
   // ---------------------------------------------------------------- //
@@ -2506,67 +1983,7 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     renderMute()
   })
 
-  // ---------------------------------------------------------------- //
-  //  8) DEPOSIT sheet — slide up over a --scrim-dimmed live surface
-  // ---------------------------------------------------------------- //
-  function openSheet(): void {
-    sheetOpen = true
-    scrimEl.classList.add('is-open')
-    sheetEl.classList.add('is-open')
-    host.actions.becomeHouse()
-    setTimeout(() => {
-      try {
-        depInput.focus()
-      } catch {
-        /* noop */
-      }
-    }, 130)
-  }
-  function closeSheet(): void {
-    sheetOpen = false
-    scrimEl.classList.remove('is-open')
-    sheetEl.classList.remove('is-open')
-  }
-  houseBtn.addEventListener('click', () => {
-    if (gateSignIn()) return
-    if (host.data.txPending) return
-    if (houseBtn.disabled) return
-    openSheet()
-  })
-  backBtn.addEventListener('click', closeSheet)
-  scrimEl.addEventListener('click', closeSheet)
-  const onKey = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape' && sheetOpen) closeSheet()
-  }
-  window.addEventListener('keydown', onKey)
-
-  fg.querySelectorAll('[data-dep-preset]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      depInput.value = (btn as HTMLElement).dataset.depPreset || ''
-    })
-  })
-  depMaxBtn.addEventListener('click', () => {
-    const w = host.data.house.walletDusdcUsd
-    if (w != null && w > 0) depInput.value = w.toFixed(2)
-  })
-  depCta.addEventListener('click', () => {
-    if (host.data.txPending) return
-    const v = Number(String(depInput.value).replace(/[^0-9.]/g, '')) || 0
-    if (v > 0) host.actions.supply(v)
-  })
-  redeemBtn.addEventListener('click', () => {
-    if (host.data.txPending) return
-    host.actions.redeemHouse()
-  })
-  // WITHDRAW FROM HOUSE (in the house section, UX item I) — same redeem/withdraw
-  // handler (router redeem_lp via useHouse) as the in-sheet cash-out control.
-  houseWithdrawBtn.addEventListener('click', () => {
-    if (gateSignIn()) return
-    if (host.data.txPending) return
-    if (houseWithdrawBtn.disabled) return
-    host.actions.redeemHouse()
-  })
-  addFundsBtn.addEventListener('click', () => host.actions.addFunds())
+  // (Section 8 — the deposit/become-the-house sheet — moved to the /house tab.)
 
   // ---------------------------------------------------------------- //
   //  9) LIVE TAPE — bottom-left ledger; render the host's tape array
@@ -2829,6 +2246,10 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     // balance text fresh each frame (the cluster holds the balance now).
     renderAcct()
     if (acctBalEl) acctBalEl.textContent = d.balanceStr
+
+    // MARKET CONTEXT — the live BTC card shows the live spot ($k-compact). It
+    // freezes with the rest of the screen during the validation window (d.frozen).
+    mktSpotEl.textContent = d.spot != null ? fmtC(d.spot) : '—'
 
     // countdown masthead
     const held = d.held
@@ -3113,87 +2534,10 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     renderResults()
     syncFlash()
 
-    // ---- HOUSE FOOTER ----
-    const hs = d.house
-    // UX item I: a SUCCESSFUL supply closes the deposit sheet exactly once. The
-    // house section (below) now shows the user's position + the WITHDRAW button —
-    // there is no success toast (item J).
-    if (hs.supplyDoneAt > lastSupplyDone) {
-      lastSupplyDone = hs.supplyDoneAt
-      if (sheetOpen) closeSheet()
-    }
-    tvlEl.textContent = hs.tvlStr
-    chgEl.textContent = hs.shareChgStr
-    yieldNumEl.textContent = hs.yieldStr
-    yieldUnitEl.textContent = hs.yieldUnit
-    // UX item #6: while HOLDING, the prominent house figure is the user's REAL
-    // stake (labeled "Your stake") — NOT the betting wallet. The depositable-funds
-    // PROJECTION is shown to NON-holders only. Toggle the two blocks accordingly.
-    if (hs.hasPosition && hs.positionValueStr != null) {
-      stakeBlockEl.hidden = false
-      projBlockEl.hidden = true
-      stakeValEl.textContent = hs.positionValueStr
-    } else {
-      stakeBlockEl.hidden = true
-      projBlockEl.hidden = false
-      projFromEl.textContent = hs.projFromStr
-      projEarnEl.textContent = hs.projEarnStr
-      projTierEl.textContent = hs.projTierStr
-    }
-    utilEl.textContent = hs.utilizationStr
-    sharePriceEl.textContent = hs.sharePriceStr
-    yourStakeRow.hidden = hs.yourStakeStr == null
-    if (hs.yourStakeStr != null) yourStakeEl.textContent = hs.yourStakeStr
-    ctaLabelEl.textContent = hs.ctaLabel
-    // stays clickable while signed-out so the click routes to Google sign-in;
-    // once signed in, the GLOBAL lock disables it while a write is in flight.
-    houseBtn.disabled = d.signedIn && pending
-
-    // WITHDRAW FROM HOUSE (UX item I): shown in the house section whenever the
-    // user holds a position. Label carries the position value so the stake +
-    // withdraw are both visible right here, no toast/popup needed.
-    houseWithdrawBtn.hidden = !(d.signedIn && hs.hasPosition)
-    if (d.signedIn && hs.hasPosition) {
-      houseWithdrawBtn.disabled = pending || hs.redeemBusy
-      if (hs.redeemBusy) houseWithdrawBtn.innerHTML = LOADING('Withdrawing')
-      else
-        houseWithdrawBtn.textContent =
-          'Withdraw from house' +
-          (hs.positionValueStr ? ' · ' + hs.positionValueStr : '')
-    }
-
-    // sheet contents
-    sheetShareEl.textContent = hs.sharePriceStr
-    sheetTvlEl.textContent = hs.tvlStr
-    sheetStakeEl.textContent = hs.positionValueStr ?? (d.signedIn ? '$0.00' : '—')
-    sheetYieldEl.textContent = hs.yieldStr
-    if (hs.supplyBusy) depCtaLabel.innerHTML = LOADING('Supplying')
-    else depCtaLabel.textContent = hs.ctaLabel
-    const depV = Number(String(depInput.value).replace(/[^0-9.]/g, '')) || 0
-    // GLOBAL lock: the deposit-sheet confirm is blocked while any write is in
-    // flight (canSupply already returns false while supply is busy via useHouse,
-    // but the global lock also blocks it while a DIFFERENT action is pending).
-    depCta.disabled = pending || !hs.canSupply(depV) || hs.supplyBusy
-    depMaxBtn.hidden = !(hs.walletDusdcUsd != null && hs.walletDusdcUsd > 0)
-    // Belt-and-suspenders: NEVER show any "cash out of the house" control while
-    // signed-out (hasPosition can only be true when signed in, but gate anyway).
-    redeemBtn.hidden = !(d.signedIn && hs.hasPosition)
-    if (d.signedIn && hs.hasPosition) {
-      redeemBtn.disabled = pending || hs.redeemBusy
-      if (hs.redeemBusy) redeemBtn.innerHTML = LOADING('Cashing out')
-      else
-        redeemBtn.textContent =
-          'cash out of the house' +
-          (hs.positionValueStr ? ' · ' + hs.positionValueStr : '')
-    }
-    addFundsBtn.hidden = !(
-      d.signedIn &&
-      !hs.hasPosition &&
-      (hs.walletDusdcUsd ?? 0) <= 0
-    )
+    // (HOUSE FOOTER tick block moved to the /house tab — Play renders no house.)
 
     // ---- TOAST ----
-    const toastMsg = hs.error || d.error
+    const toastMsg = d.error
     const okMsg = !toastMsg ? d.notice : null
     if (toastMsg) {
       toastEl.hidden = false
@@ -3232,7 +2576,6 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
     baseHandle.teardown()
     cancelAnimationFrame(raf)
     window.clearTimeout(copiedTimer)
-    window.removeEventListener('keydown', onKey)
     if (style.parentNode) style.parentNode.removeChild(style)
     if (fg.parentNode) fg.parentNode.removeChild(fg)
   }

@@ -1,4 +1,6 @@
 import type { EventId, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+import { parseSerializedSignature } from '@mysten/sui/cryptography'
+import { MultiSigPublicKey } from '@mysten/sui/multisig'
 import type { SiteInfo } from '@suize/shared'
 import { PACKAGE_IDS } from '@suize/shared'
 import { DEPLOY_BASE_DOMAIN } from './config'
@@ -103,14 +105,243 @@ export const fetch_sites_onchain = async (
   return sites.slice(0, opts.limit)
 }
 
+// ---- "Your sites" = your main address ∪ your agent sub-account(s) -----------
+//
+// An agent deploys from its SUB-ACCOUNT — a 1-of-2 multisig { main, agent } — so
+// those sites are owned by the sub-account ADDRESS, not your main address, and a
+// plain `owner === main` filter hides them (the "No sites yet" bug). The link is
+// purely ON-CHAIN (never localStorage): the sub-account signs its gasless payment
+// with the multisig, and that serialized signature embeds the FULL committee. So
+// for each non-main site owner we read ONE transaction it sent, parse the multisig
+// committee, and keep the owner iff YOUR main address is a member. The signature
+// IS the link — no paste, no stored state.
+
+const MY_SITES_EVENT_PAGES = 3 // newest-first SiteCreated pages to scan (×50)
+const SUBACCT_CHECK_CAP = 24 // max distinct non-main owners we committee-check
+
+interface RawSiteEvent {
+  json: SiteCreatedJson
+  timestampMs: string | null | undefined
+}
+
+// Newest-first SiteCreated events across up to `pages` pages of 50.
+const recent_site_events = async (
+  client: SuiJsonRpcClient,
+  pages: number,
+): Promise<RawSiteEvent[]> => {
+  const out: RawSiteEvent[] = []
+  let cursor: EventId | null = null
+  for (let p = 0; p < pages; p++) {
+    const page = await client.queryEvents({
+      query: { MoveEventType: SITE_CREATED_TYPE },
+      order: 'descending',
+      cursor,
+      limit: 50,
+    })
+    for (const e of page.data) {
+      out.push({ json: e.parsedJson as SiteCreatedJson, timestampMs: e.timestampMs })
+    }
+    if (!page.hasNextPage || !page.nextCursor) break
+    cursor = page.nextCursor
+  }
+  return out
+}
+
+// Is `candidate` an agent sub-account whose multisig committee includes `main`?
+// Reads ONE transaction the candidate SENT (its gasless payment is multisig-signed)
+// and checks committee membership. A zkLogin member's address derives structurally
+// (no proof check needed for an address). Any read/parse failure → false, so this
+// NEVER yields a false positive (a site you don't control can't show as yours).
+const subaccount_includes_main = async (
+  client: SuiJsonRpcClient,
+  candidate: string,
+  main: string,
+): Promise<boolean> => {
+  try {
+    const page = await client.queryTransactionBlocks({
+      filter: { FromAddress: candidate },
+      options: { showInput: true },
+      order: 'descending',
+      limit: 1,
+    })
+    for (const tx of page.data) {
+      for (const sig of tx.transaction?.txSignatures ?? []) {
+        const parsed = parseSerializedSignature(sig)
+        if (parsed.signatureScheme !== 'MultiSig') continue
+        const committee = new MultiSigPublicKey(parsed.multisig.multisig_pk).getPublicKeys()
+        if (committee.some(m => m.publicKey.toSuiAddress() === main)) return true
+      }
+    }
+  } catch {
+    /* unreadable candidate → treat as not-yours */
+  }
+  return false
+}
+
+// "Your sites": every site owned by your `main` address, PLUS every site owned by
+// an agent sub-account whose multisig committee includes `main` (each tagged
+// `viaAgent`). Fully chain-derived — no localStorage. Newest-first, capped.
+export const fetch_my_sites = async (
+  client: SuiJsonRpcClient,
+  main: string,
+  limit: number,
+): Promise<SiteInfo[]> => {
+  const mainLc = main.toLowerCase()
+  const events = await recent_site_events(client, MY_SITES_EVENT_PAGES)
+
+  // Distinct non-main owners = candidate sub-accounts (dedup; cap the on-chain checks).
+  const candidates: string[] = []
+  const seen = new Set<string>()
+  for (const e of events) {
+    const owner = (e.json.owner ?? '').toLowerCase()
+    if (!owner || owner === mainLc || seen.has(owner)) continue
+    seen.add(owner)
+    if (candidates.length < SUBACCT_CHECK_CAP) candidates.push(e.json.owner)
+  }
+
+  // Committee-check candidates in parallel; collect the ones that are YOUR sub-accounts.
+  const checks = await Promise.all(
+    candidates.map(async addr =>
+      (await subaccount_includes_main(client, addr, mainLc)) ? addr.toLowerCase() : null,
+    ),
+  )
+  const mine = new Set(checks.filter((a): a is string => a != null))
+
+  const sites: SiteInfo[] = []
+  const deduped = new Set<string>()
+  for (const e of events) {
+    const owner = (e.json.owner ?? '').toLowerCase()
+    const isMain = owner === mainLc
+    const isAgent = mine.has(owner)
+    if (!isMain && !isAgent) continue
+    if (deduped.has(e.json.site_id)) continue
+    deduped.add(e.json.site_id)
+    const info = to_site_info(e.json, e.timestampMs)
+    sites.push(isAgent ? { ...info, viaAgent: true } : info)
+  }
+  return sites.slice(0, limit)
+}
+
+// ---- Public gallery feed + chain-derived stats -----------------------------
+
+// The PUBLIC showcase feed: every site, any owner, newest-first, capped. Reads
+// the SiteCreated event stream (no owner filter) — the front-door gallery's
+// source. Pages via recent_site_events so a cap > 50 is honoured.
+export const fetch_recent_sites = async (
+  client: SuiJsonRpcClient,
+  limit: number,
+): Promise<SiteInfo[]> => {
+  const pages = Math.max(1, Math.ceil(limit / 50))
+  const events = await recent_site_events(client, pages)
+  const out: SiteInfo[] = []
+  const seen = new Set<string>()
+  for (const e of events) {
+    if (seen.has(e.json.site_id)) continue
+    seen.add(e.json.site_id)
+    out.push(to_site_info(e.json, e.timestampMs))
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+// PURE, chain-derived aggregate stats over a set of sites (no network, no fakes).
+// `deploysByDay` is a dense ascending series ending today, so a sparkline never
+// lies about gaps. Used by the global stats ribbon + the dashboard analytics.
+export interface SiteStats {
+  totalSites: number
+  totalBytes: number
+  totalFiles: number
+  withDomains: number
+  /** Sites deployed within the last 24h (the "today" pulse). */
+  last24h: number
+  /** Dense daily deploy counts, oldest→newest, length `days`. */
+  deploysByDay: { dayMs: number; count: number }[]
+}
+
+const DAY = 86_400_000
+
+export const computeStats = (sites: SiteInfo[], days = 30): SiteStats => {
+  const now = Date.now()
+  const todayStart = Math.floor(now / DAY) * DAY
+  const buckets = new Map<number, number>()
+  for (let i = days - 1; i >= 0; i--) buckets.set(todayStart - i * DAY, 0)
+
+  let totalBytes = 0
+  let totalFiles = 0
+  let withDomains = 0
+  let last24h = 0
+  for (const s of sites) {
+    totalBytes += Number.isFinite(s.sizeBytes) ? s.sizeBytes : 0
+    totalFiles += Number.isFinite(s.fileCount) ? s.fileCount : 0
+    if (s.domains.length > 0) withDomains++
+    if (s.createdAtMs && now - s.createdAtMs <= DAY) last24h++
+    if (s.createdAtMs) {
+      const day = Math.floor(s.createdAtMs / DAY) * DAY
+      if (buckets.has(day)) buckets.set(day, (buckets.get(day) ?? 0) + 1)
+    }
+  }
+
+  return {
+    totalSites: sites.length,
+    totalBytes,
+    totalFiles,
+    withDomains,
+    last24h,
+    deploysByDay: [...buckets.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([dayMs, count]) => ({ dayMs, count })),
+  }
+}
+
 // ---- One site's detail ------------------------------------------------------
+
+// A site's FULL on-chain record — SiteInfo plus the Walrus + integrity anchors
+// the dossier surfaces (the permanence proof). Every field is read straight off
+// the immutable shared `Site` object (packages/move-deploy/sources/site.move).
+export interface SiteFull extends SiteInfo {
+  /** Walrus root quilt CONTENT id holding the site's files. */
+  quiltId: string
+  /** Walrus blob CONTENT id holding the path → quilt-patch manifest JSON. */
+  manifestBlobId: string
+  /** sha256 of the manifest blob bytes, hex — the serve-time integrity anchor. */
+  manifestHashHex: string
+  /** Sui object id of the Walrus Blob OBJECT holding the quilt (storage target). */
+  quiltBlobObject: string
+  /** Sui object id of the Walrus Blob OBJECT holding the manifest. */
+  manifestBlobObject: string
+  /** On-chain Site schema version (always 1 in MVP). */
+  version: number
+}
+
+// A Move `vector<u8>` field comes back from the RPC either as a number[] of bytes
+// or (some nodes) a base64 string. Normalise to a lowercase hex string; '' when
+// genuinely absent. Display only — the worker is the authority on the real hash.
+const vec_u8_to_hex = (v: unknown): string => {
+  if (Array.isArray(v)) {
+    return v.map(n => (Number(n) & 0xff).toString(16).padStart(2, '0')).join('')
+  }
+  if (typeof v === 'string' && v.length > 0) {
+    try {
+      const bin = atob(v)
+      let out = ''
+      for (let i = 0; i < bin.length; i++)
+        out += bin.charCodeAt(i).toString(16).padStart(2, '0')
+      return out
+    } catch {
+      return ''
+    }
+  }
+  return ''
+}
+
+const str_field = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 // The `Site` object fields + createdAtMs (from the matching SiteCreated event) +
 // the site's CURRENT linked domains (best-effort, reduced from Domain events).
 export const fetch_site_onchain = async (
   client: SuiJsonRpcClient,
   siteId: string,
-): Promise<SiteInfo> => {
+): Promise<SiteFull> => {
   const obj = await client.getObject({
     id: siteId,
     options: { showContent: true },
@@ -128,13 +359,19 @@ export const fetch_site_onchain = async (
 
   return {
     siteId,
-    name: typeof f.name === 'string' ? f.name : '',
+    name: str_field(f.name),
     owner: typeof f.owner === 'string' ? f.owner : (created?.owner ?? ''),
     url: site_url(siteId),
     sizeBytes: Number(f.size_bytes ?? 0),
     fileCount: Number(f.file_count ?? 0),
     createdAtMs: created?.createdAtMs ?? 0,
     domains: await fetch_site_domains(client, siteId),
+    quiltId: str_field(f.quilt_id),
+    manifestBlobId: str_field(f.manifest_blob_id),
+    manifestHashHex: vec_u8_to_hex(f.manifest_hash),
+    quiltBlobObject: str_field(f.quilt_blob_object),
+    manifestBlobObject: str_field(f.manifest_blob_object),
+    version: Number(f.version ?? 1),
   }
 }
 
@@ -264,6 +501,81 @@ export const resolveSuizeHandle = async (
   } catch {
     return null
   }
+}
+
+// ---- Owner identity: a person, or a person's Suize agent -------------------
+// A site's on-chain `owner` is whoever PAID — for an MCP/agent deploy that's the
+// agent SUB-ACCOUNT (a 1-of-2 multisig { main, agent }), which has no handle of its
+// own, so "Owned by 0x0ab0…" reads as a stranger. But the sub-account's committee
+// (embedded in its own payment signature) names the human MAIN member, who DOES
+// have a Suize handle. So we resolve the owner to one of:
+//   · { kind: 'direct' } — a normal address (its own handle, or hex)
+//   · { kind: 'agent' }   — a Suize sub-account → show the MAIN member's handle
+// Fully chain-derived (no stored state). Presentation only — never gates anything.
+
+export type OwnerIdentity =
+  | { kind: 'direct'; address: string; handle: string | null }
+  | { kind: 'agent'; address: string; mainAddress: string; mainHandle: string | null }
+
+// The two committee members of a Suize agent sub-account, or null when `address`
+// isn't one. Reads ONE transaction the address SENT (its gasless payment is
+// multisig-signed) and accepts ONLY the Suize sub-account shape: a 1-of-2,
+// threshold-1 multisig of two zkLogin members whose derived address == `address`.
+const subaccountCommittee = async (
+  address: string,
+  client: SuiJsonRpcClient,
+): Promise<string[] | null> => {
+  try {
+    const page = await client.queryTransactionBlocks({
+      filter: { FromAddress: address },
+      options: { showInput: true },
+      order: 'descending',
+      limit: 1,
+    })
+    for (const tx of page.data) {
+      for (const sig of tx.transaction?.txSignatures ?? []) {
+        const parsed = parseSerializedSignature(sig)
+        if (parsed.signatureScheme !== 'MultiSig') continue
+        const mpk = new MultiSigPublicKey(parsed.multisig.multisig_pk)
+        const members = mpk.getPublicKeys()
+        // The exact formAgentSubaccount shape: 1-of-2, both zkLogin (flag 5).
+        if (members.length !== 2 || mpk.getThreshold() !== 1) continue
+        if (!members.every(m => m.publicKey.flag() === 5)) continue
+        if (mpk.toSuiAddress().toLowerCase() !== address.toLowerCase()) continue
+        return members.map(m => m.publicKey.toSuiAddress())
+      }
+    }
+  } catch {
+    /* unreadable → not a recognizable sub-account */
+  }
+  return null
+}
+
+// Resolve a site owner to a human-readable identity. Tries the owner's OWN handle
+// first; failing that, recognizes a Suize agent sub-account and resolves the MAIN
+// member's handle (the member that carries a `@suize` handle — the agent's
+// second-login address has none). Degrades to the hex address at every step.
+export const resolveOwnerIdentity = async (
+  owner: string,
+  client: SuiJsonRpcClient,
+): Promise<OwnerIdentity> => {
+  const direct = await resolveSuizeHandle(owner, client)
+  if (direct) return { kind: 'direct', address: owner, handle: direct }
+
+  const committee = await subaccountCommittee(owner, client)
+  if (committee) {
+    const handles = await Promise.all(committee.map(a => resolveSuizeHandle(a, client)))
+    const idx = handles.findIndex(h => h != null)
+    const mainIdx = idx >= 0 ? idx : 0
+    return {
+      kind: 'agent',
+      address: owner,
+      mainAddress: committee[mainIdx],
+      mainHandle: handles[mainIdx],
+    }
+  }
+
+  return { kind: 'direct', address: owner, handle: null }
 }
 
 // ---- Coin balances (admin panel — read-only) -------------------------------

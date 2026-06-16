@@ -7,7 +7,13 @@
 // own service wallet does), so they are informational only here.
 // ============================================================================
 
-import { PACKAGE_IDS, fullnodeUrl, resolveNetwork, type SuiNetwork } from '@suize/shared'
+import {
+  PACKAGE_IDS,
+  WALRUS_DEFAULTS,
+  fullnodeUrl,
+  resolveNetwork,
+  type SuiNetwork,
+} from '@suize/shared'
 
 // Network — ENV-ONLY (VITE_SUI_NETWORK; only the exact string 'mainnet' opts in,
 // anything else/unset = testnet). Never hardcoded.
@@ -36,7 +42,45 @@ export const DEPLOY_PACKAGE: string = PACKAGE_IDS.DEPLOY.PACKAGE
 // the same `<base36(siteId)>.<DEPLOY_BASE_DOMAIN>` URL the worker resolves.
 export const DEPLOY_BASE_DOMAIN = 'suize.site'
 
+// The consumer Suize wallet — where a human funds + talks to their agent (the
+// agent is what actually subscribes/acts through the Deploy API). The plan rail
+// links here so "ask your agent to subscribe" has a destination.
+export const SUIZE_WALLET_URL = 'https://wallet.suize.io'
+
 // True once move-deploy is published and shared carries a real id. Drives a
 // small "chain pending" banner so the dashboard never silently implies the
 // on-chain Site registry is live when it isn't.
 export const DEPLOY_PACKAGE_PUBLISHED = DEPLOY_PACKAGE !== '0x0'
+
+// ============================================================================
+// EXPLORER + WALRUS LINKS — the dossier surfaces a site's real on-chain + Walrus
+// anchors as clickable references (the "permanence proof" is verifiable, not just
+// asserted). All bases are network-aware + env-overridable. SINGLE SOURCE: the
+// Walrus aggregator default lives in @suize/shared (WALRUS_DEFAULTS); we only add
+// the convenience link builders here. Never fabricate a URL — every builder maps
+// to a real, resolvable resource.
+// ============================================================================
+
+// The Walrus HTTP aggregator base (reads blobs). Env override → shared default.
+export const WALRUS_AGGREGATOR: string =
+  import.meta.env.VITE_WALRUS_AGGREGATOR?.trim().replace(/\/+$/, '') ||
+  WALRUS_DEFAULTS[SUI_NETWORK].aggregator
+
+// A Walrus blob CONTENT id → the aggregator read URL (the bytes themselves). For
+// the manifest blob this returns the manifest JSON; guaranteed-resolvable.
+export const walrusBlobUrl = (blobId: string): string =>
+  `${WALRUS_AGGREGATOR}/v1/blobs/${encodeURIComponent(blobId)}`
+
+// SuiVision — network-aware (mainnet host vs the `<net>.` subdomain). The
+// canonical explorer for the on-chain Site object + the Walrus Blob OBJECTs.
+export const SUIVISION_BASE: string =
+  SUI_NETWORK === 'mainnet'
+    ? 'https://suivision.xyz'
+    : `https://${SUI_NETWORK}.suivision.xyz`
+
+export const suivisionObject = (id: string): string =>
+  `${SUIVISION_BASE}/object/${id}`
+export const suivisionAccount = (addr: string): string =>
+  `${SUIVISION_BASE}/account/${addr}`
+export const suivisionTx = (digest: string): string =>
+  `${SUIVISION_BASE}/txblock/${digest}`

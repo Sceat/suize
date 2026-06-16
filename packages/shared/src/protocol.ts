@@ -254,10 +254,9 @@ export interface LivechatMessage {
 // ===========================================================================
 
 /**
- * One turn of the visible transcript. Content is PLAIN TEXT only — the client
- * flattens a prior assistant proposal to its narration text, so the server never
- * receives raw tool_use / tool_result blocks. Keeps the wire simple and the
- * model's history valid without tool-result bookkeeping.
+ * One turn of the visible transcript — PLAIN TEXT only. The client flattens any
+ * prior tool exchange to its narration text, so the server never receives raw
+ * tool_use / tool_result blocks (keeps the wire simple and the history valid).
  */
 export interface BrainMessage {
   role: 'user' | 'assistant';
@@ -265,40 +264,36 @@ export interface BrainMessage {
 }
 
 /**
- * A read-only wallet snapshot the client computes and sends each turn. These are
- * DETERMINISTIC numbers (the wallet owns them); the brain only narrates over the
- * block and NEVER invents a balance. It is DATA, never an instruction.
+ * Client → server. Start a chat turn: the visible transcript. Identity is the
+ * verified ws.data.address (never a body field). Carries `id`; the server streams
+ * narration chunks + tool-use frames, then a done frame.
  */
-export interface BrainWalletState {
-  /** `<name>@suize`, if claimed. */
-  handle?: string;
-  /** The user's own USDC, decimal string. */
-  mainUsdc: string;
-  /** The agent sub-account's balance (decimal), if armed. */
-  agentUsdc?: string;
-  /** The Agent-enabled toggle. */
-  agentEnabled: boolean;
-  /** Short human activity lines — memos ALREADY stripped client-side. */
-  recentActivity?: string[];
-  /** Short human subscription lines (merchant · amount · period). */
-  subscriptions?: string[];
-}
-
-/** Client → server. A chat turn: the visible transcript + the wallet snapshot. */
 export interface BrainChatRequest {
   messages: BrainMessage[];
-  wallet: BrainWalletState;
+  /**
+   * The user's MemWal memory account id, if they've onboarded memory. NOT a secret:
+   * a wrong id simply fails `seal_approve` against the user's server-derived delegate
+   * key, so it grants no access — the delegate-key binding is the real auth.
+   */
+  memwalAccountId?: string;
 }
 
-/**
- * A PROPOSED action the model emitted (a strict tool call). The WALLET decodes
- * it, re-derives every number, dial-gates, and signs — the brain only proposes.
- */
-export interface BrainProposal {
-  /** Tool name: send_usdc | create_paylink | pay_merchant | deploy_site | create_subscription | cancel_subscription. */
-  tool: string;
-  /** The validated tool input. Amounts here are SUGGESTIONS the wallet re-shows on the confirm card — never authoritative. */
-  input: Record<string, unknown>;
+// ── MEMWAL onboarding handshake (RPC) — the wallet asks the backend for the user's
+//    DERIVED delegate public key + the on-chain constants, then signs the one-time
+//    createAccount + addDelegateKey itself (the delegate PRIVATE key stays server-side).
+export type MemwalDelegateRequest = Record<string, never>;
+export interface MemwalDelegateResponse {
+  /** False when memory is not configured on the backend (the wallet skips onboarding). */
+  enabled: boolean;
+  /** The user's derived delegate Ed25519 public key (hex) to register on-chain. */
+  publicKey?: string;
+  /** The Sui address of that delegate key. */
+  suiAddress?: string;
+  /** The MemWal contract package id + AccountRegistry object id for the setup txs. */
+  packageId?: string;
+  registryId?: string;
+  /** 'testnet' | 'mainnet'. */
+  network?: string;
 }
 
 /** Server → client. One streamed text delta of the assistant's narration. */
@@ -307,12 +302,36 @@ export interface BrainChatChunk {
 }
 
 /**
- * Server → client. The turn is complete: any proposed actions + why it stopped.
- * `limited` is true when the strict daily token cap was hit (the chunk carried
- * the work-in-progress notice and NO model call was made).
+ * Server → client. The agentic loop wants a TOOL run. The WALLET executes it —
+ * READS answer instantly from the wallet's own state; WRITES go through the
+ * confirm card + dials + LOCAL signing — and replies with a {@link BrainToolResult}.
+ * The brain NEVER executes a tool itself: it has no chain access and no key (the
+ * number wall + non-custody hold by process isolation). `toolUseId` correlates
+ * the result; `input` amounts are SUGGESTIONS the wallet re-derives on the card.
+ */
+export interface BrainToolUse {
+  toolUseId: string;
+  tool: string;
+  input: Record<string, unknown>;
+}
+
+/**
+ * Client → server. The wallet's result for one {@link BrainToolUse}, fed back into
+ * the loop. `content` is a short plain-text result the model reads; `isError`
+ * marks a decline / failure (e.g. the user closed the confirm card, or a dial
+ * blocked an auto-spend).
+ */
+export interface BrainToolResult {
+  toolUseId: string;
+  content: string;
+  isError: boolean;
+}
+
+/**
+ * Server → client. The turn is complete. `limited` = the strict daily token cap
+ * was hit (the chunk carried the work-in-progress notice; no model call was made).
  */
 export interface BrainChatDone {
-  proposals: BrainProposal[];
   stopReason: string | null;
   limited?: boolean;
 }
@@ -367,10 +386,17 @@ export type BalanceUpdateFrame = Frame<'balanceUpdate', BalanceUpdate>;
 export type AgentActivityFrame = Frame<'agentActivity', AgentActivity>;
 export type LivechatMessageFrame = Frame<'livechatMessage', LivechatMessage>;
 
-// ── BRAIN (RPC: brainChatRequest carries `id`; chunk + done echo it) ─────────
+// ── BRAIN (agentic loop: brainChatRequest carries `id`; the server streams
+//    chunk + toolUse frames echoing it; the client replies toolResult; done ends) ─
 export type BrainChatRequestFrame = Frame<'brainChatRequest', BrainChatRequest>;
 export type BrainChatChunkFrame = Frame<'brainChatChunk', BrainChatChunk>;
+export type BrainToolUseFrame = Frame<'brainToolUse', BrainToolUse>;
+export type BrainToolResultFrame = Frame<'brainToolResult', BrainToolResult>;
 export type BrainChatDoneFrame = Frame<'brainChatDone', BrainChatDone>;
+
+// ── MEMWAL (RPC: request carries `id`, response echoes it) ───────────────────
+export type MemwalDelegateRequestFrame = Frame<'memwalDelegateRequest', MemwalDelegateRequest>;
+export type MemwalDelegateResponseFrame = Frame<'memwalDelegateResponse', MemwalDelegateResponse>;
 
 /** Frames a client may SEND to the server. */
 export type ClientPacket =
@@ -380,7 +406,9 @@ export type ClientPacket =
   | HandleAvailableRequestFrame
   | HandleMeRequestFrame
   | HandleClaimRequestFrame
-  | BrainChatRequestFrame;
+  | BrainChatRequestFrame
+  | BrainToolResultFrame
+  | MemwalDelegateRequestFrame;
 
 /** Frames the server may SEND to the client. */
 export type ServerPacket =
@@ -397,7 +425,9 @@ export type ServerPacket =
   | AgentActivityFrame
   | LivechatMessageFrame
   | BrainChatChunkFrame
-  | BrainChatDoneFrame;
+  | BrainToolUseFrame
+  | BrainChatDoneFrame
+  | MemwalDelegateResponseFrame;
 
 /** Any frame on the wire, either direction. The full `oneof`. */
 export type Packet = ClientPacket | ServerPacket;

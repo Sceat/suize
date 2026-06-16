@@ -5,13 +5,13 @@ import { PRODUCTS } from '../config'
 
 // A stubbed product room — inherits the full chassis + its own accent so the
 // per-product theming is provable, with a "detail page coming" badge. Used now
-// only by Crash; Deploy has its own full page (pages/Deploy.jsx).
+// by PolySui (id `crash`) + Agents; Deploy has its own full page (pages/Deploy.jsx).
 export default function ProductStub({ id }) {
   const p = PRODUCTS.find(x => x.id === id) || PRODUCTS[0]
   return (
     <Room id={id}>
       <RoomHero
-        eyebrow={`${p.name} · ${p.side}`}
+        eyebrow={p.name}
         title={p.desc}
         sub={`Part of the Suize ecosystem — the same dark house, this room's own motif. Open the live product, or head back to the rail.`}
         ctaHref={p.external}

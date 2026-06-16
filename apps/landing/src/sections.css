@@ -515,11 +515,7 @@
 }
 .sx-mega__row {
   display: flex;
-  /* pin the dotted leader + side tag to the NAME row (the top line) so the now
-     SHORTER punchy desc reads as a clean second line beneath, never pushing the
-     tag off-baseline. */
   align-items: flex-start;
-  gap: 10px;
   width: 100%;
   padding: 10px 10px;
   border-radius: var(--r-3);
@@ -532,13 +528,18 @@
 .sx-mega__rowmain {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
+/* product NAME in the brand display face (Hashgraph Title — same as the SUIZE
+   wordmark); a touch larger + looser than body so the display face reads cleanly
+   at small size. */
 .sx-mega__name {
-  font-family: var(--sans);
-  font-size: 13px;
-  font-weight: 600;
+  font-family: 'Hashgraph Title', var(--sans);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
   color: var(--fg);
 }
 .sx-mega__row:hover .sx-mega__name {
@@ -549,24 +550,6 @@
   font-size: 12px;
   line-height: 1.4;
   color: var(--fg-2);
-}
-.sx-mega__lead {
-  flex: 1 1 auto;
-  height: 0;
-  border-bottom: 1px dotted var(--hair-strong);
-  /* sit the dotted leader on the NAME line's centre (rowmain top line is 13px) */
-  margin-top: 9px;
-  min-width: 16px;
-}
-.sx-mega__tag {
-  flex: 0 0 auto;
-  /* align the side tag with the NAME line, not the row top */
-  margin-top: 2px;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--fg-3);
-  letter-spacing: -0.01em;
-  white-space: nowrap;
 }
 .sx-mega__foot {
   margin-top: 12px;

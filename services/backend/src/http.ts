@@ -11,7 +11,11 @@ export const corsHeaders = (origin: string | null): Record<string, string> => {
     // MCP Streamable-HTTP transport (an MCP client sends these on /mcp); the rest
     // of the backend ignores them. `mcp-session-id` is also EXPOSED below so a
     // browser-side MCP client can read a server-assigned session id.
-    "Access-Control-Allow-Headers": "Content-Type, mcp-session-id, mcp-protocol-version, authorization",
+    // `X-PAYMENT` (+ its `PAYMENT-SIGNATURE` alias) is the x402 payment header a
+    // BROWSER payer (the wallet's agent publish) sends on POST /deploy — without it
+    // in this allow-list the preflight blocks the payment-carrying retry.
+    "Access-Control-Allow-Headers":
+      "Content-Type, mcp-session-id, mcp-protocol-version, authorization, X-PAYMENT, PAYMENT-SIGNATURE",
     "Access-Control-Expose-Headers": "mcp-session-id",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",

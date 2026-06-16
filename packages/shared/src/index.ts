@@ -176,13 +176,96 @@ const DEPLOY_DEPLOYER_CAP_OBJECT =
  */
 // PUBLISHED to testnet 2026-06-14 (publish digest 2XbnJRCCJzcRXkmPWsVY2sthDevjm25UDB9tZKDNTaqi)
 // from packages/move-subs (module: subscription) by the CLI dev wallet 0x087aa862… —
-// which therefore holds the SubsAdminCap (0xd3840886…) + UpgradeCap (0xbfa04cd0…) and is
-// the SubsConfig.treasury until synced. This republish adds the USDC coin-type PIN
-// (set_coin_type, EWrongCoin) + a 10-year period cap — run `bun run subs:sync-treasury`
-// after publish to set BOTH treasury AND coin_type on the fresh SubsConfig. CONFIG_OBJECT
-// is the shared SubsConfig init created. Mainnet stays '0x0' — its publish is a republish.
-const SUBS_PACKAGE: string = '0xb6bca1cfbcff846c2e575190c70a78fc777f858deae9d4d5a6e797cb005d1c69';
-const SUBS_CONFIG_OBJECT: string = '0xd176a16a392bf2b358d467c486eebbb4fee660196ec927b93ddc174b4c45c4bf';
+// which therefore holds the SubsAdminCap (0xcd0e5bbc…) + UpgradeCap (0xfb6dac80…) and is
+// the SubsConfig.treasury until synced. VERSION-GATED republish (2026-06-15): every
+// create/renew/cancel now takes the shared `Version` first (assert_latest) — run
+// `sync-subs-config.ts` after publish to set BOTH treasury AND coin_type on the fresh
+// SubsConfig. CONFIG_OBJECT is the shared SubsConfig init created; VERSION_OBJECT is the
+// shared Version. Mainnet stays '0x0' — its publish is a republish.
+const SUBS_PACKAGE: string = '0x759105b5f7382cb22533e8a5282e90c92c558edb1bc2eaa0904247914082d821';
+const SUBS_CONFIG_OBJECT: string = '0x976c10fb2eb9d29b8ae7c17fa6bf8b06cbb1e6a591e6ce7a82c04ff344332029';
+const SUBS_VERSION_OBJECT: string = '0x6542cdaa1f7bc55a00a319b98b8dd6d45b546868558a1e1a0b58d409b6d87d86';
+
+/**
+ * Ad-slot auction Move package (`auction::auction`) — the agents.suize.io directory's
+ * on-chain monetization. Each `AdSlot` is a SHARED object sold by continuous English
+ * auction (King-of-the-Hill: a strictly-higher bid takes the slot; the net goes to the
+ * directory, the configured fee to the treasury — so an ad sale is a payment on the
+ * rail that shows in the directory's own feed). Bids are USER-SIGNED + Enoki-sponsored
+ * (same shape as a subs renewal), so the sponsor allow-lists AUCTION_MOVE_TARGETS.
+ *
+ * PUBLISHED to testnet 2026-06-14 — the HARDENED v2 (republish digest
+ * 6kjMqdJzNn46q1sZz2V2smw1eXzg1akfemKNhPgJAH5P; supersedes the pre-hardening 0x07c192ad…,
+ * now abandoned) from packages/move-auction by the CLI dev wallet 0x087aa862… — which holds
+ * the AuctionAdminCap (0x8df7762c…) + UpgradeCap (0x3bbdadaa…). Post-publish admin txs set
+ * the AuctionConfig.treasury to the resolved treasury@suize, pinned USDC (set_coin_type —
+ * which MUST precede create_slot now: the hardened module aborts ECoinUnpinned otherwise),
+ * and created the three slots below; CONFIG.directory defaults to the publisher
+ * (= DIRECTORY_PAYTO). ON-CHAIN CAVEAT (same as subs): AuctionConfig.treasury is a
+ * LITERAL set at sync — if treasury@suize is repointed, an admin set_treasury is needed.
+ * Mainnet stays '0x0' — its publish is a republish.
+ */
+// REPUBLISHED 2026-06-15 (digest in git): version gate + `creative`/`update_creative`
+// REMOVED — an ad's content now comes from the holder's BusinessProfile NFT (see PROFILE_*).
+// Fresh publish (ABI break), so the prior 0xe0c4eeec… is abandoned. CLI dev wallet
+// 0x087aa862… holds the new AuctionAdminCap (0x583fb90a…) + UpgradeCap (0x908b44d0…).
+const AUCTION_PACKAGE: string = '0xa7151d699c93e48e5f502759d4de704ba4b8f22111b3d0b5a60c265ff2d37869';
+/**
+ * The auction MOVE-CALL ENTRY package. EQUALS AUCTION_PACKAGE — a FRESH republish (not an
+ * upgrade), so the AdSlot/AuctionConfig TYPES and the call targets share this one new id.
+ * A future UPGRADE that adds a fn would set this to the upgraded id while PACKAGE keeps the
+ * original; that distinction is preserved here for that case.
+ */
+const AUCTION_PACKAGE_LATEST: string = AUCTION_PACKAGE;
+const AUCTION_CONFIG_OBJECT: string = '0xe81a46df69a31d91b0eae9e03eb299e339294142cbd132957558d88e49ad1293';
+/** The shared `Version` gate — `bid` / `create_slot` call `assert_latest` first. */
+const AUCTION_VERSION_OBJECT: string = '0x9152d4ec84c1e04b0ae8ba453d7fe39e9a8791992ca63eda5384704554bd1a23';
+/** The shared `AdSlot` objects (genesis $50, held by the directory) — created by the sync
+ * script on this republish (digest G8hBsUWc…). */
+const AUCTION_SLOTS: Record<string, string> = {
+  hero: '0xce8607a907080baa23685ed2ce03bc3ce7b07e229cbb45faf8ec6af8c2e44128',
+  'feed-banner': '0x8c162a8061fd5e9c4fcf48f98601756663a4b2a4f48dbd32e468e2780893b574',
+  'rankings-sidebar': '0x5f0abceb1b3ad0e040c1937c4ee497479db63f0a6cff6390f1a1a3fcb2306801',
+};
+
+/**
+ * The directory's own merchant payout address — where each ad-slot bid's NET proceeds
+ * land (the fee leg goes to treasury@suize). This is `AuctionConfig.directory` on-chain
+ * (defaults to the publisher; redirect via the AuctionAdminCap `set_directory`). It is
+ * the address the directory appears under in its own live feed.
+ */
+export const DIRECTORY_PAYTO = '0x087aa862ca645c0b94400c49e11b491011fca35db837361ccfc4c6f69d356e86';
+
+/** The genesis price of every ad slot: $50 = 50_000_000 base units (6 decimals). A first
+ * bid must STRICTLY exceed it. */
+export const AD_SLOT_START_PRICE = 50_000_000;
+
+// ---------------------------------------------------------------------------
+// Business Profile NFT (`profile::profile`) — the merchant identity reused across ads +
+// the directory. A soulbound `BusinessProfile` (key, no store) with `Display<>` holds
+// name · description · image_url (logo) · banner_url · website. PUBLISHED to testnet
+// 2026-06-15 by the CLI dev wallet 0x087aa862… (holds ProfileAdminCap 0x100d5892… +
+// UpgradeCap 0x981e3548…). create/edit each cost a FLAT $0.10 (USDC) → treasury (the
+// rail's 2% is separate). One per business by convention; resolve by the address's owned
+// profile. Mainnet '0x0' — a republish. The on-chain ProfileConfig.treasury is set post-
+// publish (the sync script), same caveat as subs/auction.
+const PROFILE_PACKAGE: string = '0x21be5a6957d8e944eebb93d594057859fd793474ed6778479145b73b0b156c5d';
+const PROFILE_CONFIG_OBJECT: string = '0x537c791ad8612122f6f3363e7698125f4a3ed409a1ad8d54cfc796d81fd51e86';
+/** The shared `Version` gate — create_profile / edit_profile call `assert_latest` first. */
+const PROFILE_VERSION_OBJECT: string = '0xbb63c6c44e565d3b6955729f2e2f7c1149d3eefad26171f08a93370506410954';
+/** The on-chain `BusinessProfile` struct type — for `getOwnedObjects` type-filtered lookups. */
+export const BUSINESS_PROFILE_TYPE = (network: SuiNetwork): string =>
+  `${packageIds(network).PROFILE.PACKAGE}::profile::BusinessProfile`;
+/** The flat create/edit fee for a Business Profile: $0.10 at 6 decimals. */
+export const PROFILE_FEE = 100_000;
+
+/** Display metadata for the ad slots (the on-chain ids live in PACKAGE_IDS.AUCTION.SLOTS,
+ * keyed by the same `key`). The order here is the surface order on agents.suize.io. */
+export const AD_SLOT_DEFS = [
+  { key: 'hero', label: 'Hero banner', blurb: 'Top of every page' },
+  { key: 'feed-banner', label: 'Feed banner', blurb: 'Inside the live purchase feed' },
+  { key: 'rankings-sidebar', label: 'Rankings sidebar', blurb: 'Beside the volume leaderboard' },
+] as const;
 
 /**
  * The Suize treasury is the SuiNS handle `treasury@suize` — the ONE source of truth,
@@ -229,6 +312,19 @@ export async function resolveTreasury(client: TreasuryResolver): Promise<string 
 
 /** The price (in native USDC base units, 6 decimals) of one one-off deploy charge: $0.50 = 500_000. */
 export const DEPLOY_CHARGE_AMOUNT = 500_000;
+
+/** The DISCOUNTED per-deploy price for an active Deploy subscriber (Premium): $0.10
+ * = 100_000, vs the $0.50 standard rate. A perk of the $19.99/mo plan — each deploy
+ * costs a fifth. ENFORCED at the facilitator verify against the payer's on-chain sub
+ * (`hasValidDeploySub(payer)`): a non-subscriber that submits this lower amount is
+ * rejected; a subscriber may pay either this or the standard amount. */
+export const DEPLOY_PREMIUM_CHARGE_AMOUNT = 100_000;
+
+/** The Walrus storage a one-off deploy buys, in EPOCHS — the documented default
+ * (the backend's `DEPLOY_EPOCHS`, env-tunable). At testnet's ~1-day epochs that's
+ * ~1 month; the actual per-site end epoch is on-chain (the blobs' `storage.end_epoch`,
+ * surfaced as `expiresAtMs` on GET /sites/:id). Extend or subscribe to push it out. */
+export const DEPLOY_STORAGE_EPOCHS = 30;
 
 /** The price of a one-off Walrus-storage EXTEND, as a DECIMAL USDC string ("0.50")
  * — the x402/facilitator wire convention (decimal strings, not base units), so it
@@ -385,9 +481,11 @@ const deployIds = (ids: {
  * accept them or the sponsored renewal PTB is rejected. The function names MUST
  * match the published module verbatim — a typo silently breaks sponsorship.
  */
-const subsIds = (ids: { pkg: string; config: string }) => ({
+const subsIds = (ids: { pkg: string; config: string; version: string }) => ({
   PACKAGE: ids.pkg,
   CONFIG_OBJECT: ids.config,
+  /** The shared `Version` gate every create/renew/cancel passes first (assert_latest). */
+  VERSION_OBJECT: ids.version,
   TARGETS: {
     CREATE: `${ids.pkg}::subscription::create`,
     RENEW: `${ids.pkg}::subscription::renew`,
@@ -402,6 +500,55 @@ const subsIds = (ids: { pkg: string; config: string }) => ({
     // NORMALIZED targets, so a short `0x2::…` entry never matches and silently
     // breaks sponsorship (proven on testnet 2026-06-12 — short form → Enoki 400
     // "not part of an allow-listed move call target"; full form → accepted).
+    BALANCE_REDEEM_FUNDS: `${FRAMEWORK_PKG}::balance::redeem_funds`,
+    COIN_INTO_BALANCE: `${FRAMEWORK_PKG}::coin::into_balance`,
+  } as Record<string, string>,
+});
+
+/**
+ * Ad-slot auction package block (`auction::auction`) — PUBLISHED on testnet (real ids
+ * above; mainnet is a republish — '0x0' until then). `SLOTS` maps each slot key to its
+ * shared `AdSlot` object id (read live for the current price/holder/creative). The ONE
+ * write target `bid` is USER-SIGNED + Enoki-sponsored, so the sponsor allow-lists this
+ * set via AUCTION_MOVE_TARGETS — PLUS the two Sui framework helpers the `CoinWithBalance`
+ * intent injects to materialize the bid's `Balance<USDC>` under sponsorship (same pair
+ * as subs; MUST be the NORMALIZED 64-hex `0x2` form or Enoki silently rejects).
+ */
+const auctionIds = (ids: {
+  pkg: string;
+  pkgLatest: string;
+  config: string;
+  version: string;
+  slots: Record<string, string>;
+}) => ({
+  // PACKAGE = the ORIGINAL publish id: the AdSlot/AuctionConfig TYPE origin + AUCTION_PUBLISHED
+  // gate. (Fresh republish, so pkg === pkgLatest today.)
+  PACKAGE: ids.pkg,
+  CONFIG_OBJECT: ids.config,
+  /** The shared `Version` gate every bid/create_slot passes (assert_latest). */
+  VERSION_OBJECT: ids.version,
+  SLOTS: ids.slots,
+  TARGETS: {
+    // `bid<T>(version, slot, config, payment, clock, ctx)` — USER-SIGNED + Enoki-sponsored, so
+    // the sponsor allow-lists this set. No `update_creative` (ad content is the BusinessProfile).
+    BID: `${ids.pkgLatest}::auction::bid`,
+    BALANCE_REDEEM_FUNDS: `${FRAMEWORK_PKG}::balance::redeem_funds`,
+    COIN_INTO_BALANCE: `${FRAMEWORK_PKG}::coin::into_balance`,
+  } as Record<string, string>,
+});
+
+/**
+ * Business Profile package block (`profile::profile`). `create_profile` + `edit_profile` each
+ * push a $0.10 `Balance<USDC>` → treasury; USER-SIGNED + Enoki-sponsorable, so the sponsor
+ * allow-lists PROFILE_MOVE_TARGETS + the CoinWithBalance framework helpers (same `0x2` form).
+ */
+const profileIds = (ids: { pkg: string; config: string; version: string }) => ({
+  PACKAGE: ids.pkg,
+  CONFIG_OBJECT: ids.config,
+  VERSION_OBJECT: ids.version,
+  TARGETS: {
+    CREATE_PROFILE: `${ids.pkg}::profile::create_profile`,
+    EDIT_PROFILE: `${ids.pkg}::profile::edit_profile`,
     BALANCE_REDEEM_FUNDS: `${FRAMEWORK_PKG}::balance::redeem_funds`,
     COIN_INTO_BALANCE: `${FRAMEWORK_PKG}::coin::into_balance`,
   } as Record<string, string>,
@@ -424,7 +571,9 @@ const NETWORK_ADDRESSES: Record<
       siteDigestRegistry: string;
       deployerCap: string;
     };
-    subs: { pkg: string; config: string };
+    subs: { pkg: string; config: string; version: string };
+    auction: { pkg: string; pkgLatest: string; config: string; version: string; slots: Record<string, string> };
+    profile: { pkg: string; config: string; version: string };
   }
 > = {
   testnet: {
@@ -436,7 +585,15 @@ const NETWORK_ADDRESSES: Record<
       siteDigestRegistry: DEPLOY_SITE_DIGEST_REGISTRY_OBJECT,
       deployerCap: DEPLOY_DEPLOYER_CAP_OBJECT,
     },
-    subs: { pkg: SUBS_PACKAGE, config: SUBS_CONFIG_OBJECT },
+    subs: { pkg: SUBS_PACKAGE, config: SUBS_CONFIG_OBJECT, version: SUBS_VERSION_OBJECT },
+    auction: {
+      pkg: AUCTION_PACKAGE,
+      pkgLatest: AUCTION_PACKAGE_LATEST,
+      config: AUCTION_CONFIG_OBJECT,
+      version: AUCTION_VERSION_OBJECT,
+      slots: AUCTION_SLOTS,
+    },
+    profile: { pkg: PROFILE_PACKAGE, config: PROFILE_CONFIG_OBJECT, version: PROFILE_VERSION_OBJECT },
   },
   mainnet: {
     wallet: '0x0',
@@ -447,7 +604,9 @@ const NETWORK_ADDRESSES: Record<
       siteDigestRegistry: '0x0',
       deployerCap: '0x0',
     },
-    subs: { pkg: '0x0', config: '0x0' },
+    subs: { pkg: '0x0', config: '0x0', version: '0x0' },
+    auction: { pkg: '0x0', pkgLatest: '0x0', config: '0x0', version: '0x0', slots: {} },
+    profile: { pkg: '0x0', config: '0x0', version: '0x0' },
   },
 };
 
@@ -461,6 +620,8 @@ export const packageIds = (network: SuiNetwork) => ({
   WALLET: walletIds(NETWORK_ADDRESSES[network].wallet),
   DEPLOY: deployIds(NETWORK_ADDRESSES[network].deploy),
   SUBS: subsIds(NETWORK_ADDRESSES[network].subs),
+  AUCTION: auctionIds(NETWORK_ADDRESSES[network].auction),
+  PROFILE: profileIds(NETWORK_ADDRESSES[network].profile),
 });
 
 /**
@@ -484,6 +645,26 @@ export const SUBS_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.SUBS.TARGET
 
 /** True once the `subs` package has been published (its id is no longer the 0x0 placeholder). */
 export const SUBS_PUBLISHED: boolean = PACKAGE_IDS.SUBS.PACKAGE !== '0x0';
+
+/**
+ * Flat list of the `auction` write target (`bid`) PLUS the Sui framework helpers the
+ * `CoinWithBalance` intent injects under sponsorship — the sponsor allow-lists this set
+ * so a gasless ad-slot bid can call ONLY the auction surface. The sponsor MUST union
+ * these in only when AUCTION_PUBLISHED is true, else a `0x0::auction::*` target poisons
+ * the allow-list.
+ */
+export const AUCTION_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.AUCTION.TARGETS);
+
+/** True once the `auction` package has been published (its id is no longer the 0x0 placeholder). */
+export const AUCTION_PUBLISHED: boolean = PACKAGE_IDS.AUCTION.PACKAGE !== '0x0';
+
+/** Flat list of the `profile` write targets (create/edit) + the CoinWithBalance framework
+ * helpers — the sponsor allow-lists this set so a gasless profile mint/edit calls ONLY the
+ * profile surface. Union in only when PROFILE_PUBLISHED. */
+export const PROFILE_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.PROFILE.TARGETS);
+
+/** True once the `profile` package is published (id no longer the 0x0 placeholder). */
+export const PROFILE_PUBLISHED: boolean = PACKAGE_IDS.PROFILE.PACKAGE !== '0x0';
 
 /** Flat list of the wallet targets — the wallet pkg is LIVE on testnet (mandate/vault/swap/navi). */
 export const WALLET_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.WALLET.TARGETS);
@@ -649,44 +830,6 @@ export interface DeployResponse {
 // ---------------------------------------------------------------------------
 
 /**
- * POST /checkout request body — the OPTIONAL no-auth URL FORMATTER (backend
- * SPEC §7.3): pure string assembly of the hosted pay-page URL, for merchants
- * who want a server-call shape. NO store, NO session record — the terms live
- * entirely in the returned URL. `payTo` is a
- * 0x…64-hex Sui address; `amount` a positive decimal USDC string (≤ 6 dp);
- * `memo` (optional) is the merchant's own correlation id (≤ 256 chars — put
- * the 402 `paymentId` here); `returnUrl` (optional) an http(s) URL the pay
- * page redirects to AFTER settlement with `?digest=` appended.
- */
-export interface FacilitatorCheckoutRequest {
-  /** The merchant address being paid. */
-  payTo: string;
-  /** Decimal USDC string, e.g. "0.50". */
-  amount: string;
-  /** Optional correlation id stamped as the pay-link's memo (≤ 256 chars). */
-  memo?: string;
-  /** Optional post-settlement redirect (http/https only). */
-  returnUrl?: string;
-  /**
-   * Optional Suize handle (`name`, `name@suize`, or `name.suize.sui`) —
-   * round-tripped UNRESOLVED into the link's `to=` param (the pay page
-   * resolves it on-chain client-side and prefers it over `payTo`; the raw
-   * `payTo` stays in the link as the protocol fallback).
-   */
-  handle?: string;
-}
-
-/** POST /checkout response. `sessionUrl` is the hosted pay-page URL carrying
- * the exact terms (`?payTo=&amount=&memo=&returnUrl=`); `paymentId` is the
- * caller's `memo` echoed back, or a freshly generated `pay_[0-9a-f]{32}`
- * (128 CSPRNG bits) when absent — either way it IS the link's `memo` param,
- * so the merchant's later GET /verify correlates by it. */
-export interface FacilitatorCheckoutResponse {
-  sessionUrl: string;
-  paymentId: string;
-}
-
-/**
  * GET /sites/:id (and the entries of GET /sites) response body.
  * `owner` is the cryptographically-recovered deployer address (the signer of the
  * deploy auth nonce) — always a real, authenticated owner, never the service wallet.
@@ -712,6 +855,12 @@ export interface SiteInfo {
    * SDK — suizeSubs.findByRef(siteId)). Unlocks custom domains + auto-renews storage.
    * Absent on the list endpoint; absent when the subs module is unpublished. */
   subscribed?: boolean;
+  /** Client-derived, deploy dashboard ONLY: true when this site's `owner` is the
+   * signed-in user's agent SUB-ACCOUNT (a 1-of-2 multisig whose committee includes
+   * the user's main address) rather than the main address itself. Never set by the
+   * backend/wire — the dashboard tags it after an ON-CHAIN committee check (the
+   * signature IS the link; no stored state). Drives the "via agent" card chip. */
+  viaAgent?: boolean;
 }
 
 /**

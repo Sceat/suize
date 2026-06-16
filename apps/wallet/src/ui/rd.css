@@ -237,45 +237,38 @@ more serious) ---- */
   --rd-grad-hot: linear-gradient(120deg, #15468f 0%, #1c5cb8 45%, #2f7fe0 100%);
   --rd-grad-accent: linear-gradient(120deg, #15468f 0%, #1c5cb8 45%, #2f7fe0 100%);
 }
-/* ---- BUSINESS ROOM,
-dark — deep-water corporate,
-lifted to match ---- */
+/* ---- BUSINESS ROOM, dark — matches the PERSONAL graphite dark (owner 2026-06-16:
+   "business dark should resemble the personal dark"); same neutral graphite base +
+   #4da2ff accent, so the two faces read as one app in dark. ---- */
 :root[data-theme='dark'] .rd[data-rd-room='business'] {
-  --rd-ink-0: #0c1726;
-  --rd-base: #101e33;
-  --rd-surface: #142640;
-  --rd-raised: #1a3052;
-  --rd-raised-2: #21406b;
-  --rd-fg: #e7edf5;
-  --rd-fg-2: #a7b6cb;
-  --rd-fg-3: #6f819b;
-  --rd-fg-4: #495a74;
-  --rd-hair: rgba(180, 205, 240, 0.12);
-  --rd-hair-2: rgba(180, 205, 240, 0.06);
-  --rd-hair-strong: rgba(180, 205, 240, 0.2);
-  --rd-blue: #2f7fe0;
-  --rd-blue-deep: #1c5cb8;
-  --rd-blue-bright: #5ea6f5;
-  --rd-blue-ice: #9cc8f8;
-  --rd-wash: rgba(47, 127, 224, 0.12);
-  --rd-glow: rgba(47, 127, 224, 0.4);
-  --rd-hair-blue: rgba(47, 127, 224, 0.34);
-  --rd-grad-hot: linear-gradient(120deg, #1c5cb8 0%, #2f7fe0 45%, #5ea6f5 100%);
-  --rd-grad-accent: linear-gradient(120deg, #1c5cb8 0%, #2f7fe0 45%, #5ea6f5 100%);
-  --rd-glass-fill: rgba(13, 28, 50, 0.56);
-  --rd-glass-edge: rgba(160, 190, 230, 0.16);
+  --rd-ink-0: #0e1118;
+  --rd-base: #13161e;
+  --rd-surface: #181c26;
+  --rd-raised: #1f2430;
+  --rd-raised-2: #262c3a;
+  --rd-fg: #eceff3;
+  --rd-fg-2: #aeb6c2;
+  --rd-fg-3: #7d8795;
+  --rd-fg-4: #565f6d;
+  --rd-hair: rgba(236, 239, 243, 0.1);
+  --rd-hair-2: rgba(236, 239, 243, 0.06);
+  --rd-hair-strong: rgba(236, 239, 243, 0.17);
+  --rd-blue: #4da2ff;
+  --rd-blue-deep: #2e7bd6;
+  --rd-blue-bright: #7ac4ff;
+  --rd-blue-ice: #b9defa;
+  --rd-wash: rgba(77, 162, 255, 0.09);
+  --rd-glow: rgba(77, 162, 255, 0.45);
+  --rd-hair-blue: rgba(77, 162, 255, 0.34);
+  --rd-grad-hot: linear-gradient(120deg, #2e7bd6 0%, #4da2ff 50%, #7ac4ff 100%);
+  --rd-grad-accent: linear-gradient(120deg, #2e7bd6 0%, #4da2ff 50%, #7ac4ff 100%);
+  --rd-glass-fill: rgba(20, 24, 32, 0.56);
+  --rd-glass-edge: rgba(236, 239, 243, 0.12);
 }
 
 /* custom cursor over the whole lab (the .j-cursor-* layers are global) */
-@media (hover: hover) and (pointer: fine) {
-  .rd,
-  .rd a,
-  .rd button,
-  .rd input,
-  .rd textarea {
-    cursor: none;
-  }
-}
+/* Native cursor — the custom dot+ring was removed (reads as a gimmick on a money
+   app, and left bridge popups / previews with no pointer at all). */
 
 /* ==========================================================================
    THE HARNESS HEADER — the review switcher. Deliberately quiet meta-chrome:
@@ -598,6 +591,33 @@ grown into an app surface).
   border-bottom-left-radius: 5px;
 }
 
+/* assistant markdown (inline-safe — the bubble is a span; rich() in bits.tsx) */
+.rd-bubble strong {
+  font-weight: 640;
+}
+.rd-bubble .rd-md-code {
+  font-family: var(--rd-mono);
+  font-size: 0.9em;
+  padding: 0.05em 0.36em;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--rd-fg) 8%, transparent);
+}
+.rd-row--you .rd-bubble .rd-md-code {
+  background: color-mix(in srgb, #fff 22%, transparent);
+}
+.rd-bubble .rd-md-a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.rd-bubble .rd-md-bullet {
+  color: var(--rd-fg-3);
+  margin-right: 0.5em;
+}
+.rd-row--you .rd-bubble .rd-md-bullet {
+  color: color-mix(in srgb, #fff 72%, transparent);
+}
+
 /* the typing dots */
 .rd-dots {
   display: inline-flex;
@@ -617,6 +637,106 @@ grown into an app surface).
 @keyframes rd-typing {
   0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* the agentic loader — pulsing spark, shimmering status verb, animated ellipsis,
+   elapsed beat (Claude-Code style). Replaces the plain dots for the live brain turn. */
+.rd-loader {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px;
+  border-radius: 13px;
+  background: var(--rd-glass-fill);
+  border: 1px solid var(--rd-hair);
+  font-size: 13px;
+  line-height: 1;
+}
+.rd-loader__spark {
+  display: inline-flex;
+  animation: rd-loader-pulse 1.5s ease-in-out infinite;
+}
+@keyframes rd-loader-pulse {
+  0%, 100% { opacity: 0.5; transform: scale(0.86); }
+  50% { opacity: 1; transform: scale(1.14); }
+}
+.rd-loader__label {
+  font-weight: 560;
+  letter-spacing: -0.01em;
+  background: linear-gradient(90deg, var(--rd-fg-3) 0%, var(--rd-fg) 50%, var(--rd-fg-3) 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: rd-loader-shimmer 2s linear infinite;
+}
+@keyframes rd-loader-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.rd-loader__ell::after {
+  content: '';
+  animation: rd-loader-ell 1.4s steps(1, end) infinite;
+}
+@keyframes rd-loader-ell {
+  0% { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75%, 100% { content: '...'; }
+}
+.rd-loader__t {
+  min-width: 22px; /* fixed width on the LEFT so the time never shifts with the verb/ellipsis */
+  font-size: 11px;
+  color: var(--rd-fg-4);
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rd-loader__spark,
+  .rd-loader__label,
+  .rd-loader__ell::after { animation: none; }
+  .rd-loader__label {
+    -webkit-text-fill-color: var(--rd-fg-2);
+    color: var(--rd-fg-2);
+  }
+  .rd-loader__ell::after { content: '…'; }
+}
+
+/* a confirmed/declined action, collapsed into a compact permanent receipt row that
+   stays in the thread (instead of the card vanishing). */
+.rd-receipt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  max-width: 92%;
+  margin: 1px 0;
+  padding: 6px 11px;
+  border-radius: 11px;
+  background: var(--rd-glass-fill);
+  border: 1px solid var(--rd-hair);
+  font-size: 12px;
+  color: var(--rd-fg-2);
+}
+.rd-receipt > svg { color: var(--rd-blue); flex: 0 0 auto; }
+.rd-receipt__x { color: var(--rd-fg-4); font-weight: 700; }
+.rd-receipt__title { font-weight: 580; color: var(--rd-fg); white-space: nowrap; }
+.rd-receipt__meta { color: var(--rd-fg-3); font-variant-numeric: tabular-nums; }
+.rd-receipt.is-bad { opacity: 0.82; }
+.rd-receipt.is-bad .rd-receipt__title { color: var(--rd-fg-2); font-weight: 540; }
+
+/* a quiet persistent reminder while the agent is actively working — the loop runs
+   server-side but there's no durable store, so closing the tab kills the in-flight turn. */
+.rd-asst__notice {
+  margin: 0 14px 8px;
+  padding: 6px 11px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--rd-blue) 9%, transparent);
+  border: 1px solid var(--rd-hair-blue);
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--rd-fg-3);
+  text-align: center;
 }
 
 /* day divider — a caps label on a fading hairline */
@@ -785,6 +905,82 @@ its own line) */
 }
 .rd-confirm.is-done .rd-confirm__done {
   display: flex;
+}
+
+/* ---- agent-connect success: "confident receipt" ---- */
+.rd-ac {
+  width: min(340px, 88%);
+}
+.rd-ac__head {
+  color: var(--rd-bull);
+}
+.rd-ac__check {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--rd-bull);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
+.rd-ac__body {
+  padding: 16px 16px 17px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  text-align: center;
+}
+.rd-ac__addr {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: var(--rd-r-12);
+  background: var(--rd-glass-fill);
+  border: 1px solid var(--rd-hair);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    border-color 0.15s ease,
+    transform 0.06s ease;
+}
+.rd-ac__addr:hover {
+  border-color: var(--rd-glass-edge);
+}
+.rd-ac__addr:active {
+  transform: translateY(1px);
+}
+.rd-ac__mono {
+  font-family: var(--rd-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--rd-fg);
+}
+.rd-ac__copy {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+}
+.rd-ac__cap {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rd-fg);
+}
+.rd-ac__note {
+  margin: 0;
+  max-width: 30ch;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--rd-fg-3);
 }
 
 /* ---- the wallet main column ---- */
@@ -2525,4 +2721,191 @@ drop movement.
   font-size: 10.5px;
   line-height: 1.45;
   color: var(--rd-fg-4);
+}
+
+/* ── BUSINESS PROFILE tab — mint/edit the public brand identity (NFT) ────────── */
+.rd-prof {
+  display: block;
+}
+.rd-prof__blurb {
+  margin: 2px 0 16px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--rd-fg-3);
+  max-width: 52ch;
+}
+.rd-prof__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--rd-bull);
+  font-weight: 600;
+}
+.rd-prof__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.82fr);
+  gap: 22px;
+  align-items: start;
+}
+@media (max-width: 880px) {
+  .rd-prof__grid {
+    grid-template-columns: 1fr;
+  }
+}
+.rd-prof__form {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+.rd-prof__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rd-prof__field .rd-label {
+  margin: 0;
+}
+.rd-prof__fieldicon {
+  display: inline-flex;
+  color: var(--rd-fg-4);
+  margin-right: 8px;
+  flex: 0 0 auto;
+}
+/* the description is DERIVED from the linked website — a read-only block, not an input */
+.rd-prof__desc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 13px;
+  min-height: 56px;
+  border-radius: var(--rd-r-12);
+  border: 1px solid var(--rd-hair-strong);
+  background: var(--rd-raised);
+}
+.rd-prof__desctext {
+  margin: 0;
+  font-family: var(--rd-sans);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--rd-fg-2);
+}
+.rd-prof__deschint {
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  color: var(--rd-fg-4);
+}
+.rd-prof__deschint--load {
+  color: var(--rd-blue);
+}
+
+/* the live preview column */
+.rd-prof__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  position: sticky;
+  top: 12px;
+}
+.rd-prof__dirrow {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 14px;
+  border-radius: var(--rd-r-12);
+  border: 1px solid var(--rd-hair-strong);
+  background: var(--rd-raised);
+}
+.rd-prof__logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: var(--rd-r-8);
+  overflow: hidden;
+  background: var(--rd-grad-accent);
+  color: #fff;
+  font-family: var(--rd-mono);
+  font-size: 14px;
+  font-weight: 600;
+}
+.rd-prof__logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.rd-prof__logo--sm {
+  width: 26px;
+  height: 26px;
+  font-size: 11px;
+  border-radius: var(--rd-r-8);
+}
+.rd-prof__dirname {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--rd-fg);
+}
+
+/* the ad-card preview — carbon, mirrors the agents directory sponsored card */
+.rd-prof__adcard {
+  border-radius: var(--rd-r-16);
+  overflow: hidden;
+  border: 1px solid var(--rd-hair-strong);
+  background: linear-gradient(160deg, #16181d, #0c0d10);
+}
+.rd-prof__banner {
+  background: linear-gradient(120deg, #1d2030 0%, #14161b 100%);
+  line-height: 0;
+}
+.rd-prof__banner:empty {
+  min-height: 72px;
+}
+/* show the image at its OWN aspect ratio — never crop it (owner) */
+.rd-prof__banner img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.rd-prof__adbody {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 12px 14px 14px;
+}
+.rd-prof__adbody .rd-prof__logo {
+  grid-row: span 1;
+}
+.rd-prof__adname {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f2f4f8;
+}
+.rd-prof__addesc {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #aab2c0;
+}
+.rd-prof__err {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--rd-bear);
+}
+.rd-prof__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 15px;
+  border-top: 1px solid var(--rd-hair);
+}
+.rd-prof__feenote {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--rd-fg-4);
+  max-width: 40ch;
 }

@@ -11,6 +11,7 @@
     "deploy": "npx vercel@latest pull --yes --environment production && npx vercel@latest build --prod && npx vercel@latest deploy --prebuilt --prod"
   },
   "dependencies": {
+    "@mysten-incubation/memwal": "^0.0.7",
     "@mysten/dapp-kit": "1.0.6",
     "@mysten/enoki": "1.0.8",
     "@mysten/sui": "2.17.0",

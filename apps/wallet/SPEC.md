@@ -11,15 +11,15 @@
 - **The personal face (`ui/WalletDeck.tsx`)** — the deck: the wallet balance + the funded-agent card, subscriptions, activity, the assistant column, the money sheets.
 - **The business face (`ui/BusinessConsole.tsx`)** — one masthead tap away: a vertical-tab console (Overview / Revenue / Subscriptions) with the settled balance + the same money verbs, MRR/ARR, the charges ledger (the printed fee is the trust proof), and the analytics chat as a permanent column. **Honest by construction:** the merchant data feed does not exist yet, so production shows the real wallet USDC plus calm zeros/empty states — never fabricated revenue.
 
-Five jobs (the conversational job is ROADMAP; the rest are SHIPPED):
+Five jobs (the assistant + on-chain rail are SHIPPED; the *broad* cross-service reach is roadmap):
 
-1. **Converse + act** *(ROADMAP — the assistant UI ships honest: an empty thread, one "What can you do?" chip, and a truthful "I'm almost ready" reply; no fabricated history or actions in production).* The **Agent-enabled switch** lives in the assistant panel head.
-2. **Fund the agent** — the agent's spend cap IS its OWN address balance (a separate zkLogin identity — §3). "Fund" is a plain gasless P2P `sendWallet` from the human's wallet to the agent address; fund more → bigger cap.
+1. **Converse + act** — the assistant IS the **brain**: a Claude-powered (Haiku) tool-use agent (`ui/Assistant.tsx` `BrainAssistant`, which the panel runs in production whenever the deck passes `runAgentTool`). It READS your money and PROPOSES actions; it executes NOTHING itself — the keyless backend runs the loop and the **wallet is the sole executor** (reads answer instantly from app state; every write is a confirm card you tap, signed LOCALLY — the loop transport is `services/backend/SPEC.md`). Seven tools: read balance / activity / subscriptions, send USDC, cancel a subscription, sweep the sub-account, and publish a static page through Deploy. The **Agent-enabled switch** (the **Pause/Resume** button on the agent card) is the kill switch — off ⇒ no auto-spend. *(Built + green, pending this deploy; the brain answers "not configured" until the backend ships with its key. The BROADER "books flights / orders food across services" reach is roadmap — the brain has a fixed seven-tool set, not open-ended provider integration.)*
+2. **Fund the agent** — the spend cap IS the sub-account's balance (the 1-of-2 multisig — §3). "Fund" is a plain gasless P2P `sendWallet` from the human's wallet to the multisig address; fund more → bigger cap.
 3. **Dial** — the confirm policy stays a client-side dial (root `CLAUDE.md` #8); no `policy` field on-chain.
-4. **Kill** — the honest two-step (the wallet can't sweep a foreign zkLogin address — §10): stop funding the agent (you control the tap) + revoke at the source (the MCP `suize_kill` tool + Google's app-permissions page); plus per-row subscription "Cancel" (`subs::subscription::cancel`), the Agent-enabled switch off, and **Sign out** (the masthead identity menu → dapp-kit disconnect; autoConnect will not silently restore).
+4. **Kill** — **stop funding + one-tap sweep**: the sub-account is a 1-of-2 multisig the human's MAIN member can drain alone (§3), so "bring my money back" is a single signed sweep — no foreign-address caveat. Plus per-row subscription "Cancel" (`subs::subscription::cancel`), the **Agent-enabled** switch off (halts auto-spend at once), and **Sign out** (the masthead identity menu → dapp-kit disconnect; autoConnect will not silently restore).
 5. **Trace** — every subscription lifecycle event (`SubscriptionCreated`/`Renewed`/`Cancelled`) + sent payment rendered as a checkable row with a real explorer link (`SUIVISION_TX`). The Walrus action-log remains the phase-2 extension (root `CLAUDE.md` moat).
 
-**The number wall holds** (root `CLAUDE.md` #5): the deterministic builders + the dial own every on-chain amount; no LLM emits a tx number. **No server signing** — the in-app zkLogin session signs locally.
+**The number wall holds** (root `CLAUDE.md` #5): the brain only *proposes* — the wallet's deterministic builders re-derive every on-chain amount, recipient, and fee on the confirm card the user taps; no LLM output ever becomes a tx number. **No server signing** — the in-app zkLogin session signs locally; the backend brain is keyless and never touches the money path.
 
 ---
 
@@ -39,9 +39,9 @@ Five jobs (the conversational job is ROADMAP; the rest are SHIPPED):
 | Card | Label | Source | Verbs |
 |---|---|---|---|
 | **Your money** | "Your money" | wallet USDC (`getBalance`) | **Add funds** (receive) · **Send** (P2P) |
-| **Agent (sub-account)** | "Sub-account" | the agent ADDRESS's USDC balance (`getBalance` on a SEPARATE zkLogin identity — `data/useAgent.ts`) | **Connect** (paste the agent's address) · **Fund** (a P2P `sendWallet` to it) |
+| **Agent (sub-account)** | "Sub-account" | the sub-account's USDC balance — a 1-of-2 multisig over { MAIN, AGENT } session keys (`data/useAgent.ts`) | **Connect** (arm it: a one-time agent Google sign-in captures the AGENT member) · **Fund** (a P2P `sendWallet` to the multisig) · **Bring it back** (one-tap sweep — MAIN signs alone) |
 
-There is **no on-chain shared `Account` anymore** (the `account.move` cage is retired — §6): the agent's spend cap IS its own address balance. The human FUNDS a separate address (the MCP/assistant session's address, pasted from `suize_balance`), and that balance is the hard ceiling — fund more raises it, the wallet cannot reach in. The **honest custody caveat (§10):** that address is a DIFFERENT Google `aud`, so the wallet **cannot sweep it back** — only the agent's own session can move its funds.
+There is **no on-chain shared `Account` anymore** (the `account.move` cage is retired — §6): the sub-account is a **1-of-2 Sui multisig** over { the MAIN wallet session key, the AGENT session key }, threshold 1 — a PURE FUNCTION of the two members (`@suize/x402` `formAgentSubaccount`), so the wallet re-derives the address with no trusted state. Its balance is the hard cap — fund more raises it. **Threshold 1 cuts both ways:** the AGENT member spends from it (the leash), and the **MAIN member can sweep it back in ONE TAP, signing alone** — so unlike the old "fund a foreign address" model, the human is never locked out of the sub-account (§10). The members are captured at **arm** (§6b `/agent-connect`) and persisted (public keys, not secrets — `payStore`).
 
 The masthead shows the **Total** at the right, beside the **identity menu** (`ui/Identity.tsx` — the handle ▾: copy address, Sign out; lives at the masthead's right on BOTH faces). The activity ledger is the **verifiable trace**: sent payments flow out (−), and subscription rows (created / renewed / cancelled) carry the period amount or, where nothing moved, **no signed amount**. Consumer-vocabulary law (root `CLAUDE.md`): "sub-account" everywhere — never "leash"/"pot"/"agent money" — and no tech jargon reaches the UI.
 
@@ -51,7 +51,7 @@ The masthead shows the **Total** at the right, beside the **identity menu** (`ui
 
 Shared by both faces; all are real modals (focus-trapped, `aria-modal`, Escape closes, focus returns to the opener):
 
-- **Add funds** — the branded decorative QR (`SuizeQr` — NOT scannable; the copy row is the share surface), the copyable handle, the network warning (*"Send only USDC on Sui"*), and the coming-soon rails (Bank transfer / Apple Pay / Card). The **exact-amount request link is demo-gated** (`requestEnabled`) until its route ships — production never mints a link that leads nowhere. Request links are the WALLET surface (free gasless P2P `sendWallet`), never the merchant pay-link (the 2% CHARGE surface).
+- **Add funds** — the branded decorative QR (`SuizeQr` — NOT scannable; the copy row is the share surface), the copyable handle, the network warning (*"Send only USDC on Sui"*), and the coming-soon rails (Bank transfer / Apple Pay / Card). The **exact-amount request link is demo-gated** (`requestEnabled`) until its route ships — production never mints a link that leads nowhere. Request links are the WALLET surface (free gasless P2P `sendWallet`), never a merchant CHARGE (the 2% x402 surface — an agent pays the merchant's own x402 endpoint).
 - **Send** — accepts ANY SuiNS name form, all resolved the same on submit (owner law 2026-06-13): `name@suize` (a Suize handle = `name.suize.sui`), the SuiNS `@name` form (= `name.sui`), `name.sui`, and subnames `x.y.sui`. The ONE normalizer is `normalizeSuiName` in `data/suins.ts` (shared by the Send sheet's `detectRecipient` and `resolveRecipient` — single source of truth; a dotted-parent `a@b.tld` is an email, not a name). Also full 64-hex addresses, and emails/phones (detected, marked coming-soon; the claim-link path is demo-gated). The pre-submit tick says "looks right" (resolution is on submit). No memo field. Executes `sendWallet` (a gasless single-output x402 `send_funds`). "Max" **floors to cents** so sub-cent dust can never overdraw the tx.
 - **Fund the agent** — amount + quick chips + Max; a plain `sendWallet` to the connected agent address (its balance becomes the cap); async with a calm in-sheet error line.
 
@@ -69,11 +69,14 @@ Write failures everywhere surface calmly in place (sheets inline; subscription-c
 
 - **`subs.ts`** — pure PTB builders + object/event reads for the STANDALONE `subs::subscription` module (the SINGLE source of the subscription Move shapes: `create`/`renew`/`cancel`, the `Subscription<USDC>` type arg, the shared `SubsConfig`, the Clock; push-not-pull — each period's `Balance<USDC>` is pushed into create/renew via `tx.balance(...)`). Ids live ONLY in `@suize/shared`.
 - **`useAccount.ts`** — the one hook (REWRITTEN onto the live rail, 2026-06-12): reads (wallet USDC + the subs lifecycle as the activity trace) + writes — **`sendWallet`** (a gasless single-output x402 Address-Balance `send_funds` of the user's own wallet USDC; the payer's OWN session signs; no fee) and **`cancelSubscription`** (`subs::subscription::cancel`, ridden over the WS sponsor). The shared funded-`Account` deposit/withdraw/spend verbs are GONE. The event feed is **paginated with caps** so a fixed window can't starve our rows under real module traffic.
-- **`useAgent.ts`** — the agent-address store: read the saved agent address (per-owner localStorage) + its USDC balance (its hard cap), `setAddress`/`clearAddress`, and **`fund`** (a `sendWallet` to the agent address). No on-chain Account; the honest can't-sweep custody caveat lives in the copy (§10).
+- **`useAgent.ts`** — the sub-account hook (the **1-of-2 multisig** model): derive the sub-account address from the stored members (`formAgentSubaccount`; `armed` only when both parse back to the owner), read its USDC balance (the hard cap), **`fund`** (a `sendWallet` to the multisig), and **`withdraw`** (the one-tap sweep — a gasless multisig `send_funds` from the sub-account to MAIN, the MAIN member signs + combines alone). A stored member that mis-parses (e.g. the old flag-prefix bug) derives to a different address ⇒ treated as NOT armed, so the UI offers a clean re-arm instead of a sub-account the owner's signature can't satisfy.
 - **`useSubscriptions.ts`** — the live `Subscription<USDC>` object reads + the silent-renew loop driver.
 - **`payTypes.ts`** — the stable `PayApi` contract (pending union includes `'send'` and `'cancel'`).
-- **`payStore.ts`** — the per-owner agent-address cache + the approved-terms store (the silent-renew leash: the loop only auto-renews terms the user approved).
+- **`payStore.ts`** — per-owner client-side policy (all localStorage, all the SECOND control layer — funding physics is the first): the **agent multisig members** (the two public keys; the address is a pure function of them), the **approved-terms** store (the silent-renew leash — the loop only auto-renews terms the user approved), the **spending dials** (`each` / `under $X` / `full`; a NEW payee always confirms), the **known-payee** allow-list, and the **repeat-action loop-breaker** (`autoActionIsRepeat` — the 3rd identical auto-send in 10 min falls through to a confirm; funding physics + the coming Walrus action-log are the real backstops, this just probes intent on a loop).
 - **`coins.ts` / `grpc.ts` / `prices.ts`** — the USDC coin type/decimals, the gRPC client (the transport where gasless eligibility resolves), and USD pricing.
+- **`memwal.ts`** — the one-time **memory onboarding**: ask the backend for the user's derived MemWal delegate pubkey (`wsMemwalDelegate`), then `createAccount` + `addDelegateKey` (Enoki-sponsored, signed locally) and cache the `accountId`. The brain does recall/remember server-side around each turn (`services/backend/SPEC.md`); the wallet only authorizes the delegate ONCE. Best-effort — never blocks a chat or a payment.
+- **`agentTools.ts`** — the `ToolRun` contract the brain's tool calls compile to: an `immediate` result (a read, no money) or a `card` (a write the user must tap, carrying its `commit`). `ui/WalletDeck.tsx` `runAgentTool` is the executor (the number wall lives here — it re-derives recipient/amount/fee, never trusting the model's args).
+- **`deploy.ts` / `pack.ts`** — deploy-from-agent: tar a single self-contained `index.html` and publish it through the Deploy **x402** flow (probe → 402 → settle the $0.50 locally → live URL). A strict CSP `<meta>` is injected so the page is truly self-contained (no network); the price is the backend's OWN 402 challenge (the number wall — the model never sets it).
 - **`useAuth.ts`** — Enoki zkLogin (`connect` = an OAuth **popup**, must fire from a user gesture) + **`signOut`** (dapp-kit disconnect). **`suins.ts` / `ws.ts` / `useIdentity.ts` / `useWsLifecycle.ts`** — the WS sponsor/handle transport per root `CLAUDE.md` #14. **The socket self-heals (2026-06-11):** a user action on a down socket kicks a fresh connect and waits briefly (`ensureConnected`) instead of instantly failing, and tab-focus / network-online kick a reconnect — a dropped socket (laptop sleep, transient server-side verify failure) can no longer strand the session on "not ready" until reload.
 
 Transport: a gasless x402 write (`sendWallet`) builds its own gasless bytes and the session signs them; a sponsored write (a subscription `create`/`renew`/`cancel`, which mints/touches a persistent Party object → not fully gas-rebatable) builds KIND bytes → `requestSponsorship` → the zkLogin session signs the sponsored bytes verbatim → `executeSponsored`. The backend never signs owner txs.
@@ -82,97 +85,53 @@ Transport: a gasless x402 write (`sendWallet`) builds its own gasless bytes and 
 
 ---
 
-## 6b. The SSO bridge (the wallet as the suite's identity origin — 2026-06-11)
+## 6b. The subscription + agent gates (wallet-hosted popups)
 
-The Enoki session lives on THIS origin only; other `*.suize.io` products consume
-it through two wallet-hosted surfaces (protocol + security model:
-`@suize/shared/bridge`; wire shapes there, POLICY here):
+The Enoki session lives on THIS origin only; the wallet hosts two visible
+top-level popups other `*.suize.io` products open for the operations they can't
+sign themselves (protocol + security model: `@suize/shared/bridge`; wire shapes
+there, POLICY here). **NOTHING signs on a silent surface — money always needs a
+visible popup the human approves.**
 
-- **`/bridge`** (`bridge.html`, a SEPARATE vite entry → `src/bridge/main.tsx` +
-  `BridgeHost.tsx`) — a hidden same-site iframe, ONE silent op: `getSession`
-  (address or null). **NOTHING signs on the silent surface.** The host answers
-  through a **settle gate**: the session restores ASYNCHRONOUSLY after the
-  iframe mounts (Enoki registration → autoConnect → IndexedDB decrypt), so when
-  dapp-kit's persisted connection marker says a session is expected, `getSession`
-  is parked until the account materializes (6s deadline for the stale-marker
-  case) — answering straight from `useCurrentAccount()` raced the restore and
-  reported logged-in users as null, which silently broke suite-wide auto-login
-  (fixed 2026-06-13). A second op
-  `signAuthNonce` (sign the fixed backend-WS login message so another product
-  could open its OWN authenticated WS with the shared session) is DESIGNED in
-  `@suize/shared/bridge` but **deliberately NOT shipped** — it has no consumer
-  (pay.suize.io uses the facilitator + the confirm popup, never a WS) and a
-  zero-click signer is the one piece that turns an allowlisted-origin XSS into a
-  full WS session as the victim. Re-add WITH a mitigation (one-time visible
-  consent / audience-scoped nonce) when the first WS product lands. Gates: the
-  exact-match origin allowlist (`src/bridge/origins.ts` — `pay.suize.io` +
-  `deploy.suize.io` + `crash.suize.io`; NEVER a wildcard, NEVER `*.suize.site`)
-  + a `frame-ancestors` CSP in `vercel.json` listing the same three (CSP is the
-  ONLY frame control here — X-Frame-Options can't express the multi-origin
-  embed; `/confirm` adds `XFO: DENY`); the PWA service worker denylists the path
-  from its SPA fallback.
-- **`/confirm`** (`src/bridge/ConfirmPay.tsx`, routed in `main.tsx`) — the
-  visible MONEY popup: receives terms (origin + opener-pinned), then
-  **builds-what-it-displays** (the gasless x402 `send_funds` payment built from the
-  displayed terms → local sign → settled via the facilitator) and returns ONLY the
-  digest. Signed-out: "Continue with Google" opens the Enoki OAuth popup; this
-  window stays open and its session updates reactively on return (no redirect, no
-  sessionStorage stash). `frame-ancestors 'none'` — it can never be iframed.
 - **`/confirm-subscribe`** (`src/bridge/ConfirmSubscribe.tsx`) — the RECURRING money
-  gate: a visible top-level popup other `*.suize.io` products open to set up (or
-  cancel) a subscription. Mirrors `/confirm` (same origin-pinning + `ready` beacon +
-  same popup sign-in) for the `SubscribeTerms` pair. **display = build:** it renders
+  gate: a visible top-level popup other `*.suize.io` products (Deploy's storage
+  subscription) open to set up (or cancel) a subscription. Origin-pinned + a `ready`
+  beacon + popup sign-in for the `SubscribeTerms` pair. **display = build:** it renders
   the terms (merchant / amount / periodMs / ref) and on approval builds the
   `subs::subscription::create` PTB ITSELF from those same terms (push-not-pull —
   period 1 paid inline). **Sponsored** (a Party-object mint is not fully
   gas-rebatable), so it runs the WS sign-once lifecycle and rides the sponsor path —
   the key still never leaves the machine. On success it records the APPROVED terms in
-  `payStore` (the silent-renew leash) and posts the new `subKey` back.
+  `payStore` (the silent-renew leash) and posts the new `subKey` back. Signed-out:
+  "Continue with Google" opens the Enoki OAuth popup; this window stays open and its
+  session updates reactively on return. `frame-ancestors 'none'` — it can never be
+  iframed.
 
-**ONE consumer shape (live 2026-06-11):**
-- **Identity + money popup (pay):** reads `getSession` for who-you-are, runs NO
-  local login, signs money through `/confirm`. `apps/pay/src/bridge-client.ts`.
-- **The auto-login bootstrap is REMOVED (owner decision 2026-06-13).** Deploy and
-  crash briefly shipped a `useSsoAutoLogin` hook that, on load, asked the bridge
-  `getSession` and silently triggered the app's own Google login. It died on
-  platform reality: Enoki's `connect` is POPUP-based (`window.open` → OAuth →
-  poll → close — NOT a full-page redirect), so the "silent" mint either gets
-  popup-blocked (no user gesture on page load) or flashes a popup with Google's
-  account chooser — never silent. Deploy/crash now use their plain local sign-in
-  button (popup behind a real click). Do NOT reintroduce a load-time OAuth mint;
-  if zero-click identity is ever wanted there, consume the bridge ADDRESS as
-  read-only identity (pay's shape) and mint the local session lazily behind the
-  first signing click.
-- **Limitation (by construction):** identity propagates FROM the wallet origin
-  (the bridge host). Logging into a leaf app first does not back-propagate to the
-  wallet (cross-origin storage), so suite-wide SSO assumes the canonical login is
-  the wallet (or pay's wallet-origin popup). Acceptable: the wallet is the home.
-
-**`/agent-connect` — the MCP auth door (CHARGE-side / dev, NOT a consumer PAY path)**
+**`/agent-connect` — the Suize-door agent sign-in (CHARGE-side / dev, NOT a consumer PAY path)**
 (`src/bridge/AgentConnect.tsx`): an external assistant's Suize MCP signs in via a
 **SECOND, DISTINCT Google zkLogin client** (`VITE_GOOGLE_AGENT_CLIENT_ID`) so the
-agent's address is a different `aud` and **NEVER reuses the human wallet session** —
-this is exactly why the wallet can't sweep the agent (§10). It then hands the MCP a
+AGENT session is a different `aud` and **NEVER reuses the human wallet session**. With
+`?arm=1` (the wallet's "Connect" — §3) it captures the AGENT member's public key that,
+together with the MAIN member, forms the **1-of-2 multisig** sub-account; threshold 1
+means the human's MAIN member can still **sweep it alone** (§10). It then hands the MCP a
 local session. **LOAD-BEARING FOREVER:** `VITE_GOOGLE_AGENT_CLIENT_ID` is a separate
 pinned OAuth client id — once registered it can never be rotated (it is the agent
 identity's zkLogin `aud`), exactly like the primary `client_id`. **STATUS — STUB:**
 the second Enoki OAuth client is not yet registered, so `GOOGLE_AGENT_CLIENT_ID` is
 empty in this build and the door is inert (`AGENT_ENABLED` false) until it is set.
 
-The key never leaves this origin; no bridge surface exports key material or
-signs arbitrary tx bytes. Consumers: `pay.suize.io` (identity + popup),
-`deploy.suize.io` + `crash.suize.io` (identity + auto-login) — see
-`services/backend/SPEC.md` §7.4. **Reviewed** (4-agent `/review` + a dedicated
-web-security adversary, 2026-06-11): no exploitable finding against the hard
-requirements (key isolation, display=build, money-needs-visible-UI,
-non-allowlisted-origins-get-nothing — the last proven live with a hostile
-origin). Hardened in the same pass: silent surface cut to `getSession` only
-(above); the OAuth-resume stash re-asserts the allowlist on its stored
-`openerOrigin` before posting any result; first-valid-terms guard + a 30 s
-beacon deadline; the payer receipt shows ONLY the approved amount (never the
-verify response's fee fields). Accepted residual (in the stated threat model):
-an XSS'd allowlisted origin can *request* a payment via the popup — but the
-human still sees and approves the amount, and the key never moves.
+The key never leaves this origin; no popup surface exports key material or
+signs arbitrary tx bytes. The `/confirm-subscribe` consumer is Deploy's storage
+subscription — see `services/backend/SPEC.md` §7.4. **Reviewed** (4-agent
+`/review` + a dedicated web-security adversary, 2026-06-11): no exploitable
+finding against the hard requirements (key isolation, display=build,
+money-needs-visible-UI, non-allowlisted-origins-get-nothing — the last proven
+live with a hostile origin). Hardened in the same pass: the OAuth-resume stash
+re-asserts the allowlist on its stored `openerOrigin` before posting any result;
+first-valid-terms guard + a 30 s beacon deadline. Accepted residual (in the
+stated threat model): an XSS'd allowlisted origin can *request* a subscription
+via the popup — but the human still sees and approves the amount, and the key
+never moves.
 
 ---
 
@@ -192,8 +151,8 @@ The subscription module `subs::subscription` is **PUBLISHED on testnet** (`PACKA
 
 ## 9. What this app does NOT do (anti-drift fence)
 
-- **No server signing; no server-side AI in the signing path** (root `CLAUDE.md` #5). The assistant UI never fabricates: production threads start empty and reply honestly until the conversational layer ships.
-- **No on-chain agent identity / `set_agent` / pause / budget / scope / allow-list / expiry, and no shared funded `Account`** — the agent address's own balance is the cap; kill = stop funding + revoke at the source / cancel subscriptions / switch off / sign out.
+- **No server signing; the server-side AI is FENCED OUT of the money path** (root `CLAUDE.md` #5). The backend brain runs Claude and PROPOSES tool calls, but it is keyless: it never signs, settles, sponsors, or imports the money path, and the wallet re-derives every on-chain number on the confirm card (the number wall). The assistant never reports an action as done unless the tool result says so.
+- **No on-chain agent identity / `set_agent` / pause / budget / scope / allow-list / expiry, and no shared funded `Account`** — the multisig sub-account's own balance is the cap; kill = stop funding + one-tap sweep / cancel subscriptions / switch off / sign out.
 - **No fabricated numbers.** Demo data exists only behind the DEV `?demo=1` seam.
 - **No request/claim links in production** until their routes exist (Soon-gated).
 
@@ -205,7 +164,7 @@ The verbatim law (root `CLAUDE.md`): **"fully non-custodial — your keys never 
 
 > **Fully non-custodial** — your keys never leave your machine. Every payment is signed by your own login; Suize never signs for you.
 
-The custody phrase is VERBATIM and never deviates. **The honest agent caveat (the new model):** the agent's funds live on a SEPARATE zkLogin identity (a different Google `aud`, connected via `/agent-connect` — §6b), so **the wallet cannot sweep them back** — only the agent's own session can move them. Kill is therefore the honest two-step (§1.4): stop funding it (you control the tap) + revoke at the source (the MCP `suize_kill` tool + Google's app-permissions page). We never pretend the wallet can claw back a foreign address. (The agent balance is delegated-spend, bounded by what you funded + the verifiable log + that two-step kill — delegated-spend risk, not custody risk.)
+The custody phrase is VERBATIM and never deviates. **The honest agent caveat:** the sub-account is a **1-of-2 multisig** over { your MAIN session, the AGENT session } (§3) — threshold 1, so the AGENT member can spend the funds you put there (delegated-spend; v1 has no on-chain payee allow-list), but **your MAIN member can sweep it back in one tap, signing alone.** So the leash is bounded by what you fund + a verifiable log + a one-tap sweep you alone control — **delegated-spend risk, NOT custody risk.** (We never claim the wallet can claw back a *foreign* address — the sub-account is not foreign, it's a multisig you co-own.)
 
 ---
 
@@ -213,6 +172,7 @@ The custody phrase is VERBATIM and never deviates. **The honest agent caveat (th
 
 - **SHIPPED + LIVE at `wallet.suize.io`** (Vercel, prebuilt deploys; PWA with `skipWaiting` so new deploys take over immediately). Meta/OG: "Suize — the AI wallet that makes life easier" + the marketing tweet card (1600×900).
 - **Migrated onto the live x402 rail (2026-06-12):** off the retired `account.move`, onto gasless x402 `send_funds` + the standalone `subs::subscription` module.
-- **Real on testnet:** sign-in, handle claim, wallet balance, gasless send, the funded-agent card (connect/fund/balance), subscriptions + the verifiable trace with explorer links, push-not-pull silent renew, cancel, coverage warnings, sign-out.
+- **Real on testnet:** sign-in, handle claim, wallet balance, gasless send, the **multisig sub-account** (arm / fund / balance / one-tap sweep), subscriptions + the verifiable trace with explorer links, push-not-pull silent renew, cancel, coverage warnings, sign-out.
+- **The conversational assistant (the brain) is BUILT + green:** Claude Haiku, seven tools, the wallet-executes-every-tool loop, the spending dials + repeat loop-breaker, and MemWal memory ("it remembers you"). Wired into production (`BrainAssistant`); it answers "not configured" until the backend ships with `ANTHROPIC_API_KEY` (this deploy).
 - **Reviewed:** the 4-agent `/review` gauntlet passed after the 2026-06-10/11 fix round (blockers: orphaned landing token, false +cap credit, vocab in the ledger, dead request links — all fixed).
-- **Pending:** the merchant data feed (business face real revenue); the conversational AI layer; the Walrus action-log (phase 2); the request/claim-link routes (then flip their gates); the `/agent-connect` second Enoki client registration (STUB until then); the mainnet publish.
+- **Pending:** this DEPLOY (backend with the Anthropic + MemWal env; wallet Vercel); the `/agent-connect` **second Enoki client** registration (the sub-account can't arm until it's set — dormant-but-honest until then); the merchant data feed (business-face real revenue); the **Walrus action-log** (phase 2 — the verifiable trace of every agent action); the broader **cross-service reach** (book flights / order food — the brain has a fixed seven-tool set today); two more brain tools (pay an external merchant, create a subscription); the request/claim-link routes; the mainnet publish.

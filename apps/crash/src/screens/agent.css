@@ -1,0 +1,750 @@
+/* ============================================================================
+   AGENT screen — the uncopyable wedge, made legible. Scoped under `.ag`.
+   Obeys POLYSUI-UI-LAW + the Suize house DNA:
+   - full-bleed editorial broadsheet, NOT a centered boxed column
+   - hierarchy by SIZE (one oversized statement leads)
+   - flat surfaces + 1px fading hairlines (--rule-fade) — NEVER shadows/glow
+   - ONE blue accent spent ~3× max (primary CTA · UP side · the live "verify"/dot)
+   - Newsreader = titles/kickers · Martian Mono = every numeral · Space Grotesk = words
+   - NO pills, NO icon-tile grids, NO left-accent rails, NO emoji, NO glow
+   - slow house motion (≤300ms, cubic-bezier(.16,1,.3,1))
+   Tokens (--paper/--ink/--blue/--hair/--rule-fade/--sans/--mono/--serif/
+   --bull-ink/--bear-ink…) come from styles.css; never hardcode a hex here.
+   ============================================================================ */
+
+.ag {
+  --ag-gutter: clamp(20px, 5.5vw, 88px);
+  --ag-max: 1180px;
+
+  /* ---- premium texture tokens — consume the shared veil/top-light ladder if
+     the shell has shipped it, else degrade to a self-contained local value so
+     this surface is premium standalone. Theme-aware via the dark overrides
+     below. ---- */
+  --ag-veil-1: var(--veil-1, rgba(10, 27, 46, 0.015));
+  --ag-veil-2: var(--veil-2, rgba(10, 27, 46, 0.03));
+  --ag-top-light: var(--top-light, inset 0 1px 0 rgba(255, 255, 255, 0.7));
+  --ag-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  min-height: 100dvh;
+  padding: calc(var(--ps-nav) + clamp(40px, 8vh, 92px)) var(--ag-gutter) 120px;
+  position: relative;
+  font-family: var(--sans);
+  color: var(--ink);
+  /* the section-scoped editorial wash — a single barely-there ink-in-water
+     bloom at top-left, confined to this surface (the chart void lives only on
+     Play). NEVER a flat dead box, NEVER glow. */
+  background:
+    radial-gradient(60% 42% at 12% 0%, var(--blue-wash), transparent 70%),
+    transparent;
+}
+:root[data-theme='dark'] .ag {
+  --ag-veil-1: var(--veil-1, rgba(234, 241, 250, 0.02));
+  --ag-veil-2: var(--veil-2, rgba(234, 241, 250, 0.035));
+  --ag-top-light: var(--top-light, inset 0 1px 0 rgba(255, 255, 255, 0.07));
+}
+
+.ag > * {
+  max-width: var(--ag-max);
+  margin-inline: auto;
+  position: relative;
+  z-index: 1;
+}
+
+/* ---- DUAL-LABEL SECTION FURNITURE — a serif kicker + a mono gloss, the move
+   that turns label-soup into a considered system. ---- */
+.ag-furniture {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.ag-kicker {
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.ag-furniture .ag-kicker {
+  margin-bottom: 0;
+}
+.ag-gloss {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  /* a faint dotted lead-in so the gloss reads as an instrument label */
+  position: relative;
+  padding-left: 18px;
+}
+.ag-gloss::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 10px;
+  height: 0;
+  border-top: 1px solid var(--hair-strong);
+  transform: translateY(-50%);
+}
+
+/* ---- the universal raised surfaces (veil-over-floor elevation + lit top
+   edge), consumed by the connect card + feed. NEVER a flat solid fill. ---- */
+.ag .surface {
+  background: linear-gradient(180deg, var(--ag-veil-2), var(--ag-veil-1)),
+    var(--paper);
+  border: 1px solid var(--hair);
+  box-shadow: var(--ag-top-light);
+  border-radius: 10px;
+}
+.ag .surface-mesh {
+  background: radial-gradient(130% 150% at 85% -20%, var(--blue-wash),
+      transparent 55%),
+    linear-gradient(180deg, var(--ag-veil-2), var(--ag-veil-1)), var(--paper);
+  border: 1px solid var(--hair);
+  box-shadow: var(--ag-top-light);
+  border-radius: 10px;
+}
+
+/* ---------------- HERO — one oversized statement, alone in a field -------- */
+.ag-hero {
+  display: grid;
+  gap: 0;
+}
+/* GHOST-GLYPH DEPTH LAYER — a colossal faded ₿ behind the masthead. One per
+   view, pointer-inert, the editorial weight that reads "expensive". */
+.ag-hero-ghost::before,
+.ag-closer-ghost::before {
+  content: '₿';
+  position: absolute;
+  font-family: var(--serif);
+  line-height: 0.8;
+  color: var(--ink);
+  opacity: 0.028;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+}
+.ag-hero-ghost::before {
+  right: -3vw;
+  top: -2vh;
+  font-size: clamp(280px, 42vw, 660px);
+}
+:root[data-theme='dark'] .ag-hero-ghost::before,
+:root[data-theme='dark'] .ag-closer-ghost::before {
+  opacity: 0.04;
+}
+
+.ag-title {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(44px, 8.2vw, 104px);
+  line-height: 0.96;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  margin: 0 0 30px;
+}
+.ag-title em {
+  font-style: italic;
+  /* the one warm note in the masthead — a quiet gradient-clip on the pivot
+     word, the same recipe proven on the wordmark. Spent once. */
+  background: linear-gradient(135deg, var(--blue-bright), var(--blue) 45%,
+      var(--blue-deep));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.ag-lede {
+  font-family: var(--sans);
+  font-size: clamp(16px, 1.55vw, 20px);
+  line-height: 1.62;
+  color: var(--ink-2);
+  max-width: 58ch;
+  margin: 0 0 34px;
+}
+.ag-lede-lede {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-style: italic;
+  font-size: clamp(19px, 1.9vw, 24px);
+  line-height: 1.4;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+.ag-lede b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.ag-hero-cta {
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 2.4vw, 30px);
+  flex-wrap: wrap;
+}
+.ag-hero-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  max-width: 30ch;
+}
+
+/* the ONE primary affordance — a directional blue gradient (never a flat
+   tint), a lit top edge, a tight 8px radius (never a pill) */
+.ag-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #fff;
+  background: linear-gradient(180deg, var(--blue), var(--blue-deep));
+  border: 1px solid var(--blue-deep);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  padding: 13px 22px;
+  cursor: pointer;
+  transition: background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ag-primary:hover {
+  background: linear-gradient(180deg, var(--blue-deep), var(--blue-deep));
+  transform: translateY(-1px);
+}
+.ag-primary-ico {
+  display: grid;
+  place-items: center;
+}
+.ag-primary-ico svg {
+  width: 15px;
+  height: 15px;
+}
+.ag-primary-lg {
+  font-size: 15px;
+  padding: 15px 26px;
+}
+
+/* ---------------- THE WEDGE — three claims, hairline-separated ------------ */
+.ag-claims {
+  margin-top: clamp(56px, 8vh, 96px);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  border-top: 1px solid var(--hair);
+}
+.ag-claim {
+  padding: 28px clamp(20px, 2.4vw, 34px) 30px 0;
+  border-right: 1px solid var(--hair);
+}
+.ag-claim:last-child {
+  border-right: 0;
+  padding-right: 0;
+}
+.ag-claim:not(:first-child) {
+  padding-left: clamp(20px, 2.4vw, 34px);
+}
+/* the claim index, as a ledger entry — a mono numeral with a dotted leader
+   running to the column edge (the broadsheet "current, not a wall" detail) */
+.ag-claim-n {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--blue-deep);
+  margin-bottom: 16px;
+}
+.ag-claim-n::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 0;
+  border-bottom: 1px dotted var(--hair-strong);
+  transform: translateY(1px);
+}
+.ag-claim-h {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(19px, 1.7vw, 23px);
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0 0 12px;
+}
+.ag-claim-p {
+  font-size: 14px;
+  line-height: 1.62;
+  color: var(--ink-2);
+  margin: 0;
+  max-width: 34ch;
+}
+.ag-claim-p b {
+  color: var(--ink);
+  font-weight: 600;
+}
+.ag-claim-p i {
+  font-style: italic;
+  color: var(--ink);
+}
+
+/* the signature divider — a current, not a wall */
+.ag-rule {
+  height: 1px;
+  background: var(--rule-fade);
+  margin: clamp(56px, 9vh, 104px) 0;
+}
+
+/* ---------------- HOW — three numbered editorial steps -------------------- */
+.ag-how-head {
+  margin-bottom: clamp(34px, 5vh, 56px);
+}
+.ag-h2 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(30px, 4.4vw, 52px);
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0;
+}
+.ag-h2-sub {
+  font-family: var(--sans);
+  font-size: clamp(15px, 1.45vw, 18px);
+  line-height: 1.6;
+  color: var(--ink-2);
+  max-width: 52ch;
+  margin: 18px 0 0;
+}
+
+.ag-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+}
+.ag-step {
+  display: grid;
+  grid-template-columns: clamp(56px, 7vw, 96px) 1fr;
+  gap: clamp(18px, 3vw, 44px);
+  padding: clamp(26px, 3.5vh, 38px) 0;
+  border-top: 1px solid var(--hair);
+  align-items: start;
+}
+.ag-step:last-child {
+  border-bottom: 1px solid var(--hair);
+}
+.ag-step-n {
+  font-family: var(--mono);
+  font-size: clamp(34px, 4.4vw, 54px);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--ink-4);
+}
+.ag-step-h {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(20px, 2vw, 27px);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 2px 0 12px;
+}
+.ag-step-p {
+  font-size: 15px;
+  line-height: 1.62;
+  color: var(--ink-2);
+  margin: 0;
+  max-width: 56ch;
+}
+.ag-step-p b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---------------- LIVE ACTIVITY ------------------------------------------ */
+.ag-live-head {
+  margin-bottom: clamp(30px, 4.4vh, 46px);
+}
+.ag-live-sub {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  max-width: 60ch;
+  margin: 16px 0 0;
+}
+
+/* -- honest connect state (no agent → no fabricated rows).
+   Surface (veil + lit edge + accent bloom) comes from .surface-mesh; this only
+   owns layout. -- */
+.ag-connect {
+  padding: clamp(30px, 5vw, 52px);
+  display: grid;
+  justify-items: start;
+  gap: 22px;
+  max-width: 720px;
+}
+.ag-connect-mark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  color: var(--blue);
+}
+.ag-connect-mark svg {
+  width: 26px;
+  height: 26px;
+}
+.ag-connect-lede {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  margin: 0;
+  max-width: 48ch;
+}
+.ag-connect-lede-strong {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-style: italic;
+  color: var(--ink);
+}
+.ag-watch {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  max-width: 520px;
+  flex-wrap: wrap;
+}
+.ag-watch-in {
+  flex: 1 1 280px;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--hair-strong);
+  border-radius: 6px;
+  padding: 11px 13px;
+  outline: none;
+  transition: border-color 0.18s;
+}
+.ag-watch-in::placeholder {
+  color: var(--ink-4);
+}
+.ag-watch-in:focus {
+  border-color: var(--hair-blue);
+}
+.ag-watch-btn {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--blue-deep);
+  background: transparent;
+  border: 1px solid var(--hair-blue);
+  border-radius: 6px;
+  padding: 11px 20px;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+}
+.ag-watch-btn:hover:not(:disabled) {
+  background: var(--blue-wash);
+}
+.ag-watch-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ag-connect-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.ag-connect-cta:hover {
+  color: var(--blue-deep);
+}
+.ag-connect-cta .ag-primary-ico svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* -- connected feed. Surface (veil + lit edge) comes from .surface; this only
+   owns layout and clipping. -- */
+.ag-feed-wrap {
+  overflow: hidden;
+}
+.ag-agentbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px clamp(16px, 2.2vw, 24px);
+  border-bottom: 1px solid var(--hair);
+  flex-wrap: wrap;
+}
+/* hairline state-chip — replaces the bare diode. One ink dot, no glow. */
+.ag-chip-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--hair-blue);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--blue-deep);
+}
+.ag-chip-live-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--blue);
+  flex: 0 0 auto;
+}
+.ag-agentbar-label {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.ag-agentbar-id {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hair-strong);
+  transition: color 0.18s;
+}
+.ag-agentbar-id:hover {
+  color: var(--blue-deep);
+}
+.ag-agentbar-stop {
+  margin-left: auto;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-3);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 4px 2px;
+  transition: color 0.18s;
+}
+.ag-agentbar-stop:hover {
+  color: var(--ink);
+}
+
+.ag-feed-state {
+  padding: clamp(28px, 5vw, 44px);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-3);
+  max-width: 52ch;
+}
+
+.ag-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ag-row {
+  display: grid;
+  grid-template-columns: 54px 1fr auto auto;
+  align-items: center;
+  gap: clamp(12px, 1.8vw, 22px);
+  padding: 15px clamp(16px, 2.2vw, 24px);
+  border-top: 1px solid var(--hair-2);
+  animation: ag-row-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.ag-row:first-child {
+  border-top: 0;
+}
+@keyframes ag-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+/* the bet decision is the ONE sanctioned green/red zone — INK tier only */
+.ag-row-side {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+.ag-row-side.up {
+  color: var(--bull-ink);
+}
+.ag-row-side.down {
+  color: var(--bear-ink);
+}
+.ag-row-desc {
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--ink-2);
+  min-width: 0;
+}
+.ag-row-desc b {
+  font-family: var(--mono);
+  color: var(--ink);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.ag-row-strike {
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.ag-row-ago {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: -0.02em;
+  color: var(--ink-3);
+  text-align: right;
+  white-space: nowrap;
+}
+.ag-row-verify {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--blue-deep);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.18s;
+}
+.ag-row-verify:hover {
+  color: var(--blue);
+}
+.ag-row-verify-ico {
+  display: grid;
+  place-items: center;
+}
+.ag-row-verify-ico svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* ---------------- CLOSER — the pitch line, given room to breathe ---------- */
+.ag-closer {
+  position: relative;
+  margin-top: clamp(60px, 9vh, 108px);
+  padding-top: clamp(44px, 6.5vh, 72px);
+  border-top: 1px solid var(--hair);
+  display: grid;
+  gap: 32px;
+  justify-items: start;
+}
+.ag-closer-ghost::before {
+  left: -2vw;
+  bottom: -6vh;
+  font-size: clamp(240px, 36vw, 560px);
+}
+.ag-closer-gloss {
+  color: var(--ink-3);
+}
+/* THE 3-BEAT PROSE LAW — a short serif declarative lede (its own block), an
+   em-dashed elaboration breathing on its own line, then a quiet punch. The
+   measure is held to ~44ch so the eye lands on each beat in turn. */
+.ag-closer-line {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(22px, 2.9vw, 34px);
+  line-height: 1.42;
+  letter-spacing: -0.018em;
+  color: var(--ink-2);
+  max-width: 44ch;
+  margin: 0;
+  text-wrap: balance;
+}
+.ag-closer-lede {
+  display: block;
+  font-style: italic;
+  color: var(--ink);
+  margin-bottom: 0.5em;
+}
+.ag-closer-punch {
+  display: block;
+  margin-top: 0.55em;
+  color: var(--ink);
+}
+
+/* ---------------- RESPONSIVE --------------------------------------------- */
+@media (max-width: 860px) {
+  .ag-claims {
+    grid-template-columns: 1fr;
+  }
+  .ag-claim {
+    border-right: 0;
+    border-bottom: 1px solid var(--hair);
+    padding: 24px 0;
+  }
+  .ag-claim:not(:first-child) {
+    padding-left: 0;
+  }
+  .ag-claim:last-child {
+    border-bottom: 0;
+  }
+  .ag-claim-p {
+    max-width: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .ag {
+    /* leave room for the bottom tab bar (60px + safe area, see shell.css) */
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0) + 40px);
+  }
+  .ag-step {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .ag-step-n {
+    font-size: 30px;
+  }
+  .ag-row {
+    grid-template-columns: 46px 1fr auto;
+    row-gap: 6px;
+  }
+  /* on phones move the relative time under the description, keep verify inline */
+  .ag-row-ago {
+    grid-column: 2;
+    text-align: left;
+  }
+  .ag-row-verify {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ag-row {
+    animation: none;
+  }
+}

@@ -11,10 +11,13 @@
  * The `demo` seam (DEV-only) plays the full SF choreography — ask → plan →
  * found-it → confirm card → "Book it" → `onBooked()` ticks the host balances.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, Check, ExternalLink, Plus, ICON_STROKE } from '../system';
 import { ASSISTANT, WALLET, money, type ChatMsg } from './copy';
 import { Divider, Row, Spark, TypingRow, rich } from './bits';
+import { wsBrainChat, wsBrainToolResult } from '../data/ws';
+import type { AgentToolRunner, ToolRun } from '../data/agentTools';
+import type { BrainMessage } from '@suize/shared/protocol';
 
 const reduceMotion = () =>
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -36,9 +39,30 @@ export interface AssistantPanelProps {
   onBooked?: () => void;
   /** DEV demo seam — seeded thread + sample history + the confirm card */
   demo?: boolean;
+  /** PRODUCTION: the wallet's agent tool runner (reads + write-confirm plans). When
+   *  present (and not demo), the panel runs the REAL brain chat instead of the stub. */
+  runAgentTool?: AgentToolRunner;
+  /** the user's MemWal memory account id (if onboarded) — sent with each turn so the
+   *  brain recalls/stores memory under it. Undefined = no memory this session. */
+  memwalAccountId?: string;
 }
 
-export function AssistantPanel({ agentOn, onBooked, demo = false }: AssistantPanelProps) {
+export function AssistantPanel(props: AssistantPanelProps) {
+  // Production with the agent wired → the REAL brain chat. Demo (DEV-only) or a
+  // missing tool runner → the legacy panel (the SF choreography / honest empty thread).
+  if (!props.demo && props.runAgentTool) {
+    return (
+      <BrainAssistant
+        agentOn={props.agentOn}
+        runAgentTool={props.runAgentTool}
+        memwalAccountId={props.memwalAccountId}
+      />
+    );
+  }
+  return <LegacyAssistant {...props} />;
+}
+
+function LegacyAssistant({ agentOn, onBooked, demo = false }: AssistantPanelProps) {
   const reduce = useMemo(reduceMotion, []);
 
   const [convo, setConvo] = useState<string>(demo ? 'sf' : 'new');
@@ -297,3 +321,368 @@ export function AssistantPanel({ agentOn, onBooked, demo = false }: AssistantPan
 
 // (The floating AssistantDock died with the dock-pill pattern — both faces now
 // keep their chat as a PERMANENT column, owner law 2026-06-10.)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE BRAIN ASSISTANT — the REAL conversational wallet (production). Drives the
+// backend's keyless agentic loop over the WS: the user types → the brain streams
+// narration (chunks) and PROPOSES tools → the WALLET runs each tool via
+// `runAgentTool` (reads answer instantly; writes surface an inline confirm card the
+// user taps, then sign LOCALLY) → the result is fed back → the model continues.
+// The model never moves money: every spend is a card the user approves, decoded by
+// the wallet itself (the number wall, on the client). One turn at a time.
+// ─────────────────────────────────────────────────────────────────────────────
+// A thread entry: a chat bubble (`you`/`ai`), OR a compact RECEIPT — a confirmed
+// (or declined) action that turned into a small permanent record instead of vanishing.
+type Turn = { who: 'you' | 'ai'; text: string; kind?: 'receipt'; meta?: string; bad?: boolean };
+type CardPhase = 'pending' | 'working' | 'done' | 'error';
+interface ActiveCard {
+  toolUseId: string;
+  title: string;
+  subtitle?: string;
+  rows: { k: string; v: string }[];
+  cta: string;
+  commit: (onStep?: (label: string) => void) => Promise<string>;
+  phase: CardPhase;
+  error?: string;
+}
+
+const PROD_CHIPS = ["What's my balance?", 'Show my recent activity', 'What am I subscribed to?'];
+
+// Friendly, no-jargon status verbs for the live loader (consumer-vocabulary law —
+// never the tool name). When a step is running we pin its verb; otherwise the loader
+// cycles the generic thinking verbs below.
+const TOOL_STATUS: Record<string, string> = {
+  get_balance: 'Checking your balance',
+  get_activity: 'Looking through your activity',
+  get_subscriptions: 'Checking your subscriptions',
+  send_usdc: 'Preparing your payment',
+  cancel_subscription: 'Setting that up',
+  sweep_agent: 'Bringing your money back',
+  deploy_site: 'Publishing your page',
+};
+const THINKING_VERBS = ['Thinking', 'Working it out', 'One moment', 'Putting it together'];
+
+/** The agentic loader — a pulsing spark, a shimmering status verb, an animated
+ *  ellipsis, and an elapsed beat (Claude-Code style). `label` pins a step-specific
+ *  verb; without one it cycles the generic thinking verbs. Real model thinking runs
+ *  under the hood — this is the on-screen treatment, no raw reasoning shown. */
+function LoaderRow({ label }: { label?: string | null }) {
+  const [tick, setTick] = useState(0);
+  const start = useRef(Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const elapsed = Math.floor((Date.now() - start.current) / 1000);
+  // Open with an instant acknowledgement ("Sure, let me do that") so there's a beat of
+  // feedback before the model's thinking lands; then a step verb (if pinned) or rotating
+  // generic verbs. The elapsed beat sits on the LEFT (fixed width) so it never shifts as
+  // the verb / animated ellipsis change width.
+  const verb = label ?? (tick < 3 ? 'Sure, let me do that' : THINKING_VERBS[Math.floor((tick - 3) / 3) % THINKING_VERBS.length]!);
+  return (
+    <div className="rd-row rd-row--ai is-in">
+      <span className="rd-loader" aria-live="polite" aria-label={`${verb}…`}>
+        <span className="rd-loader__t">{elapsed >= 1 ? `${elapsed}s` : ''}</span>
+        <span className="rd-loader__spark">
+          <Spark />
+        </span>
+        <span className="rd-loader__label">
+          {verb}
+          <i className="rd-loader__ell" aria-hidden="true" />
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function BrainAssistant({
+  agentOn,
+  runAgentTool,
+  memwalAccountId,
+}: {
+  agentOn: boolean;
+  runAgentTool: AgentToolRunner;
+  memwalAccountId?: string;
+}) {
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [thinking, setThinking] = useState(false);
+  const [status, setStatus] = useState<string | null>(null); // current loader verb (step-specific)
+  const [workingLabel, setWorkingLabel] = useState<string | null>(null); // live progress on a committing card
+  const [card, setCard] = useState<ActiveCard | null>(null);
+  const [draft, setDraft] = useState('');
+  const threadRef = useRef<HTMLDivElement>(null);
+  const aiIdxRef = useRef(-1); // index of the streaming AI turn in `turns`
+  const busy = thinking || card != null;
+
+  useEffect(() => {
+    const el = threadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns, thinking, card]);
+
+  const appendAi = useCallback((delta: string) => {
+    setTurns((prev) => {
+      const i = aiIdxRef.current;
+      if (i < 0 || !prev[i]) return prev;
+      const next = prev.slice();
+      next[i] = { ...next[i]!, text: next[i]!.text + delta };
+      return next;
+    });
+  }, []);
+
+  const setAi = useCallback((text: string) => {
+    setTurns((prev) => {
+      const i = aiIdxRef.current;
+      if (i < 0 || !prev[i]) return prev;
+      const next = prev.slice();
+      next[i] = { ...next[i]!, text };
+      return next;
+    });
+  }, []);
+
+  // Run one proposed tool. Reads answer immediately; writes surface a confirm card.
+  const onToolUse = useCallback(
+    async (toolUseId: string, tool: string, input: Record<string, unknown>) => {
+      setStatus(TOOL_STATUS[tool] ?? null); // pin the step verb on the loader
+      let run: ToolRun;
+      try {
+        run = await runAgentTool(tool, input);
+      } catch (e) {
+        wsBrainToolResult(toolUseId, `That failed: ${(e as Error).message}`, true);
+        return;
+      }
+      if (run.kind === 'immediate') {
+        wsBrainToolResult(toolUseId, run.content, run.isError ?? false);
+        setThinking(true); // keep the loader up while the model reasons about the next step
+        return;
+      }
+      // a money action — show the confirm card and wait for the user's tap.
+      setThinking(false);
+      setStatus(null);
+      setCard({
+        toolUseId,
+        title: run.title,
+        subtitle: run.subtitle,
+        rows: run.rows,
+        cta: run.cta,
+        commit: run.commit,
+        phase: 'pending',
+      });
+    },
+    [runAgentTool],
+  );
+
+  const startTurn = useCallback(
+    (messages: BrainMessage[]) => {
+      wsBrainChat(messages, {
+        onChunk: (delta) => {
+          setThinking(false);
+          setStatus(null);
+          appendAi(delta);
+        },
+        onToolUse: (id, tool, input) => void onToolUse(id, tool, input),
+        onDone: () => {
+          setThinking(false);
+          setStatus(null);
+          aiIdxRef.current = -1;
+          // drop a trailing empty AI bubble (the model acted silently then ended).
+          setTurns((prev) =>
+            prev.length && prev[prev.length - 1]!.who === 'ai' && !prev[prev.length - 1]!.text.trim()
+              ? prev.slice(0, -1)
+              : prev,
+          );
+        },
+        onError: (message) => {
+          setThinking(false);
+          setStatus(null);
+          setAi(message);
+          aiIdxRef.current = -1;
+        },
+      }, memwalAccountId);
+    },
+    [appendAi, setAi, onToolUse, memwalAccountId],
+  );
+
+  const send = useCallback(
+    (text: string) => {
+      const msg = text.trim();
+      if (!msg || !agentOn || busy) return;
+      setDraft('');
+      setTurns((prev) => {
+        const next: Turn[] = [...prev, { who: 'you', text: msg }, { who: 'ai', text: '' }];
+        aiIdxRef.current = next.length - 1;
+        // the transcript = every non-empty turn EXCEPT the trailing AI placeholder.
+        const messages: BrainMessage[] = next
+          .slice(0, -1)
+          .filter((t) => t.text.trim())
+          .map((t) => ({ role: t.who === 'you' ? 'user' : 'assistant', text: t.text }));
+        startTurn(messages);
+        return next;
+      });
+      setThinking(true);
+    },
+    [agentOn, busy, startTurn],
+  );
+
+  // A confirmed/declined card doesn't vanish — it collapses into a compact, permanent
+  // RECEIPT row that stays in the thread (the card's title + a short status line).
+  const pushReceipt = useCallback((c: ActiveCard, line: string, bad = false) => {
+    const cost = c.rows.find((r) => r.k === 'Cost')?.v;
+    const meta = bad ? line : [cost, line].filter(Boolean).join(' · ');
+    setTurns((prev) => [...prev, { who: 'ai', kind: 'receipt', text: c.title, meta, bad }]);
+  }, []);
+
+  function onYes() {
+    if (!card || card.phase !== 'pending') return;
+    const c = card;
+    setWorkingLabel(null);
+    setCard({ ...c, phase: 'working' });
+    void c
+      .commit((label) => setWorkingLabel(label)) // live progress on the working card
+      .then((ok) => {
+        pushReceipt(c, 'done'); // card → permanent receipt
+        setCard(null);
+        setWorkingLabel(null);
+        wsBrainToolResult(c.toolUseId, ok, false);
+        setThinking(true); // the model narrates the outcome next
+      })
+      .catch((e) => {
+        const m = (e as Error).message || 'failed';
+        pushReceipt(c, `Couldn't complete — ${m}`, true);
+        setCard(null);
+        setWorkingLabel(null);
+        wsBrainToolResult(c.toolUseId, `That failed: ${m}`, true);
+        setThinking(true);
+      });
+  }
+
+  function onNo() {
+    if (!card || card.phase !== 'pending') return; // mirror onYes — never double-resolve a tool
+    pushReceipt(card, 'Not now', true);
+    wsBrainToolResult(card.toolUseId, 'The user declined this action.', true);
+    setCard(null);
+    setThinking(true); // let the model acknowledge the decline
+  }
+
+  const empty = turns.length === 0;
+
+  return (
+    <div className="rd-asst rd-glass">
+      <div className="rd-asst__head">
+        <span className="rd-asst__title">
+          <Spark />
+          {ASSISTANT.title}
+        </span>
+      </div>
+
+      <div className="rd-asst__thread" ref={threadRef}>
+        {empty ? (
+          <div className="rd-asst__empty">
+            <p className="rd-asst__emptytitle">What can I handle for you?</p>
+            <div className="rd-chips">
+              {PROD_CHIPS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className="rd-chip"
+                  onClick={() => send(c)}
+                  disabled={!agentOn || busy}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {turns.map((m, i) =>
+          m.kind === 'receipt' ? (
+            <div key={i} className={`rd-receipt is-in${m.bad ? ' is-bad' : ''}`}>
+              {m.bad ? <span className="rd-receipt__x" aria-hidden>·</span> : <Check size={12} strokeWidth={2.4} aria-hidden />}
+              <span className="rd-receipt__title">{m.text}</span>
+              {m.meta ? <span className="rd-receipt__meta">{m.meta}</span> : null}
+            </div>
+          ) : m.who === 'ai' && !m.text ? null : (
+            <Row key={i} who={m.who}>
+              {rich(m.text)}
+            </Row>
+          ),
+        )}
+
+        {card ? (
+          <div className="rd-row rd-row--ai is-in">
+            <article className={`rd-confirm rd-glass${card.phase === 'done' ? ' is-done' : ''}`}>
+              <div className="rd-confirm__head">
+                <Spark />
+                {card.title}
+              </div>
+              <div className="rd-confirm__body">
+                {card.subtitle ? <span className="rd-confirm__detail">{card.subtitle}</span> : null}
+                {card.rows.map((r) => (
+                  <span key={r.k} className="rd-confirm__source">
+                    {r.k}: {r.v}
+                  </span>
+                ))}
+              </div>
+              {card.phase === 'pending' ? (
+                <div className="rd-confirm__acts">
+                  <button type="button" className="rd-cta" onClick={onYes} disabled={!agentOn}>
+                    {card.cta}
+                  </button>
+                  <button type="button" className="rd-btn" onClick={onNo}>
+                    Not now
+                  </button>
+                </div>
+              ) : null}
+              {card.phase === 'working' ? (
+                <div className="rd-confirm__done">{workingLabel ? `${workingLabel}…` : 'Working…'}</div>
+              ) : null}
+              {card.phase === 'done' ? (
+                <div className="rd-confirm__done">
+                  <Check size={14} strokeWidth={2.2} aria-hidden />
+                  Done
+                </div>
+              ) : null}
+              {card.phase === 'error' ? (
+                <div className="rd-confirm__done" style={{ display: 'flex', color: 'var(--rd-fg-3)' }}>
+                  Couldn’t complete — {card.error}
+                </div>
+              ) : null}
+            </article>
+          </div>
+        ) : null}
+
+        {thinking ? <LoaderRow label={status} /> : null}
+      </div>
+
+      {thinking || card?.phase === 'working' ? (
+        <div className="rd-asst__notice" role="status">
+          Keep the wallet open — closing it stops what your agent is doing.
+        </div>
+      ) : null}
+
+      <form
+        className="rd-asst__composer"
+        onSubmit={(e) => {
+          e.preventDefault();
+          send(draft);
+        }}
+      >
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={agentOn ? WALLET.composer : WALLET.composerOff}
+          disabled={!agentOn || busy}
+          aria-label="Message your wallet"
+        />
+        <button
+          type="submit"
+          className="rd-composer__send"
+          aria-label="Send"
+          disabled={!agentOn || busy || !draft.trim()}
+        >
+          <ArrowUp size={15} strokeWidth={2} aria-hidden />
+        </button>
+      </form>
+    </div>
+  );
+}

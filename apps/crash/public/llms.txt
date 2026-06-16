@@ -1,4 +1,4 @@
-# Crash by Suize — call Bitcoin up or down
+# PolySui by Suize — call Bitcoin up or down
 
 > A live BTC up/down game on Sui. Pick a side for the next 15-minute round,
 > one tap, done. Sign in with Google — no wallet setup, no gas. Runs on Sui
@@ -15,13 +15,13 @@ How it plays:
 - Be the House: supply the vault and earn the house side of every bet;
   redeem your share anytime.
 
-For agents: Crash is a human game — there is no agent betting API. If you are
+For agents: PolySui is a human game — there is no agent betting API. If you are
 an agent looking to pay or get paid on Sui, read the Suize rail contract:
 https://suize.io/llms.txt
 
 ## Links
 
-- Play: https://crash.suize.io
+- Play: https://polysui.suize.io
 - Suize home: https://suize.io
 - The rail (agent contract): https://suize.io/llms.txt
-- This file: https://crash.suize.io/llms.txt
+- This file: https://polysui.suize.io/llms.txt

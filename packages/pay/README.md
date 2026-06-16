@@ -25,7 +25,7 @@ Every payment is **single-use** (one settlement, one serve), **fail-closed** (a 
 
 ## The fee split
 
-The fee leg is fetched from the facilitator's `/terms` and folded into `extra.outputs` — the merchant absorbs it, so the payer sees one price. If `/terms` is unreachable, `@suize/pay` **fails open on the fee, never on the sale**: it issues a vanilla single-output quote (you absorb no fee that moment) rather than refusing to serve. A vanilla single-output requirement is the **free tier**.
+The fee leg is fetched from the facilitator's `/terms` and folded into `extra.outputs` — the merchant absorbs it, so the payer sees one price. `@suize/pay` is **fail-closed**: if it can't resolve the canonical split (a cold-start `/terms` miss with no cached terms), the serve path returns `503` "resend the same header" rather than issuing an unpriced quote — and the facilitator recomputes and enforces the fee at `/verify` regardless, so a missing leg never slips a payment through unbilled. A single-output requirement is **structural** (merchant == treasury, e.g. the deploy charge), never a free tier.
 
 ## Config
 
@@ -35,7 +35,6 @@ suize({
   price: "0.10",        // decimal USDC string, ≤ 6 dp, > 0 (required)
   facilitator: "https://api.suize.io",   // optional — the verify/settle/terms host
   network: "sui:testnet",                // optional — "sui:testnet" | "sui:mainnet"
-  payPage: "https://pay.suize.io",       // optional — the human pay-page fallback
 });
 ```
 

@@ -169,10 +169,7 @@ export const COIN_ZERO = PACKAGE_IDS.CRASH.TARGETS.COIN_ZERO
 // ----------------------------------------------------------------------------
 // ENOKI SPONSORSHIP ALLOWLIST — the seven (and only seven) move-call targets the
 // app ever signs. EVERY user write goes through one of these, so sponsored gas
-// can never reach a rake-skipping predict::* path. This array is the SINGLE
-// SOURCE OF TRUTH for that allowlist: the sponsored write path asserts (in dev)
-// that every moveCall target in a tx is one of these before signing, and the
-// Enoki Portal allowlist must mirror it verbatim.
+// can never reach a rake-skipping predict::* path.
 //
 //   <ROUTER_PACKAGE>::router::create_manager   (one-time manager setup)
 //   <ROUTER_PACKAGE>::router::bet              (BET: UP/DOWN)
@@ -182,10 +179,10 @@ export const COIN_ZERO = PACKAGE_IDS.CRASH.TARGETS.COIN_ZERO
 //   <ROUTER_PACKAGE>::router::supply           (HOUSE: deposit dUSDC, get PLP)
 //   <ROUTER_PACKAGE>::router::redeem_lp        (HOUSE: burn PLP, get dUSDC)
 //
-// IN-CODE per-request allowlisting is NOT reachable in @mysten/enoki 1.0.8 from a
-// Enoki sponsorship allowlist is enforced SERVER-SIDE per API key in the Enoki
-// Portal (the registered-wallet JWT path can't set it in browser code). The 7
-// router targets to allowlist in the Portal are documented in .env.example.
+// Enforcement is SERVER-SIDE per API key in the Enoki Portal — in-code per-request
+// allowlisting is NOT reachable in @mysten/enoki 1.0.8 (the registered-wallet JWT
+// path can't set it from browser code), so there is NO client-side assertion. The
+// Portal must list exactly these 7 targets; they're mirrored in .env.example.
 
 // The Move router skims 3% on-chain. The client never computes or transfers the
 // rake — it only ensures the manager holds enough to cover cost + the rake, so

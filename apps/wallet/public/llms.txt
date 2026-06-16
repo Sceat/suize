@@ -21,10 +21,9 @@ Ways to pay:
   - auto-approve anything under a limit you set,
   - or let it run hands-off.
   A new subscription can always be set to ask you first, whatever the mode.
-- Pay someone yourself. Open a Suize pay-link — a business's payment request —
-  and it's a one-tap pay page: who you're paying and the exact amount are spelled
-  out, you sign in with Google or connect a wallet, and tap once. You always pay
-  exactly the amount shown.
+- Pay someone yourself. Send in one tap — to a @suize name or a wallet address.
+  You see exactly who you're paying and how much, and approve once; you always
+  pay exactly the amount shown. You can also make a request link to be paid back.
 - Subscriptions are push, not pull. You approve a subscription once; every
   renewal after that is paid by you, on your own signature — nobody ever reaches
   into your account. Your wallet renews silently while it's open; otherwise it

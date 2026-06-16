@@ -201,10 +201,14 @@ export function AgentConnect() {
       mainPubKey: p.mainPubKey,
     };
 
+    // FLAT shape: the MCP loopback reads `tok` (CSRF) AND validates the v1 session
+    // fields on the SAME top-level object (`validateSessionPayload(parsed)`), so the
+    // session fields must sit alongside `tok`, NOT nested under `session` (a nested
+    // shape made `parsed.version` undefined → "unsupported payload version: undefined").
     const res = await fetch(p.cb, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tok: p.tok, session: payload }),
+      body: JSON.stringify({ tok: p.tok, ...payload }),
     });
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -372,6 +376,17 @@ export function AgentConnect() {
 
   const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
+  const [copied, setCopied] = useState(false);
+  const copyAddr = (full: string) => {
+    navigator.clipboard
+      ?.writeText(full)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1600);
+      })
+      .catch(() => {});
+  };
+
   return (
     <div className="rd">
       <div className="rd-amb" aria-hidden="true">
@@ -403,16 +418,30 @@ export function AgentConnect() {
             </p>
           </article>
         ) : stage.step === 'done' ? (
-          <article className="rd-confirm rd-glass" style={{ maxWidth: 380, textAlign: 'center' }}>
-            <div className="rd-confirm__head">Sub-account created</div>
-            {stage.address ? (
-              <span className="rd-confirm__detail rd-confirm__detail--mono">{shortAddr(stage.address)}</span>
-            ) : null}
-            <p className="rd-confirm__source">
-              {stage.inApp
-                ? 'Your agent’s sub-account is ready — returning to your wallet, where you can fund it (its balance is its cap) and withdraw any time in one tap.'
-                : 'Your agent is armed. Its sub-account now shows in your Suize wallet — fund it there (its balance is its cap), and withdraw any time in one tap. You can close this window and return to your assistant.'}
-            </p>
+          <article className="rd-confirm rd-glass rd-ac" style={{ maxWidth: 340 }}>
+            <div className="rd-confirm__head rd-ac__head">
+              <span className="rd-ac__check" aria-hidden="true">✓</span>
+              Agent armed
+            </div>
+            <div className="rd-ac__body">
+              {stage.address ? (
+                <button
+                  type="button"
+                  className="rd-ac__addr"
+                  onClick={() => copyAddr(stage.address!)}
+                  title="Copy the full address"
+                >
+                  <span className="rd-ac__mono">{shortAddr(stage.address)}</span>
+                  <span className="rd-ac__copy">{copied ? 'copied ✓' : 'copy'}</span>
+                </button>
+              ) : null}
+              <p className="rd-ac__cap">Its balance is its cap.</p>
+              <p className="rd-ac__note">
+                {stage.inApp
+                  ? 'It’s in your Suize wallet — returning now, where you can fund it and withdraw any time.'
+                  : 'It’s in your Suize wallet — fund it and withdraw any time. Safe to close this tab and return to your assistant.'}
+              </p>
+            </div>
           </article>
         ) : stage.step === 'error' ? (
           <article className="rd-confirm rd-glass" style={{ maxWidth: 360, textAlign: 'center' }}>

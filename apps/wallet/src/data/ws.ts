@@ -48,6 +48,8 @@ import {
   type AgentActivity,
   type LivechatMessage,
   type ErrorResponse,
+  type BrainMessage,
+  type MemwalDelegateResponse,
 } from '@suize/shared/protocol';
 import { WS_URL } from '../lib/env';
 
@@ -120,6 +122,20 @@ const pending = new Map<string, PendingRpc>();
 
 /** Per-RPC timeout — a hung request rejects rather than leaking forever. */
 const RPC_TIMEOUT_MS = 30_000;
+
+// ── BRAIN (the wallet AI) — a STREAMING turn, not a one-shot RPC. One
+// `brainChatRequest` yields many frames (chunk · toolUse · done), so it can't ride
+// the `pending` map (one-request-one-response). A brain turn registers its handlers
+// here keyed by the turn `id`; `handleMessage` routes chunk/toolUse/done/error to
+// them. The wallet EXECUTES every tool (reads from its own state; writes via the
+// confirm card + local signing) and answers each toolUse with `wsBrainToolResult`.
+export interface BrainTurnHandlers {
+  onChunk: (delta: string) => void;
+  onToolUse: (toolUseId: string, tool: string, input: Record<string, unknown>) => void;
+  onDone: (stopReason: string | null, limited?: boolean) => void;
+  onError: (message: string) => void;
+}
+const brainTurns = new Map<string, BrainTurnHandlers>();
 
 /**
  * The reactive slice React subscribes to. `connect`/`disconnect` are stable module
@@ -209,6 +225,10 @@ function failAllPending(reason: string): void {
     rpc.reject(new Error(reason));
   }
   pending.clear();
+  // A dropped socket also ends every in-flight brain turn (so the chat stops
+  // "thinking" instead of hanging) — surface the reason and clear them.
+  for (const [, h] of brainTurns) h.onError(reason);
+  brainTurns.clear();
 }
 
 /**
@@ -331,7 +351,8 @@ async function handleMessage(packet: ServerPacket, ws: WebSocket): Promise<void>
     // ── RPC responses (correlated by id) ─────────────────────────────────────
     case 'sponsorResponse':
     case 'executeResponse':
-    case 'handleClaimResponse': {
+    case 'handleClaimResponse':
+    case 'memwalDelegateResponse': {
       settle(packet.id, packet.data);
       return;
     }
@@ -343,7 +364,36 @@ async function handleMessage(packet: ServerPacket, ws: WebSocket): Promise<void>
     // the honest cause (name taken, no route, sponsor rejection, …).
     case 'errorResponse': {
       const err = packet.data as ErrorResponse;
+      // A brain turn's failure rides errorResponse too (echoing the turn id) —
+      // route it to the turn's onError before falling back to the RPC map.
+      if (packet.id && brainTurns.has(packet.id)) {
+        const h = brainTurns.get(packet.id)!;
+        brainTurns.delete(packet.id);
+        h.onError(err.message || 'The assistant ran into a problem.');
+        return;
+      }
       settleError(packet.id, err.message || 'Request failed.');
+      return;
+    }
+
+    // ── BRAIN streaming frames (the wallet AI) — routed to the active turn ─────
+    case 'brainChatChunk': {
+      if (packet.id) brainTurns.get(packet.id)?.onChunk(packet.data.delta);
+      return;
+    }
+    case 'brainToolUse': {
+      const h = packet.id ? brainTurns.get(packet.id) : undefined;
+      if (h) h.onToolUse(packet.data.toolUseId, packet.data.tool, packet.data.input);
+      return;
+    }
+    case 'brainChatDone': {
+      if (packet.id) {
+        const h = brainTurns.get(packet.id);
+        if (h) {
+          brainTurns.delete(packet.id);
+          h.onDone(packet.data.stopReason, packet.data.limited);
+        }
+      }
       return;
     }
 
@@ -556,4 +606,50 @@ export function wsExecute(opts: {
     id,
     data: { digest: opts.digest, signature: opts.signature },
   }));
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// BRAIN senders — the wallet AI's streaming transport (see BrainTurnHandlers).
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Start a brain chat turn. Sends `brainChatRequest` with the visible transcript
+ * (plain text) and registers `handlers` for the streamed chunk/toolUse/done/error
+ * frames. Returns the turn id (used to send tool results). Heals a down socket
+ * first; if the heal fails, `onError` fires and no request is sent.
+ */
+export function wsBrainChat(
+  messages: BrainMessage[],
+  handlers: BrainTurnHandlers,
+  memwalAccountId?: string,
+): string {
+  const id = crypto.randomUUID();
+  brainTurns.set(id, handlers);
+  void ensureConnected().then((ok) => {
+    if (!ok || !brainTurns.has(id)) {
+      if (brainTurns.delete(id)) handlers.onError('Reconnecting — try again in a moment.');
+      return;
+    }
+    sendPacket(use_ws.getState().ws, { type: 'brainChatRequest', id, data: { messages, memwalAccountId } });
+  });
+  return id;
+}
+
+/**
+ * WS RPC: fetch the user's DERIVED MemWal delegate public key + the on-chain
+ * constants for the one-time memory onboarding (the private key stays server-side).
+ * Returns `{ enabled:false }` when memory isn't configured on the backend.
+ */
+export function wsMemwalDelegate(): Promise<MemwalDelegateResponse> {
+  return request<MemwalDelegateResponse>((id) => ({ type: 'memwalDelegateRequest', id, data: {} }));
+}
+
+/**
+ * Answer one `brainToolUse` from the active turn — the wallet's tool result fed
+ * back into the agentic loop. `content` is the short text the model reads;
+ * `isError` marks a decline / failure. Correlated by the globally-unique toolUseId
+ * (no turn id needed), so it never re-asserts identity.
+ */
+export function wsBrainToolResult(toolUseId: string, content: string, isError: boolean): void {
+  sendPacket(use_ws.getState().ws, { type: 'brainToolResult', data: { toolUseId, content, isError } });
 }

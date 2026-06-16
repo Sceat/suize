@@ -25,7 +25,6 @@ import { useAuth } from '../data/useAuth';
 import { useIdentity } from '../data/useIdentity';
 import { useWsLifecycle } from '../data/useWsLifecycle';
 import { Loader } from '../system';
-import { CustomCursor } from '../system/CustomCursor';
 import { HelloScreen, ClaimFlow } from '../ui/Onboarding';
 import { WalletDeck } from '../ui/WalletDeck';
 import { BusinessConsole } from '../ui/BusinessConsole';
@@ -226,7 +225,6 @@ function Chassis({ children, business = false }: { children: ReactNode; business
         <i />
       </div>
       <div className="rd-stage">{children}</div>
-      <CustomCursor />
     </div>
   );
 }

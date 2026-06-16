@@ -1,0 +1,27 @@
+{
+  "name": "@suize/deck",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "deploy": "npx vercel@latest pull --yes --environment production && npx vercel@latest build --prod && npx vercel@latest deploy --prebuilt --prod"
+  },
+  "dependencies": {
+    "@mysten/sui": "^2.17.0",
+    "@suize/shared": "workspace:*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.0"
+  }
+}

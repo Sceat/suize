@@ -52,7 +52,7 @@ const BACKEND_DIR = new URL("../..", import.meta.url).pathname;
 let client: SuiJsonRpcClient;
 let payer: Ed25519Keypair;
 let payerAddress = "";
-let freeMerchant = ""; // fresh — free tier (not in SUIZE_MERCHANTS)
+let freeMerchant = ""; // fresh, unregistered (default-fee) merchant — for a single-output payment
 let feeMerchant = ""; // fresh — seeded into SUIZE_MERCHANTS as a 2% merchant
 let backend: ReturnType<typeof Bun.spawn> | null = null;
 let base = "";
@@ -160,11 +160,16 @@ describe.skipIf(!E2E_ENABLED)("facilitator x402 V2 'exact' (build → verify →
     expect(r.body.signers).toMatchObject({ "sui:*": [] });
   });
 
-  test("GET /terms: free-tier merchant → outputs null, feeBps 0", async () => {
+  test("GET /terms: unregistered merchant → DEFAULT 2% split (NO free tier)", async () => {
+    // Owner law 2026-06-14: the fee is never waived. An unregistered merchant pays the
+    // default 2% — /terms returns the [merchant net, treasury fee] split, not null.
     const r = await get(`/terms?payTo=${freeMerchant}&amount=${FREE_AMOUNT_DECIMAL}`);
     expect(r.status).toBe(200);
-    expect(r.body.outputs).toBeNull();
-    expect(r.body.feeBps).toBe(0);
+    expect(r.body.feeBps).toBe(200);
+    const outputs = r.body.outputs as Output[];
+    expect(outputs).toHaveLength(2);
+    expect(outputs[0].to.toLowerCase()).toBe(freeMerchant.toLowerCase());
+    expect(outputs[1].to.toLowerCase()).toBe(TREASURY.toLowerCase());
   });
 
   test("GET /terms: fee-tier merchant → a 2-leg split [merchant net, treasury fee]", async () => {
@@ -178,93 +183,83 @@ describe.skipIf(!E2E_ENABLED)("facilitator x402 V2 'exact' (build → verify →
     expect(outputs[1].amount).toBe(FEE.toString());
   });
 
-  test("FREE-TIER happy path: build → verify → settle; payer pays ZERO gas", async () => {
+  test("SINGLE-OUTPUT to an unregistered merchant is REJECTED — Suize is not a free facilitator", async () => {
+    // NO FREE TIER (owner law). /verify RECOMPUTES the canonical split from policy
+    // (outputsFor) and IGNORES the merchant's declared outputs, so a payment that pays
+    // the merchant the whole amount — with no treasury fee leg — fails verify and never
+    // settles. (The deploy charge's single output is the ONLY legit one, and only because
+    // its payTo IS the treasury so the two legs merge — see deploy.402.e2e.)
     const outputs: Output[] = [{ to: freeMerchant, amount: FREE_AMOUNT.toString() }];
-    const suiBefore = await coinBalance(client, payerAddress, SUI_TYPE);
     expect(await coinBalance(client, freeMerchant, USDC_TYPE)).toBe(0n);
 
     const { payload, requirements: reqs } = await buildAndSign(freeMerchant, FREE_AMOUNT_DECIMAL, outputs);
 
-    // VERIFY — simulate-only, must be valid + recover the payer.
+    // VERIFY must REJECT it — the missing treasury leg is caught (the recomputed split
+    // expects [merchant net, treasury fee], the tx pays only the merchant).
     const verify = await post("/verify", { paymentPayload: payload, paymentRequirements: reqs });
     expect(verify.status).toBe(200);
-    expect(verify.body.isValid).toBe(true);
-    expect((verify.body.payer as string).toLowerCase()).toBe(payerAddress.toLowerCase());
+    expect(verify.body.isValid).toBe(false);
 
-    // SETTLE — broadcast over gRPC (KEYLESS). Digest + success.
-    const settle = await post("/settle", { paymentPayload: payload, paymentRequirements: reqs });
-    expect(settle.status).toBe(200);
-    expect(settle.body.success).toBe(true);
-    const digest = settle.body.transaction as string;
-    expect(digest.length).toBeGreaterThan(0);
-    expect(settle.body.network).toBe(NETWORK);
-    expect((settle.body.payer as string).toLowerCase()).toBe(payerAddress.toLowerCase());
-
-    // PHYSICS: merchant +full amount (free tier, no rake), payer SUI UNTOUCHED.
-    // Poll the e2e client's own node lag (settle already waited on the backend's).
-    let merchantAfter = 0n;
-    const deadline = Date.now() + 12_000;
-    for (;;) {
-      merchantAfter = await coinBalance(client, freeMerchant, USDC_TYPE);
-      if (merchantAfter === FREE_AMOUNT || Date.now() > deadline) break;
-      await Bun.sleep(500);
-    }
-    expect(merchantAfter).toBe(FREE_AMOUNT);
-    expect(await coinBalance(client, payerAddress, SUI_TYPE)).toBe(suiBefore); // gasless proof
-
-    // REPLAY (settle) → the SAME idempotent response (chain-read-first — never a
-    // double charge; the chain read returns the settled result without re-broadcast).
-    const replay = await post("/settle", { paymentPayload: payload, paymentRequirements: reqs });
-    expect(replay.status).toBe(200);
-    expect(replay.body.success).toBe(true);
-    expect(replay.body.transaction).toBe(digest); // same digest, no second broadcast
-
-    // REPLAY (verify) → /verify must REJECT the already-executed payment ITSELF.
-    // Simulation alone is NOT a replay guard for a gasless Address-Balance tx (a
-    // re-simulation of a settled tx SUCCEEDS — no object inputs consumed); the digest
-    // chain-read is. Without this, a replayed payload would pass /verify for its whole
-    // ValidDuring window and double-serve a merchant (proven on-chain, see the SPEC).
-    const verifyReplay = await post("/verify", { paymentPayload: payload, paymentRequirements: reqs });
-    expect(verifyReplay.status).toBe(200);
-    expect(verifyReplay.body.isValid).toBe(false);
-    expect(verifyReplay.body.invalidReason).toBe("invalid_exact_sui_payload_already_executed");
+    // It never reaches chain — the merchant got nothing (the fee was not skipped).
+    expect(await coinBalance(client, freeMerchant, USDC_TYPE)).toBe(0n);
   }, 120_000);
 
-  test("FEE-TIER happy path: a declared 2-leg split → verify → settle; merchant +net, treasury +fee", async () => {
-    // Use a FRESH treasury address (provably-0 before, and ≠ the payer) so the
-    // split's two legs land on two DISTINCT addresses — the clean physics test.
-    // (The dev-wallet fallback treasury == the payer collapses the two legs onto
-    // one address, which is un-assertable as a 2-leg split — that payer-IS-treasury
-    // merge is a separate concern; the registry-resolved split is proven by /terms.)
-    const treasury = freshAddress();
+  test("FEE-TIER happy path: the canonical 2-leg split → verify → settle; merchant +net, treasury +fee, gasless + replay-safe", async () => {
+    // Strict verify RECOMPUTES the split, so the payment MUST pay the REAL resolved
+    // treasury (treasury@suize) — a fresh/arbitrary treasury is now rejected. For a clean
+    // 2-leg, treasury@suize MUST resolve to a DISTINCT address (≠ the payer): a dev-fallback
+    // treasury == payer makes the fee leg a self-credit that nets out of the balance-change
+    // set (verify would then reject). Point treasury@suize at a real testnet address to run.
+    expect(TREASURY).not.toBe("");
+    expect(TREASURY.toLowerCase()).not.toBe(payerAddress.toLowerCase());
+
     const outputs: Output[] = [
       { to: feeMerchant, amount: NET.toString() },
-      { to: treasury, amount: FEE.toString() },
+      { to: TREASURY, amount: FEE.toString() },
     ];
     expect(await coinBalance(client, feeMerchant, USDC_TYPE)).toBe(0n);
-    expect(await coinBalance(client, treasury, USDC_TYPE)).toBe(0n);
+    const treasuryBefore = await coinBalance(client, TREASURY, USDC_TYPE);
+    const payerSuiBefore = await coinBalance(client, payerAddress, SUI_TYPE);
 
     const { payload, requirements: reqs } = await buildAndSign(feeMerchant, FEE_AMOUNT_DECIMAL, outputs);
 
+    // VERIFY — the recomputed canonical split matches the payment; recovers the payer.
     const verify = await post("/verify", { paymentPayload: payload, paymentRequirements: reqs });
     expect(verify.body.isValid).toBe(true);
+    expect((verify.body.payer as string).toLowerCase()).toBe(payerAddress.toLowerCase());
 
+    // SETTLE — KEYLESS gRPC broadcast.
     const settle = await post("/settle", { paymentPayload: payload, paymentRequirements: reqs });
     expect(settle.body.success).toBe(true);
+    const digest = settle.body.transaction as string;
+    expect(digest.length).toBeGreaterThan(0);
 
-    // BOTH legs land EXACTLY: merchant +net, treasury +fee, net + fee == gross.
+    // BOTH legs land: merchant +net (fresh → absolute), treasury +fee (DELTA — it may hold a
+    // prior balance); payer SUI UNTOUCHED (gasless).
     let merchantAfter = 0n;
-    let treasuryAfter = 0n;
+    let treasuryAfter = treasuryBefore;
     const deadline = Date.now() + 12_000;
     for (;;) {
       merchantAfter = await coinBalance(client, feeMerchant, USDC_TYPE);
-      treasuryAfter = await coinBalance(client, treasury, USDC_TYPE);
-      if ((merchantAfter === NET && treasuryAfter === FEE) || Date.now() > deadline) break;
+      treasuryAfter = await coinBalance(client, TREASURY, USDC_TYPE);
+      if ((merchantAfter === NET && treasuryAfter - treasuryBefore === FEE) || Date.now() > deadline) break;
       await Bun.sleep(500);
     }
     expect(merchantAfter).toBe(NET);
-    expect(treasuryAfter).toBe(FEE);
-    expect(merchantAfter + treasuryAfter).toBe(FEE_AMOUNT); // every base unit accounted for
+    expect(treasuryAfter - treasuryBefore).toBe(FEE);
+    expect(NET + FEE).toBe(FEE_AMOUNT); // every base unit accounted for
+    expect(await coinBalance(client, payerAddress, SUI_TYPE)).toBe(payerSuiBefore); // gasless proof
+
+    // REPLAY (settle) → idempotent, SAME digest (chain-read-first — never a double charge).
+    const replay = await post("/settle", { paymentPayload: payload, paymentRequirements: reqs });
+    expect(replay.body.success).toBe(true);
+    expect(replay.body.transaction).toBe(digest);
+
+    // REPLAY (verify) → /verify REJECTS the already-executed payment itself (the digest
+    // chain-read is the only sound replay guard for a gasless tx — re-simulation succeeds).
+    const verifyReplay = await post("/verify", { paymentPayload: payload, paymentRequirements: reqs });
+    expect(verifyReplay.body.isValid).toBe(false);
+    expect(verifyReplay.body.invalidReason).toBe("invalid_exact_sui_payload_already_executed");
   }, 120_000);
 
   test("CHEAT: a single-output payment against DECLARED split terms → rejected outputs_mismatch", async () => {
@@ -314,7 +309,7 @@ describe.skipIf(!E2E_ENABLED)("facilitator x402 V2 'exact' (build → verify →
 
   test("/build hammered past the per-IP WRITE limit → 429", async () => {
     // Valid-shape /build requests (random senders hold no USDC, so the build itself
-    // fails 502 — but validation passes and each costs a WRITE token). The bucket
+    // fails — but validation passes and each costs a WRITE token). The bucket
     // (capacity 6, refill 0.5/s) must reject the overflow with 429.
     const results = await Promise.all(
       Array.from({ length: 12 }, () =>
@@ -323,8 +318,10 @@ describe.skipIf(!E2E_ENABLED)("facilitator x402 V2 'exact' (build → verify →
     );
     const statuses = results.map((r) => r.status);
     expect(statuses.filter((s) => s === 429).length).toBeGreaterThan(0);
-    // Every outcome is a non-success: 429 (rate limited) or 502 (built but the
-    // random sender holds no USDC → simulate/build fails).
-    expect(statuses.every((s) => s === 429 || s === 502)).toBe(true);
+    // Every outcome is a non-success: 429 (rate limited) or 402 (built but the
+    // random sender holds no USDC → the payer-side build/simulate fails). A no-funds
+    // build is a 402 with a readable reason, NEVER a 5xx — a 5xx would be stripped of
+    // its body + CORS by the CDN and read to the payer as a network blip.
+    expect(statuses.every((s) => s === 429 || s === 402)).toBe(true);
   }, 30_000);
 });

@@ -6,6 +6,7 @@ import {
   build_supply_tx,
   fetch_dusdc_coins,
   fetch_plp_coins,
+  fetch_redeemed_events_global,
   type ReadClient,
 } from './sui'
 import { DUSDC_SCALE } from './config'
@@ -43,6 +44,11 @@ export type HouseVM = {
   projEarnStr: string
   projTierStr: string
   utilizationStr: string
+  // ANNUALIZED rate (the all-time return scaled by 365/vault-age-days), as a
+  // plain percent — the honest basis for the per-day/month/year projection.
+  // null until the vault has enough history to annualize (no fabricated APY).
+  apyPct: number | null
+  ageDays: number | null // the vault history we annualized over (for the caveat)
   yourStakeStr: string | null
   ctaLabel: string
   hasPosition: boolean
@@ -50,6 +56,7 @@ export type HouseVM = {
   // The user's REAL stake value (shares × live share price), e.g. "$5.00" — the
   // PROMINENT house number while holding, labeled "Your stake". null otherwise.
   positionValueStr: string | null
+  positionValueUsd: number | null // the same stake as a number (projection basis)
   supplyBusy: boolean
   redeemBusy: boolean
   canSupply: (usd: number) => boolean
@@ -117,6 +124,29 @@ export function useHouse({
     const id = setInterval(load_vault, 15_000)
     return () => clearInterval(id)
   }, [load_vault])
+
+  // ----- vault age (oldest on-chain settled round) ---------------------------
+  // The vault summary carries NO inception ts, so we proxy the vault's operating
+  // age by the EARLIEST settled round on the global feed. Used ONLY to scale the
+  // REAL all-time return into a per-period estimate (clearly labeled) — we never
+  // fabricate an APY out of thin air. Read once; best-effort.
+  const [age_days, set_age_days] = useState<number | null>(null)
+  useEffect(() => {
+    let alive = true
+    fetch_redeemed_events_global(client)
+      .then(evs => {
+        if (!alive) return
+        let earliest = Number.POSITIVE_INFINITY
+        for (const e of evs) if (e.ts > 0 && e.ts < earliest) earliest = e.ts
+        if (!Number.isFinite(earliest)) return
+        const days = (Date.now() - earliest) / 86_400_000
+        set_age_days(days >= 0.5 ? days : null)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [client])
 
   // ----- the user's PLP position + spendable wallet dUSDC --------------------
   const refresh_position = useCallback(async () => {
@@ -274,6 +304,14 @@ export function useHouse({
     Math.abs(return_pct) >= 1 ? 2 : 4,
   )}%`
 
+  // Annualized estimate = the all-time return scaled by 365 / vault-age-days.
+  // Only with ≥1 day of history (a few hours would annualize to a meaningless
+  // huge number). null otherwise — the screen shows an honest "needs history" state.
+  const apy_pct =
+    age_days != null && age_days >= 1 && Number.isFinite(return_pct)
+      ? return_pct * (365 / age_days)
+      : null
+
   const tvl_str =
     vault != null ? fmt_usd_whole(BigInt(Math.round(vault.vault_value))) : null
   // PROJECTION (NON-holders only): "if you deposited $X → earn $Y" — based on the
@@ -304,6 +342,8 @@ export function useHouse({
       projEarnStr: proj_earn_str,
       projTierStr: `${return_pct >= 0 ? '+' : ''}$${fmt_amount(1000 * (return_pct / 100))}`,
       utilizationStr: vault != null ? fmt_pct(vault.utilization, 1) : '—',
+      apyPct: apy_pct,
+      ageDays: age_days,
       yourStakeStr: has_position
         ? `${fmt_usd(position_value ?? 0n)} · ${fmt_pct(ownership, 2)}`
         : null,
@@ -311,6 +351,7 @@ export function useHouse({
       hasPosition: has_position,
       walletDusdcUsd: wallet_dusdc != null ? dusdc_to_usd(wallet_dusdc) : null,
       positionValueStr: position_value_str,
+      positionValueUsd: has_position ? dusdc_to_usd(position_value ?? 0n) : null,
       supplyBusy: busy === 'supply',
       redeemBusy: busy === 'redeem',
       canSupply: can_supply,
@@ -322,6 +363,8 @@ export function useHouse({
       vault,
       share_price,
       return_str,
+      apy_pct,
+      age_days,
       depositable,
       proj_earn_str,
       return_pct,

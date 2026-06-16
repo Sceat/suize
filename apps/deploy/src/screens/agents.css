@@ -1,0 +1,171 @@
+/* ==========================================================================
+   AGENTS VIEW — "DEPLOY FROM YOUR AGENT" — the .ax-* layer.
+   --------------------------------------------------------------------------
+   The agents signpost dressed in the full IMPRINT broadsheet vocabulary: a
+   numbered "THREE MOVES" press run (mono numerals + serif heads, hairline
+   register frames, dotted ledger leaders), and a glyph rail of the rail's
+   properties. NOT a loud diagram — a typeset editorial sequence that reads as
+   the same paper the cards are pressed on. All colour is token-driven, so the
+   dark flip re-skins for free. Namespaced .ax-* — collides with nothing.
+   ========================================================================== */
+
+/* ---- THE THREE MOVES — a labelled section run over a fading rule. -------- */
+.ax-moves {
+  margin: 4px 0 22px;
+}
+.ax-moves__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 18px;
+}
+@media (max-width: 720px) {
+  .ax-moves__grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
+/* one MOVE — a register card: a hairline frame on the card stock, a press
+   numeral + glyph head over a dotted leader, a serif sub-head, and the note.
+   The blue press-rail inks in on hover, sibling to .dx-card. */
+.ax-move {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 18px 17px;
+  background: var(--card);
+  border: 1px solid var(--hair);
+  border-radius: 3px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(var(--frost-rgb), 0.55),
+    0 1px 2px rgba(10, 27, 46, 0.03);
+  transition:
+    transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.24s ease,
+    box-shadow 0.28s ease;
+}
+.ax-move::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(180deg, var(--blue), var(--blue-bright));
+  transform: scaleY(0);
+  transform-origin: top center;
+  transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ax-move:hover {
+  transform: translateY(-3px);
+  border-color: var(--hair-blue);
+  box-shadow: 0 24px 60px -34px rgba(10, 27, 46, 0.4);
+}
+.ax-move:hover::before {
+  transform: scaleY(1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ax-move {
+    transition: none;
+  }
+}
+
+/* the head row — the big press numeral, the dotted leader, then the glyph. */
+.ax-move__head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.ax-move__no {
+  font-family: var(--mono);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--blue-deep);
+  font-variant-numeric: tabular-nums lining-nums;
+  flex: 0 0 auto;
+}
+.ax-move__lead {
+  flex: 1 1 auto;
+  height: 0;
+  border-bottom: 1px dotted var(--hair-strong);
+  transform: translateY(2px);
+  min-width: 14px;
+}
+.ax-move__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--blue);
+  border: 1px solid var(--hair-blue);
+  background: var(--blue-wash);
+  box-shadow: inset 0 0 0 1px rgba(var(--frost-rgb), 0.7);
+  flex: 0 0 auto;
+}
+.ax-move__glyph svg {
+  display: block;
+}
+
+/* the move's serif sub-head — the verb of the step */
+.ax-move__title {
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+  margin: 0;
+}
+/* the move's note — sans, quiet, with mono code chips for ids/urls/numbers */
+.ax-move__body {
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  margin: 0;
+}
+.ax-move__body code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--paper-3);
+  border: 1px solid var(--hair-2);
+  padding: 0 4px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+/* a tail line under the strip — the editorial coda tying the three moves to
+   the contract card below. Serif italic kicker + a fine ink note. */
+.ax-coda {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hair-2);
+}
+.ax-coda__mark {
+  flex: 0 0 auto;
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  color: var(--blue-deep);
+  white-space: nowrap;
+}
+.ax-coda__note {
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-3);
+  margin: 0;
+}

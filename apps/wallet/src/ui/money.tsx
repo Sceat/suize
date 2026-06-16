@@ -34,6 +34,10 @@ export interface LedgerRow {
   verifyHref?: string;
   /** an OPTIMISTIC row mid-confirmation — shows "confirming…", no verify link */
   pending?: boolean;
+  /** which book the row belongs to — splits the wallet's activity into the MAIN
+   *  account's own movement vs the AGENT sub-account's (funded / returned / spent).
+   *  Defaults to main when absent. */
+  account?: 'main' | 'agent';
 }
 
 /** Classify a counterparty token for its identity gradient: a hex address is a

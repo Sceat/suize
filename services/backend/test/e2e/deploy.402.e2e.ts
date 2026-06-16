@@ -111,18 +111,10 @@ describe.skipIf(!E2E_ENABLED)(
       // NO legacy suize-402/1 fields on the wire.
       expect(c.protocol).toBeUndefined();
       expect(c.actions).toBeUndefined();
-      // The NO-SUI-KEY door: the 402 carries a `payLink` (hosted pay page,
-      // mode=authorize) the agent hands its human. NO secret nonce anymore — the human
-      // returns a signed-unsettled payload the agent submits as X-PAYMENT (same door).
-      expect(typeof c.payLink).toBe("string");
-      expect(c.nonce).toBeUndefined(); // the secret deploy nonce is GONE
-      const link = new URL(c.payLink);
-      expect(link.origin + link.pathname).toBe("https://pay.suize.io/");
-      expect(link.searchParams.get("payTo")!.toLowerCase()).toBe(TREASURY);
-      expect(link.searchParams.get("amount")).toBe("0.5");
-      // The pay page is told to AUTHORIZE (sign-but-don't-settle), not carry a secret.
-      expect(link.searchParams.get("mode")).toBe("authorize");
-      expect(link.searchParams.get("memo")).toBeNull(); // no secret memo
+      // NO human/relay path (2026-06-15): the 402 carries NO payLink — the agent
+      // self-signs X-PAYMENT (its own Sui key, or its Suize MCP session).
+      expect(c.payLink).toBeUndefined();
+      expect(c.nonce).toBeUndefined();
     }, 15_000);
 
     test("stateless mint: two discoveries → two distinct paymentIds (no session, no store)", async () => {

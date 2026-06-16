@@ -26,11 +26,15 @@ import { corsHeaders, json, text } from "./http";
 import { sponsorReady, sponsorInfo, maskKey } from "./sponsor";
 import { handleReady, handleInfo } from "./handle";
 import { handleDeployRoute, deployReady, deployInfo } from "./deploy";
+import { handleChargeRoute, chargeInfo } from "./charge";
 import { startStorageCron, storageInfo } from "./deploy/extend";
 import { subscribeInfo } from "./deploy/subscribe";
 import { handleMcpRoute, mcpInfo } from "./mcp";
 import { brainInfo } from "./brain";
+import { memoryInfo } from "./memory";
 import { handleFacilitatorRoute, facilitatorInfo, treasuryReady } from "./facilitator";
+import { handleDirectoryRoute, directoryInfo } from "./directory";
+import { handleUnfurlRoute } from "./unfurl";
 import { tryUpgrade, websocketHandler, wsConnectionCount, type WsData } from "./ws";
 
 // Fail fast on missing secrets — same guard the standalone sponsor had.
@@ -163,10 +167,28 @@ Bun.serve({
     const facilitated = handleFacilitatorRoute(req, url, origin, server);
     if (facilitated) return facilitated;
 
+    // Directory module — the agents.suize.io backend: GET /feed, GET /rankings,
+    // GET /stats, POST /stats/visit, GET /ads/slots[/:key], GET /directory.json,
+    // GET /directory.okf. Merchant-agnostic, read LIVE from chain (read-through
+    // cached); stores NO payment state. Mounted at ROOT like the facilitator.
+    const directory = handleDirectoryRoute(req, url, origin, server);
+    if (directory) return directory;
+
+    // Unfurl module — GET /unfurl?url=<site>: SSRF-guarded OpenGraph/meta read for
+    // the Business Profile form (server-side because the browser can't, CORS). Read
+    // only; stores nothing. Returns null for non-/unfurl paths.
+    const unfurled = handleUnfurlRoute(req, url, origin, server);
+    if (unfurled) return unfurled;
+
     // Deploy module — POST /deploy, GET /sites[/:id], POST /domains,
     // DELETE /domains/:domain. 503s cleanly when the deploy wallet is unconfigured.
     const deployed = handleDeployRoute(req, url, origin, server);
     if (deployed) return deployed;
+
+    // The no-code hosted merchant door (api.suize.io/charge/<token>) — the Deploy gate
+    // generalized to any {merchant, price, webhook} carried in a Suize-signed token.
+    const charged = handleChargeRoute(req, url, origin);
+    if (charged) return charged;
 
     // NOTE: the waitlist (POST /waitlist) route has been REMOVED with the api
     // module. The LIVE landing page that posts to /waitlist will 404 until the
@@ -200,6 +222,10 @@ console.log(
     (sponsorInfo.subsPublished
       ? `subs=${sponsorInfo.subsTargetCount} [SUBS LIVE]`
       : `subs=0 [unpublished]`) +
+    `, ` +
+    (sponsorInfo.auctionPublished
+      ? `auction=${sponsorInfo.auctionTargetCount} [AUCTION LIVE]`
+      : `auction=0 [unpublished]`) +
     `; account.move RETIRED — x402 V2 settles keyless)`,
 );
 console.log(`[backend] allowed origins: ${config.allowedOrigins.join(", ") || "(none)"}`);
@@ -222,6 +248,13 @@ console.log(
   );
 }
 console.log(
+  `[backend] charge door: ${
+    (await chargeInfo.ready())
+      ? `LIVE (GET/POST /charge/<token>, ${chargeInfo.network})`
+      : "OFF (set SUIZE_CHARGE_PRIVATE_KEY + resolve treasury)"
+  }`,
+);
+console.log(
   `[backend] mcp: POST ${mcpInfo.endpoint} (${mcpInfo.transport}, ` +
     `protocol=${mcpInfo.protocolVersion}, tools=[${mcpInfo.tools.join(", ")}])`,
 );
@@ -230,6 +263,12 @@ console.log(
     ? `ON over WS (brainChatRequest — FENCED/keyless, model=${brainInfo.model}, ` +
       `cap=${brainInfo.dailyTokenMax} tok/user/day; narrates + PROPOSES, never signs)`
     : "OFF (ANTHROPIC_API_KEY not set — brain frame returns not-configured)"}`,
+);
+console.log(
+  `[backend] memory (MemWal): ${memoryInfo.enabled
+    ? `ON (relayer=${memoryInfo.relayer}, ns=${memoryInfo.namespace}; per-user delegate HKDF-derived, ` +
+      `default mode — relayer sees plaintext in transit, manual-mode upgrade is improve-later; best-effort)`
+    : "OFF (MEMWAL_MASTER_KEY / MEMWAL_PACKAGE_ID / MEMWAL_REGISTRY_ID not all set)"}`,
 );
 {
   const treasuryOk = await treasuryReady();
@@ -240,6 +279,12 @@ console.log(
       `${treasuryOk ? "RESOLVED" : "unresolved — fee-tier paths 503"})`,
   );
 }
+console.log(
+  `[backend] directory (agents.suize.io, ${directoryInfo.network}): ` +
+    `${directoryInfo.routes.join(", ")} ` +
+    `(slots=${directoryInfo.slotCount}, auction=${directoryInfo.auctionPublished ? "LIVE" : "unpublished"}; ` +
+    `merchant-agnostic, chain-read read-through)`,
+);
 
 // The Walrus storage extender — the deterministic subscription↔storage backstop, now
 // driven by the MERCHANT SDK (suizeSubs.watch over the Deploy-merchant sub lifecycle;
@@ -267,6 +312,8 @@ console.log(
   `[backend] routes: GET /ws (websocket — incl. sponsor/execute + handle ops), ` +
     `POST /mcp, POST /verify, POST /settle, GET /supported, POST /build, ` +
     `GET /terms, GET /tx, POST /checkout, ` +
+    `GET /feed, GET /rankings, GET /stats, POST /stats/visit, ` +
+    `GET /ads/slots, GET /ads/slots/:key, GET /directory.json, GET /directory.okf, ` +
     `POST /deploy, POST /deploy/subscribe/build, POST /deploy/subscribe/submit, ` +
     `GET /sites, GET /sites/:id, POST /sites/:id/extend, ` +
     `POST /domains, DELETE /domains/:domain, ` +

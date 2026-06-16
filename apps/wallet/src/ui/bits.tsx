@@ -111,20 +111,75 @@ export function GoogleMark() {
   );
 }
 
-/** wrap detected `@names` (e.g. alice@suize) in an accent span — "more colors
- *  for detected @names" (owner). Plain text in, decorated nodes out. */
+// one inline pass: **bold**, *italic*, `code`, [text](url), and @names. Bold is
+// tried before italic so `**x**` never reads as two single-asterisk spans.
+const MD_INLINE =
+  /(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^)\s]+\)|\*(?=\S)[^*\n]+?\*|[a-z0-9][a-z0-9-]*@[a-z0-9][a-z0-9-]*)/g;
+
+function inlineMd(text: string, kb: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let k = 0;
+  MD_INLINE.lastIndex = 0;
+  while ((m = MD_INLINE.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const t = m[0];
+    if (t.startsWith('**')) out.push(<strong key={`${kb}b${k}`}>{t.slice(2, -2)}</strong>);
+    else if (t.startsWith('`')) out.push(<code className="rd-md-code" key={`${kb}c${k}`}>{t.slice(1, -1)}</code>);
+    else if (t.startsWith('[')) {
+      const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(t)!;
+      out.push(
+        <a className="rd-md-a" key={`${kb}a${k}`} href={link[2]} target="_blank" rel="noopener noreferrer">
+          {link[1]}
+        </a>,
+      );
+    } else if (t.startsWith('*')) out.push(<em key={`${kb}i${k}`}>{t.slice(1, -1)}</em>);
+    else
+      out.push(
+        <span className="rd-handle" key={`${kb}h${k}`}>
+          {t}
+        </span>,
+      );
+    last = MD_INLINE.lastIndex;
+    k++;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+/**
+ * rich — render the assistant's lightweight markdown. The bubble is a <span>, so
+ * everything stays INLINE-safe (no block <p>/<ul>): inline marks via inlineMd,
+ * `\n` → <br>, and `- `/`* `/`1. ` lines as • rows. The brain (Haiku) speaks
+ * simple markdown; this keeps it readable in-bubble without pulling a parser dep.
+ */
 export function rich(text: string): ReactNode {
-  const parts = text.split(/([a-z0-9-]+@[a-z0-9-]+)/g);
-  if (parts.length === 1) return text;
-  return parts.map((p, i) =>
-    /^[a-z0-9-]+@[a-z0-9-]+$/.test(p) ? (
-      <span className="rd-handle" key={i}>
-        {p}
-      </span>
-    ) : (
-      p
-    ),
-  );
+  if (!/[*`[\n]|[a-z0-9-]+@[a-z0-9-]/.test(text)) return text; // fast path: plain prose
+  const nodes: ReactNode[] = [];
+  text.split('\n').forEach((raw, i) => {
+    if (i > 0) nodes.push(<br key={`br${i}`} />);
+    const bullet = raw.match(/^\s*[-*]\s+(.*)$/);
+    const num = raw.match(/^\s*(\d+)\.\s+(.*)$/);
+    if (bullet) {
+      nodes.push(
+        <span className="rd-md-li" key={`li${i}`}>
+          <span className="rd-md-bullet">•</span>
+          {inlineMd(bullet[1], `li${i}`)}
+        </span>,
+      );
+    } else if (num) {
+      nodes.push(
+        <span className="rd-md-li" key={`li${i}`}>
+          <span className="rd-md-bullet">{num[1]}.</span>
+          {inlineMd(num[2], `li${i}`)}
+        </span>,
+      );
+    } else {
+      nodes.push(...inlineMd(raw, `ln${i}`));
+    }
+  });
+  return <>{nodes}</>;
 }
 
 /**

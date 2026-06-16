@@ -76,10 +76,11 @@ export interface SuizeSubsConfig {
 }
 
 // ⚠️ MIRROR of @suize/shared PACKAGE_IDS.SUBS.PACKAGE — keep in sync. Testnet is
-// the 2026-06-12 publish; mainnet is `0x0` until the mainnet republish (a `0x0` id
-// makes every type match fail — fails closed).
+// the 2026-06-15 version-gated republish; mainnet is `0x0` until the mainnet republish
+// (a `0x0` id makes every type match fail — fails closed). Read-only here (event/type
+// filters), so no `Version` arg — only the package id moves.
 const SUBS_PACKAGES: Record<"testnet" | "mainnet", string> = {
-  testnet: "0xb6bca1cfbcff846c2e575190c70a78fc777f858deae9d4d5a6e797cb005d1c69",
+  testnet: "0x759105b5f7382cb22533e8a5282e90c92c558edb1bc2eaa0904247914082d821",
   mainnet: "0x0",
 };
 

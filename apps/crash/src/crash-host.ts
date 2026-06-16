@@ -222,35 +222,9 @@ export type CrashData = {
   // ---- settle flash ----
   flash: 'win' | 'lose' | null
 
-  // ---- house footer (REAL vault data) ----
-  house: {
-    tvlStr: string // "$1,008,026" whole dollars, or "…"/"—"
-    sharePriceStr: string // "$1.0013"
-    shareChgStr: string // "Share price $1.0013 · live"
-    yieldStr: string // "+0.13%" honest all-time, NEVER a fake APY
-    yieldUnit: string // "all-time"
-    projFromStr: string // "Your $250"
-    projEarnStr: string // "+$0.33"
-    projTierStr: string // "+$1.30"  ($1,000 tier)
-    utilizationStr: string // "0.1%"
-    yourStakeStr: string | null // "$120.00 · 0.01%" when has position, else null
-    ctaLabel: string // "Become the house" | "Add to the house"
-    hasPosition: boolean
-    // deposit sheet
-    walletDusdcUsd: number | null
-    // The user's REAL stake value (shares × live share price), e.g. "$120.00" — the
-    // PROMINENT house number while holding ("Your stake") AND the deposit-sheet
-    // figure. null when no position.
-    positionValueStr: string | null
-    supplyBusy: boolean
-    redeemBusy: boolean
-    canSupply: (usd: number) => boolean
-    error: string | null
-    // Epoch ms of the last SUCCESSFUL supply (0 if none). The e05 layer closes
-    // the deposit sheet when this changes — ALL house state (your stake, share
-    // price, withdraw) lives in the house section, with NO success toast.
-    supplyDoneAt: number
-  }
+  // The House (PLP vault: TVL / yield / supply / redeem) is NO LONGER part of the
+  // Play data — it lives on its OWN /house tab (src/shell), which owns `useHouse`
+  // directly. Play's CrashData is pure bet + chart + cash-out + market context.
 
   // ---- toasts ----
   error: string | null
@@ -284,14 +258,16 @@ export type CrashActions = {
   // open. The two distinct positions exit independently.
   cashOutSide: (side: 'UP' | 'DOWN') => void
   claimBet: () => void
-  becomeHouse: () => void // open the deposit sheet (focus the house)
-  supply: (usd: number) => void
-  redeemHouse: () => void
+  // House supply/redeem moved to the /house tab — not in Play's action surface.
   withdraw: () => void
   addFunds: () => void // open the external wallet top-up (wallet.suize.io)
   signInGoogle: () => void
   signOut: () => void
   goToBet: () => void
+  // Navigate to the Markets tab (the full multi-market grid + real next-open
+  // countdowns). Called when a LOCKED sibling market is tapped from Play's
+  // asset-context strip. The standalone shell owns the actual route change.
+  goToMarkets: () => void
 }
 
 // The single object handed to crash-e05's mount(). `data` is read live (the app

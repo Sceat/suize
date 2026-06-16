@@ -100,6 +100,43 @@ const pending = new Map<string, PendingRpc>()
 /** Per-RPC timeout — a hung request rejects rather than leaking forever. */
 const RPC_TIMEOUT_MS = 30_000
 
+/** The retryable "socket isn't ready" message — recognised by App's
+ *  is_retryable_sponsor_error so the auto-claim / sweep treat it as transient. */
+const NOT_READY_MSG =
+  'Sponsorship unavailable — the gas sponsor connection is not ready.'
+
+/** How long an RPC will WAIT for the socket to finish (re)connecting before it
+ *  gives up. The handshake is normally sub-second (Enoki signs the auth nonce
+ *  silently); this margin only bites during a real reconnect/outage. Kept under
+ *  RPC_TIMEOUT_MS so a request never out-waits its own response window. */
+const READY_TIMEOUT_MS = 8_000
+
+/** Callers parked until the socket reaches 'connected'. Flushed on accept,
+ *  rejected on a terminal close so a write never hangs past a real outage. */
+const ready_waiters = new Set<{
+  resolve: () => void
+  reject: (error: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}>()
+
+/** Wake everyone waiting on the socket — called the instant auth is accepted. */
+function flush_ready_waiters(): void {
+  for (const w of ready_waiters) {
+    clearTimeout(w.timer)
+    w.resolve()
+  }
+  ready_waiters.clear()
+}
+
+/** Reject everyone waiting — called when the socket dies with no reconnect left. */
+function fail_ready_waiters(reason: string): void {
+  for (const w of ready_waiters) {
+    clearTimeout(w.timer)
+    w.reject(new Error(reason))
+  }
+  ready_waiters.clear()
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Frame send + RPC correlation
 // ───────────────────────────────────────────────────────────────────────────
@@ -127,20 +164,49 @@ function fail_all_pending(reason: string): void {
 }
 
 /**
+ * Resolve once the sponsor socket is authenticated + OPEN. If the socket has gone
+ * idle (a first call after a give-up, or a drop that hasn't re-armed) we kick a
+ * reconnect; if it's mid-handshake we simply wait. Rejects with the retryable
+ * not-ready message after READY_TIMEOUT_MS so a durable outage still surfaces
+ * instead of hanging. This is what turns the common "fired a write while the WS
+ * was still connecting" case from an instant failure into a brief wait-then-send.
+ */
+function ensure_connected(): Promise<void> {
+  if (socket?.readyState === WebSocket.OPEN && status === 'connected') {
+    return Promise.resolve()
+  }
+  // Idle socket — revive it if we still have a signed-in target; without one
+  // there is nothing to wait for, so fail fast (e.g. signed out / self-paying).
+  if (status === 'disconnected') {
+    if (!connect_address) return Promise.reject(new Error(NOT_READY_MSG))
+    connect_ws(connect_address)
+  }
+  return new Promise<void>((resolve, reject) => {
+    const waiter = {
+      resolve,
+      reject,
+      timer: setTimeout(() => {
+        ready_waiters.delete(waiter)
+        reject(new Error(NOT_READY_MSG))
+      }, READY_TIMEOUT_MS),
+    }
+    ready_waiters.add(waiter)
+  })
+}
+
+/**
  * Send an RPC REQUEST and resolve with its correlated RESPONSE `data`. The caller
  * mints the id; the server echoes it; `handle_message` settles the matching entry.
- * Rejects if the socket isn't connected, on timeout, or on disconnect.
+ * WAITS (up to READY_TIMEOUT_MS) for the socket to finish (re)connecting first, so
+ * a write fired during a connect/reconnect window rides it out instead of failing.
+ * Rejects on a durable outage, on timeout, or on disconnect.
  */
-function request<Res>(build: (id: string) => ClientPacket): Promise<Res> {
-  if (!socket || status !== 'connected') {
-    return Promise.reject(
-      new Error(
-        'Sponsorship unavailable — the gas sponsor connection is not ready.',
-      ),
-    )
-  }
-  const id = crypto.randomUUID()
+async function request<Res>(build: (id: string) => ClientPacket): Promise<Res> {
+  await ensure_connected()
   const ws = socket
+  // A close could land between ready and send — surface as the retryable not-ready.
+  if (ws?.readyState !== WebSocket.OPEN) throw new Error(NOT_READY_MSG)
+  const id = crypto.randomUUID()
   return new Promise<Res>((resolve, reject) => {
     const timeout = setTimeout(() => {
       pending.delete(id)
@@ -184,8 +250,12 @@ async function handle_message(packet: ServerPacket, ws: WebSocket): Promise<void
     // ── AUTH ────────────────────────────────────────────────────────────────
     case 'signatureRequest': {
       if (!signer) {
-        console.error('[ws] no signer registered — cannot answer auth challenge')
-        was_rejected = true
+        // The signer effect hasn't (re)registered yet — a transient ordering race
+        // (e.g. a signPersonalMessage identity change cleared it for a tick), NOT a
+        // server rejection. Close WITHOUT was_rejected so onclose reconnects and
+        // re-runs the handshake once the signer is back. Bounded by the reconnect
+        // cap, so a genuinely never-registered signer still can't loop forever.
+        console.warn('[ws] no signer yet — closing to reconnect + retry handshake')
         ws.close()
         return
       }
@@ -211,6 +281,8 @@ async function handle_message(packet: ServerPacket, ws: WebSocket): Promise<void
     case 'connectionAccepted': {
       reconnect_delay = 1000
       status = 'connected'
+      // Release every write parked in ensure_connected — they can send now.
+      flush_ready_waiters()
       return
     }
 
@@ -219,6 +291,7 @@ async function handle_message(packet: ServerPacket, ws: WebSocket): Promise<void
       console.warn('[ws] connection rejected:', packet.data.reason)
       was_rejected = true
       fail_all_pending(`Connection rejected: ${packet.data.reason}`)
+      fail_ready_waiters(`Connection rejected: ${packet.data.reason}`)
       ws.close()
       return
     }
@@ -304,11 +377,15 @@ export function connect_ws(address: string): void {
 
     if (was_rejected) {
       was_rejected = false
+      fail_ready_waiters(NOT_READY_MSG) // terminal → don't make writes wait it out
       return // explicit rejection → no reconnect
     }
 
-    // Reconnect on ANY non-rejected close while a connect target is set.
-    if (!connect_address) return
+    // No target (signed out mid-connect) → nothing to reconnect to.
+    if (!connect_address) {
+      fail_ready_waiters(NOT_READY_MSG)
+      return
+    }
 
     if (reconnect_attempts >= MAX_RECONNECT_ATTEMPTS) {
       console.warn(
@@ -316,6 +393,7 @@ export function connect_ws(address: string): void {
       )
       reconnect_attempts = 0
       reconnect_delay = 1000
+      fail_ready_waiters(NOT_READY_MSG) // exhausted → release parked writes
       return
     }
 

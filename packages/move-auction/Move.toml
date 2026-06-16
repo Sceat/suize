@@ -1,0 +1,15 @@
+[package]
+name = "suize_auction"
+edition = "2024"
+version = "0.0.1"
+
+# Framework-only package: `suize_auction` calls NOTHING beyond the Sui framework
+# (object / transfer / event / balance / clock / string). No vendored protocol deps.
+# MoveStdlib is auto-injected as a transitive dep of Sui. Pinned to `framework/testnet`
+# to match our deployment target — same pin as move-subs / move-deploy, and the rev
+# where Address Balances shipped `balance::send_funds` (the push-no-escrow settle).
+[dependencies]
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/testnet" }
+
+[addresses]
+auction = "0x0"

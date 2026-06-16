@@ -76,14 +76,15 @@ screenshots/
 *.png
 *.jpg
 *.jpeg
-!public/**/*.png
-!public/**/*.jpg
-!public/**/*.jpeg
+# Everything under any public/ dir is a versioned brand asset, not scratch — the
+# `**/` prefix is load-bearing: the monorepo nests public/ under apps/*/ (a bare
+# `public/**` only matches a top-level public/, which is why logo.png + the PWA
+# icons were silently un-tracked). This overrides the *.png/*.jpg rules above.
+!**/public/**/*.png
+!**/public/**/*.jpg
+!**/public/**/*.jpeg
 !**/og-image*.png
 !**/favicon*.png
-# OG share cards are versioned brand assets, not scratch (overrides *.png above).
-!**/public/og.png
-!**/public/*-og.png
 
 # ── Vite ─────────────────────────────────────────────────────────────
 .vite/

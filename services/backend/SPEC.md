@@ -31,8 +31,9 @@ One Bun service, one port, one image, one deploy. Every module is a route matche
 |---|---|
 | **mcp** (`src/mcp`) | **BUILT, bare.** `POST /mcp`, hand-rolled JSON-RPC 2.0 Streamable-HTTP. One no-auth tool `suize_ping`. NO auth, NO payment, NO Sui, NO session. The real wallet tools (`suize_pay` / `suize_balance` / `suize_receipts` / …) live in the local `@suize/mcp` stdio package, not in this bare backend route. |
 | **deploy** (`src/deploy`) | **BUILT + PROVEN end-to-end** (2026-06-10 — it shipped our own landing to Walrus testnet: auth nonce → tar → quilt + manifest → on-chain `Site` → hash-verified serving). `deploy_sui` is published on testnet (real ids in `@suize/shared`). Custom-domain link/unlink built. The **$0.50 x402 charge gate** (`src/deploy/payment.ts` — a first-party single-output x402 'exact' settlement verified + settled in-process, single-use digest reservation) is BUILT; it **arms the moment the Deploy treasury (`treasury@suize`) resolves** (no more `account` flags — `chargeGateReady()` = treasury resolves). Pays its own gas for the Site mint — NOT Enoki-sponsored. |
-| **facilitator** (§7) | **BUILT + PROVEN — x402 V2 'exact', KEYLESS, E2E on REAL testnet.** `POST /verify` · `POST /settle` · `GET /supported` · `POST /build` · `GET /terms` · `GET /tx` · `POST /checkout` live in `src/facilitator/` (`x402.ts` the verify/settle/build core, `fees.ts` the SuiNS-resolved treasury + the `extra.outputs` 2%/1¢ split, `index.ts` the HTTP layer). The **`@suize/pay` middleware shipped** (`packages/pay` — answers the x402 V2 `PaymentRequired` challenge; zero runtime deps, fetch-style + Express adapters), built on **`@suize/x402`** (the gasless `send_funds` builder + `assertOutputsExact` + `recoverPayer` + the gasless-shape guard). KEYLESS + STATELESS — the chain is the database; the payer signs the gasless tx with its OWN key, the facilitator only verifies (simulate) + broadcasts (gRPC, idempotent by digest). The hosted pay page is **BUILT + LIVE at `pay.suize.io`** (`apps/pay`, base `/`; identity via the wallet-hosted SSO bridge (§7.4); old `wallet.suize.io/pay` links 307-redirect there; base URL env-tunable via `PAY_PAGE_URL`, default `https://pay.suize.io`). (The Tier-0 "instant merchant" screen lives in the wallet's business console — handoff note at the end of `apps/wallet/SPEC.md`.) |
-| **sponsor** (`src/sponsor`) | **BUILT.** `createSponsor` / `executeSponsor` (+ `sponsorKindBytes`) over Enoki, with the move-call allow-list + gas-drain ceilings. **Allow-list (`src/sponsor/index.ts`):** `[...CRASH_MOVE_TARGETS, ...WALLET_MOVE_TARGETS, ...(SUBS_PUBLISHED ? SUBS_MOVE_TARGETS : [])]` — Crash `router::*`, the legacy wallet package, and the standalone `subs::subscription` create/renew/cancel (plus the gasless `redeem_funds`/`into_balance` helpers the subscription Balance push needs). **`account.move` is DEAD — its targets are NOT in the allow-list.** Sponsors the few non-gasless surfaces only (a vanilla x402 `send_funds` needs no sponsor). |
+| **facilitator** (§7) | **BUILT + PROVEN — x402 V2 'exact', KEYLESS, E2E on REAL testnet.** `POST /verify` · `POST /settle` · `GET /supported` · `POST /build` · `GET /terms` · `GET /tx` live in `src/facilitator/` (`x402.ts` the verify/settle/build core, `fees.ts` the SuiNS-resolved treasury + the `extra.outputs` 2%/1¢ split, `index.ts` the HTTP layer). The **`@suize/pay` middleware shipped** (`packages/pay` — answers the x402 V2 `PaymentRequired` challenge; zero runtime deps, fetch-style + Express adapters), built on **`@suize/x402`** (the gasless `send_funds` builder + `assertOutputsExact` + `recoverPayer` + the gasless-shape guard). KEYLESS + STATELESS — the chain is the database; the payer signs the gasless tx with its OWN key, the facilitator only verifies (simulate) + broadcasts (gRPC, idempotent by digest). The agent pays by signing the gasless USDC payment ITSELF and presenting `X-PAYMENT` — either with its own Sui key or its zkLogin session via `@suize/mcp`; there is no hosted pay page and no human-pays relay. |
+| **sponsor** (`src/sponsor`) | **BUILT.** `createSponsor` / `executeSponsor` (+ `sponsorKindBytes`) over Enoki, with the move-call allow-list + gas-drain ceilings. **Allow-list (`src/sponsor/index.ts`):** `[...CRASH_MOVE_TARGETS, ...(SUBS_PUBLISHED ? SUBS_MOVE_TARGETS : []), ...(AUCTION_PUBLISHED ? AUCTION_MOVE_TARGETS : []), ...MEMWAL_MOVE_TARGETS]` — Crash `router::*`, the standalone `subs::subscription` create/renew/cancel, the directory's `auction::bid` (each plus the gasless `redeem_funds`/`into_balance` helpers the Balance push needs), and the **MemWal** wallet-memory onboarding (`<memwalPkg>::account::create_account` + `add_delegate_key` — a NON-money delegate key, env-gated on `MEMWAL_PACKAGE_ID`). **`WALLET_MOVE_TARGETS` was REMOVED 2026-06-14** (move-wallet retired-in-place, in no live path) and **`account.move` is DEAD** — neither is in the allow-list. Sponsors the few non-gasless surfaces only (a vanilla x402 `send_funds` needs no sponsor). |
+| **directory** (§7.8, `src/directory`) | **BUILT** (2026-06-14). The off-chain surface for `agents.suize.io` (`apps/agents/SPEC.md`): `/feed` `/rankings` `/stats` `/ads/slots` `/ads/slots/:key` `/directory.json` `/directory.okf`. Merchant-agnostic — reads EVERY x402 payment LIVE from chain via the treasury fee-leg (read-through cached); stores no payment state. Curl-proven on testnet; not yet deployed to `api.suize.io` (k8s). |
 | **handle** (`src/handle`) | **BUILT.** Fully on-chain SuiNS leaf-subname issuance (`<name>@suize`). Optional — 503 when SuiNS env unset. *Not load-bearing for the rail; the rail has no SuiNS dependency for payments (the treasury fee-recipient IS resolved from a SuiNS name — §7.5).* |
 | **storage extender** (§5, `src/deploy/extend.ts`) | **BUILT, env-gated, wired at boot.** Replaces the deleted pull-relayer. It does NOT charge (the push-not-pull `subs` module already did) — its ONLY job is to keep a PAID Deploy site's Walrus storage extended in place: an **on-settle hook** (`notifySettled`, fired from the sponsor execute path) + a **6h safety cron** (`startStorageCron`), each extending the site's two blobs (`system::extend_blob`, ≤50-epoch clamp), with an F5 owner-binding so a crafted `ref` can't drain the service WAL. See §5. |
 | **agent** (`src/agent`) | **STUB.** No-op. Reminder: the real backend is the facilitator + executor + storage extender, NOT an AI agent. Do not wire an inference loop here. |
@@ -51,8 +52,9 @@ onboarded merchant, the 2%/1¢ fee split). The facilitator (§7) verifies that
 signed-but-not-executed tx pays the EXACT declared outputs (simulate), then settles by
 broadcasting it (gRPC) — **keyless**: no Enoki, no sponsor, no owner-tx signing. The
 fee is **merchant-absorbed** and lives in `extra.outputs` (a second declared output to
-the treasury) — the payer always pays exactly the listed price; a vanilla single-output
-payment (merchant not in the registry) is the **free tier**. The doors, one rail:
+the treasury) — the payer always pays exactly the listed price. **NO free tier** (owner
+law 2026-06-14): EVERY merchant pays (unregistered → the default 2%); the only
+single-output result is structural (merchant == treasury, or a sub-unit amount). The doors, one rail:
 
 1. **The consumer PAY wallet app** (the PRIMARY payer surface, root `CLAUDE.md` LOCKED
    #6) — pays from the user's own balance, custody law intact: the in-app zkLogin session
@@ -65,10 +67,10 @@ payment (merchant not in the registry) is the **free tier**. The doors, one rail
    payment → sign locally → settle via the facilitator) (§3, §7).
 3. **The facilitator HTTP doors** (§7 — BUILT + E2E-proven) — any external agent: the
    **FACILITATOR door** (`POST /build` returns the unsigned gasless bytes → the agent
-   signs with its own key → `POST /settle`), the **POWER door** (a Sui-native agent
+   signs with its own key → `POST /settle`), and the **POWER door** (a Sui-native agent
    builds its own `send_funds` PTB, signs, and hands the b64 `PaymentPayload` in the
-   **`X-PAYMENT`** header on retry), the **HUMAN door** (the 402's `payLink` → the hosted
-   pay page → one tap).
+   **`X-PAYMENT`** header on retry). Two doors, one wire: the agent ALWAYS signs the
+   gasless payment itself — there is no human-pays / pay-link path.
 4. **`llms.txt`** — a static discovery door (content LAW in root `CLAUDE.md`). The
    rail contract is LIVE at `suize.io/llms.txt` — the hub every per-product llms.txt
    links back to (deploy/crash/wallet ship their own).
@@ -94,13 +96,21 @@ outside `ALLOWED_MOVE_TARGETS`. The lists are the single source of truth in
 `@suize/shared`:
 
 - `CRASH_MOVE_TARGETS` — the live `…::router::*` Crash targets (testnet).
-- `WALLET_MOVE_TARGETS` — the **legacy** mandate/vault/swap/navi package (being retired).
 - `SUBS_MOVE_TARGETS` — the standalone **`subs::subscription`** create/renew/cancel,
   plus the gasless `redeem_funds`/`into_balance` helpers the per-period Balance push
   needs (`packages/move-subs/SPEC.md`).
+- `AUCTION_MOVE_TARGETS` — the directory's **`auction::bid`** (`packages/move-auction/SPEC.md`)
+  + the same gasless `redeem_funds`/`into_balance` helpers. User-signed + Enoki-sponsored,
+  the same shape as a subs renewal; unioned in only once published.
+- `MEMWAL_MOVE_TARGETS` — the **MemWal** wallet-memory onboarding
+  (`<memwalPkg>::account::create_account` + `add_delegate_key`): the user signs ONE
+  sponsored tx authorizing the backend's derived MEMORY delegate key (explicitly a
+  NON-money key — `src/memory`). Env-gated on `MEMWAL_PACKAGE_ID` (unset → empty).
 
 The effective allow-list (`src/sponsor/index.ts`) is
-`[...CRASH_MOVE_TARGETS, ...WALLET_MOVE_TARGETS, ...(SUBS_PUBLISHED ? SUBS_MOVE_TARGETS : [])]`.
+`[...CRASH_MOVE_TARGETS, ...(SUBS_PUBLISHED ? SUBS_MOVE_TARGETS : []), ...(AUCTION_PUBLISHED ? AUCTION_MOVE_TARGETS : []), ...MEMWAL_MOVE_TARGETS]`.
+**`WALLET_MOVE_TARGETS` (the legacy mandate/vault/swap/navi package) was REMOVED 2026-06-14**
+(retired-in-place, called by no first-party code — a Move-audit fix).
 **`account.move` is DEAD — there is no `ACCOUNT_MOVE_TARGETS` and no `RailConfig`.** The
 sponsor exists ONLY for the surfaces that genuinely need gas: Crash bets and the wallet's
 subscription Party-object writes (a Party-object mint is not fully gas-rebatable). A
@@ -152,7 +162,7 @@ no Sui, no state.
 
 **TO BUILD — the real tools (the dev/power-user door, owner-validated 2026-06-10):**
 
-One-line install: `claude mcp add suize` / `npx @suize/mcp`, then Google zkLogin once
+One-line install: `claude mcp add suize -- npx -y @suize/mcp`, then Google zkLogin once
 (§3.2). LAW (root `CLAUDE.md`, the integration surface): every product surface carries
 a **"Use with Claude/Codex"** doc section.
 
@@ -239,9 +249,8 @@ PTB itself (or `POST /build`), **signs with its own key**, and hands the b64
 **verifies (simulate) + settles (broadcast)** — it holds no key and stores nothing per
 payment; the on-chain balance-change set IS the receipt, fee visible. The fee can't be
 routed around: a single-output payment to a fee-tier merchant fails the facilitator's
-exact-outputs check (`assertOutputsExact`) → not settled. The **`payLink`** (the HUMAN
-door) is just the hosted pay page (§7.3) for callers that can't auto-build a Sui tx. The
-claim ladder (root `CLAUDE.md`) governs the public wording.
+exact-outputs check (`assertOutputsExact`) → not settled. The claim ladder (root
+`CLAUDE.md`) governs the public wording.
 
 ---
 
@@ -257,13 +266,14 @@ subscription unlocks custom domains + auto-renewed Walrus storage) lives in
   (nonce-free since 2026-06-14). The X-PAYMENT carries a signed gasless payment; the
   on-chain `owner` is the **recovered payer** (`recoverPayer` — zkLogin, Ed25519, OR a
   1-of-2 sub-account MultiSig), never a client field — **whoever pays, owns**. Flow:
-  verify the payment pays the exact $0.50 → unpack tar (caps: 100 MiB, 2000 files) →
-  Walrus quilt + manifest blob → **settle the payment** → mint a fresh immutable shared
-  `Site` (signed by the deploy service wallet, pays its own gas) with the **settled
-  payment digest recorded in the on-chain `SiteDigestRegistry`** → `{ siteId, subdomain:
-  base36(siteId), url, version, digest }`. The no-Sui-key door is the SAME path: the human
-  authorizes (signs-but-doesn't-settle) via `pay.suize.io?…&mode=authorize` and the agent
-  submits that signed payload as X-PAYMENT.
+  **verify** the payment pays the exact $0.50 → **settle the payment** (broadcast, keyless)
+  → unpack tar (caps: 100 MiB, 2000 files) → Walrus quilt + manifest blob → mint a fresh
+  immutable shared `Site` (signed by the deploy service wallet, pays its own gas) with the
+  **settled payment digest recorded in the on-chain `SiteDigestRegistry`** → `{ siteId,
+  subdomain: base36(siteId), url, version, digest }`. Settle BEFORE the Walrus upload so an
+  unsettled payment never burns WAL. The agent ALWAYS signs its own gasless payment (its own
+  Sui key, or its zkLogin session via `@suize/mcp`) — there is no human-authorizes / relay
+  path.
 - `GET /sites[?owner=]`, `GET /sites/:id` — read from `SiteCreated` events + the Site
   object.
 - `POST /domains` (issue challenge / `?verify=1`), `DELETE /domains/:domain` —
@@ -306,19 +316,19 @@ zero code change.
 > + the `PAYMENT-REQUIRED` header** (price discovery is public; a generic agent settles
 > zero-shot) — minted **STATELESSLY** via `@suize/pay`'s `mintPaymentRequired`,
 > facilitator/buildUrl pointed at this process's own origin; the 402's `error` carries the
-> deploy rider *"whoever pays owns the site"*; the `payLink` is
-> `pay.suize.io?…&mode=authorize` (no secret);
+> deploy rider *"whoever pays owns the site"*;
 > (b) the paid retry carries the b64 `PaymentPayload` in the **`X-PAYMENT`** header — the
 > SOLE authorization, no separate deploy-auth signature. `gateDeployPayment` decodes it,
 > deep-equals the presented `accepted` terms against OUR single-output requirement,
 > **recovers the payer** (→ the on-chain `owner`; whoever pays, owns), and runs `doVerify`
-> (simulate-only). The Walrus work runs on the VERIFIED-but-unsettled payment; then
-> `settleDeployPayment` (`doSettle` — broadcast keyless, idempotent by digest) settles it
-> **immediately before** `create_site`, which records the settled digest in the on-chain
-> **`SiteDigestRegistry`** and aborts **`EDigestUsed` (→ 409)** on a duplicate. No payment
-> → no deploy. The no-Sui-key door submits a human's `mode=authorize` (signed-unsettled)
-> payload as the SAME X-PAYMENT — owner = the human.
-> E2E: `test/e2e/deploy.402.e2e.ts` + `deploy.paid.e2e.ts` + `deploy.paylink.e2e.ts`.
+> (simulate-only) then `settleDeployPayment` (`doSettle` — broadcast keyless, idempotent by
+> digest) **BEFORE the Walrus upload** so an unsettled payment never burns WAL; only then
+> does the Walrus upload run, and `create_site` records the settled digest in the on-chain
+> **`SiteDigestRegistry`** and aborts **`EDigestUsed` (→ 409)** on a duplicate. The ordering
+> is VERIFY → SETTLE → Walrus upload → `create_site`. No payment
+> → no deploy. The agent always signs its own gasless payment (its own Sui key, or its
+> zkLogin session via `@suize/mcp`) — there is no human-authorizes / relay door.
+> E2E: `test/e2e/deploy.402.e2e.ts` + `deploy.paid.e2e.ts`.
 
 > **ONE-SITE-PER-PAYMENT = ON-CHAIN (multi-replica-safe; THE PRINCIPLE).** The in-memory
 > `settledDeploys` reserve/commit/release map is GONE. `create_site(reg: &mut
@@ -328,8 +338,8 @@ zero code change.
 > `Site`. (An identical-payload replay is ALSO caught earlier by `doVerify`'s
 > already-executed guard → 402; the registry 409 is the multi-replica backstop for the
 > race where two replicas both settle the same digest idempotently and both reach the
-> mint.) Nothing is public before the deploy — the pay-link returns a signed-UNSETTLED
-> payload — so there is no public digest to replay.
+> mint.) Nothing is public before the deploy — the agent signs its own payload privately —
+> so there is no public digest to replay.
 
 This join is Deploy being merchant AND facilitator in one process — **it IS a client of
 the ONE verify/settle core** (`src/facilitator/x402.ts` `doVerify`/`doSettle`, the same
@@ -400,13 +410,8 @@ the running code and was repudiated** — root `CLAUDE.md` LOCKED #14 (corrected
   failing, the socket closes `4004 VERIFY_UNAVAILABLE` **without** `connectionRejected`
   — that packet means "permanent, don't reconnect" to the client and is reserved for
   genuine credential failures (one transient fullnode 504 used to brick the wallet
-  session until reload).
-  **SSO bridge (2026-06-11):** the wallet origin is the suite's identity host —
-  `/bridge` (silent `getSession` ONLY; the designed `signAuthNonce` WS-login signer is
-  deliberately unshipped until a consumer needs a mitigation — `apps/wallet/SPEC.md`
-  §6b) + `/confirm` (the visible money popup, builds-what-it-displays). First consumer:
-  the standalone `pay.suize.io` (§7.4). The silent op never signs; money requires the
-  visible popup.
+  session until reload). The WS also carries the wallet's subscription `/confirm-subscribe`
+  Party-object write (sponsored — §2).
 - **The deploy/merchant surface is HTTP by necessity** (agents speak 402-shaped HTTP):
   the deploy itself is authenticated BY THE PAYMENT (the `X-PAYMENT` payload — its
   recovered payer becomes the site owner; nonce-free since 2026-06-14), and the domain
@@ -446,7 +451,7 @@ gasless builder + `assertOutputsExact` + `recoverPayer` + the gasless-shape guar
 > answer is checkable, not trusted. **The address IS the account** — no API key, no
 > signup, no merchant record server-side.
 
-### 7.0 The seven endpoints + status (`src/facilitator/index.ts`)
+### 7.0 The six endpoints + status (`src/facilitator/index.ts`)
 
 | Endpoint | Scope | Status |
 |---|---|---|
@@ -454,15 +459,13 @@ gasless builder + `assertOutputsExact` + `recoverPayer` + the gasless-shape guar
 | `POST /settle` | broadcast the verified tx over gRPC, await finality, idempotent by digest (§7.1) | **BUILT + PROVEN** |
 | `GET /supported` | the x402 V2 capability descriptor: `{ kinds:[{x402Version:2, scheme:'exact', network}], extensions:['payment-identifier'], signers:{'sui:*':[]} }` | **BUILT** |
 | `POST /build` | the optional facilitator-built unsigned gasless bytes (THE PROBE RECIPE — the payer signs locally) (§7.1) | **BUILT + PROVEN** |
-| `GET /terms?payTo&amount` | the declared `extra.outputs` split a merchant drops into its 402 — `null` = the free tier (§7.5) | **BUILT** |
+| `GET /terms?payTo&amount` | the declared `extra.outputs` split EVERY merchant drops into its 402 (NO free tier — unregistered pays the default 2%; 503 if treasury unresolved) (§7.5) | **BUILT** |
 | `GET /tx?digest` | a DESCRIPTIVE audit of `balanceChanges` (never trusted, always checkable) | **BUILT** |
-| `POST /checkout` | the no-auth pay-link URL formatter (§7.3) — pure string assembly, no store, no chain | **BUILT + PROVEN** |
 
-The `@suize/pay` middleware (§7.4, `packages/pay`) + the hosted pay page (§7.3,
-`apps/pay`, LIVE at `pay.suize.io`) round out the merchant + human surfaces. The Tier-0
-"instant merchant" screen lives in the wallet's business console (a pay link is only for
-a customer to pay a merchant; `apps/wallet/SPEC.md`). The E2E proof inventory + run
-commands live ONCE in §0.
+The `@suize/pay` middleware (§7.4, `packages/pay`) is the whole merchant integration; an
+agent can also pay any merchant's own x402 endpoint directly. The Tier-0 "instant
+merchant" screen lives in the wallet's business console (`apps/wallet/SPEC.md`). The E2E
+proof inventory + run commands live ONCE in §0.
 
 ### 7.1 The verify / settle / build core (x402 V2 'exact' — BUILT + PROVEN)
 
@@ -477,9 +480,10 @@ strings on the public surface, atomic-unit strings inside `extra.outputs`.
   Read-only (simulate + one tx-state read — NEVER broadcasts). Asserts `scheme === 'exact'` ∧
   `network` match ∧ the payload is `{ signature, transaction }` (base64), then in
   parallel **recovers the signer** (`recoverPayer`) and **simulates** the tx to prove
-  it credits the declared outputs EXACTLY (`assertOutputsExact` — default outputs =
-  a single full-amount leg to `payTo`, the free tier; a fee-tier merchant declares the
-  `[merchant net, treasury fee]` split in `extra.outputs`). Three more hard guards: a
+  it credits the declared outputs EXACTLY (`assertOutputsExact` — the protocol DEFAULT
+  for empty `extra.outputs` is a single full-amount leg to `payTo`, but a Suize merchant
+  always declares the `[merchant net, treasury fee]` split from /terms — NO free tier).
+  Three more hard guards: a
   cheap **gasless-shape check** (`assertGaslessTxShape` — `gasPrice 0`, `gasPayment`
   empty, only the allowlisted `send_funds`/`redeem_funds`/`coin::into_balance` + coin
   split/merge commands, no arbitrary command routes the asset), **recovered signer
@@ -512,8 +516,8 @@ strings on the public surface, atomic-unit strings inside `extra.outputs`.
   Belt-and-braces: the facilitator runs `assertUnsignedBytesSafe` on the bytes it built
   (the same hard pre-sign gate the payer must run) before handing them back — it never
   hands back unsafe bytes. The payer signs these **LOCALLY** (the facilitator never signs
-  an owner leg). `503` only when a fee-tier split is requested and the treasury is
-  unresolved (free-tier single-output build always works).
+  an owner leg). `503` only when a split is DERIVED from `requirements` and the treasury
+  is unresolved (a build given EXPLICIT `outputs` needs no treasury and always works).
 
 > **PROVEN on-chain (E2E, real testnet):** the payer signs a gasless `send_funds`,
 > pays **ZERO gas** (protocol-level rebate — no gas token, ever), and the exact declared
@@ -527,8 +531,7 @@ the `PAYMENT-REQUIRED` header), minted by `@suize/pay`'s `mintPaymentRequired`. 
 vanilla x402 shape — the `accepts[]` array of `PaymentRequirements`, each naming the
 scheme/network/asset/payTo/amount, the fee split in `extra.outputs`, and an `extra.buildUrl`
 pointing at the facilitator's `POST /build`. Defined HERE so the `@suize/pay` middleware
-(§7.4), the hosted pay page (§7.3), the MCP's `suize_pay` (§3), and the PAY wallet all
-agree on one shape:
+(§7.4), the MCP's `suize_pay` (§3), and the PAY wallet all agree on one shape:
 
 ```json
 {
@@ -558,7 +561,9 @@ Wire laws: the public `amount` is a **decimal USDC string** (`"0.50"`); the
 `extra.outputs` legs are **atomic-unit strings** (the exact balance-change set the
 facilitator enforces — `490000` net + `10000` fee = the full `500000`, **merchant-
 absorbed**, so the payer is debited exactly `0.50`). A **single output** (no `extra.outputs`,
-or one full-amount leg to `payTo`) is the **free tier** (no rake). `network` names the
+or one full-amount leg to `payTo`) is the protocol DEFAULT — but Suize's /terms always
+declares the split, so there is **NO free tier** (every merchant pays; the only
+single-output case is structural — merchant == treasury). `network` names the
 chain (`sui:mainnet` / `sui:testnet`). **The PAYER never speaks base units on the public
 surface** — it either echoes the merchant's `accepts[0]` to `POST /build` or builds the
 `send_funds` PTB from the declared `outputs`, signs locally, and presents the b64
@@ -568,88 +573,20 @@ declared terms; the payer-built or facilitator-built tx must credit them EXACTLY
 carries an optional correlation id for the agents that want one — it is NOT load-bearing
 for settlement (the digest is the proof).
 
-### 7.3 The hosted pay page (Phase 4 — page BUILT in `apps/pay`, LIVE at `pay.suize.io`; `/checkout` BUILT + PROVEN) — ONE page, both species
+### 7.3 The hosted pay page — RETIRED 2026-06-15
 
-`https://pay.suize.io?payTo=<address>&amount=<decimal>&memo=<text>&returnUrl=<url>`
+The hosted pay page (`pay.suize.io` / `apps/pay`), the `POST /checkout` URL formatter,
+the `PAY_PAGE`/`PAY_PAGE_URL` env, the SSO-bridge `/bridge` iframe + `/confirm` money
+popup, and the human-pays / pay-link door are **DELETED.** Every CHARGE merchant and
+Deploy are paid by the AGENT signing the gasless USDC payment ITSELF and presenting
+`X-PAYMENT` (its own Sui key, or its zkLogin session via `@suize/mcp`) — there is no
+human-relay surface. Merchant integration = the `@suize/pay` middleware (§7.4), or the
+agent pays the merchant's own x402 endpoint directly.
 
-Preferred human-friendly form: **`?to=<handle>`** (a Suize handle — `name@suize`,
-bare `name`, or `name.suize.sui`) instead of / alongside `payTo`. The PAGE resolves
-the handle on-chain client-side (suix_resolveNameServiceAddress on the
-`<name>.suize.sui` leaf record — the backend never resolves); when both params are
-present **`to` wins**, and an unresolvable handle is a HARD page error — never a
-silent fallback to `payTo` (which stays in the link as the raw protocol fallback).
-
-The terms live ENTIRELY in the URL — the page is stateless too. (The earlier
-design's Tier-1 pay-links and Tier-2 checkout sessions are **MERGED into this one
-page**, owner 2026-06-10: there are no link records and no sessions to store — a
-pay-link IS this URL.)
-
-**Hosting — STANDALONE `pay.suize.io` (owner 2026-06-11, reversing the same-day
-base-path call):** the page is its own origin (`apps/pay`, vite `base: '/'`,
-routes `/` · `/connect`), Vercel project `aresrpg/suize-pay`. Identity comes
-from the WALLET origin via the **SSO bridge** (protocol `@suize/shared/bridge`;
-host surfaces `wallet.suize.io/bridge` — the hidden same-site iframe answering
-`getSession` silently (the `signAuthNonce` signer is designed but deliberately
-unshipped — `apps/wallet/SPEC.md` §6b), origin-allowlisted + `frame-ancestors`
-pinned — and `wallet.suize.io/confirm` — the visible money popup that
-builds-what-it-displays, signs the gasless payment locally, settles, returns ONLY the
-digest; the key never leaves the wallet origin, and no bridge surface signs caller bytes).
-The pay page therefore runs NO Google login of its own; standard wallets still
-connect locally via dapp-kit. **The `/connect` MCP door is REMOVED (2026-06-11,
-unified-auth consolidation)** — its popup OAuth and the `pay.suize.io/enoki`
-Google-client flag die with it; the pay origin registers NO Enoki wallet at
-all. The MCP's auth handshake gets re-homed on the wallet origin (the one
-identity point) when the MCP ships. **Transition
-state: RESOLVED (2026-06-11)** — the DNS record landed; `pay.suize.io` is LIVE
-and is the canonical pay origin everywhere links are minted (`@suize/pay`'s
-default `PAY_PAGE`, `/checkout`, the deploy 402 challenge — all via
-`PAY_PAGE_URL`/`config.payPageUrl`); the wallet's phase-B redirect SHIPPED
-(2026-06-11): `wallet.suize.io/pay/:path*` 307-redirects to `pay.suize.io/:path*`,
-query preserved.
-
-- **A human** gets the confirm page: one tap → sign in with Google → the gasless
-  `send_funds` payment is built-from-what-is-displayed, signed locally, and settled via
-  the facilitator → redirected back to `returnUrl` with `?digest=<digest>` appended (the
-  merchant site then runs its own `/verify`).
-- **An agent** requesting the same URL with `Accept: application/json` gets the
-  §7.2 x402 V2 `PaymentRequired` body for these terms — the machine-readable door, by
-  content negotiation, same URL.
-- **`POST /checkout`** `{ payTo, amount, memo?, returnUrl?, handle? }` (`handle?`
-  is round-tripped UNRESOLVED into the link's `to=` param — resolution is the
-  page's job) →
-  `200 { sessionUrl, paymentId }` survives ONLY as an optional **NO-AUTH URL
-  formatter** (pure string assembly of the page URL above, for merchants who want a
-  server-call shape). No store, no session record, no webhookSecret. **BUILT +
-  PROVEN** (`src/facilitator/index.ts` — the per-IP WRITE bucket, the same address/amount
-  validators as the other write doors; `returnUrl` must be http(s); `paymentId` = the
-  caller's `memo`, or a freshly minted pinned-format `pay_[0-9a-f]{32}` when
-  absent — either way it IS the link's `memo` param, so the receipt correlates.
-  `400` shape · `429` bucket; no rail gate — string assembly never touches chain.
-  Base URL = `PAY_PAGE_URL` env, default `https://pay.suize.io` (the standalone
-  pay origin) — the query is appended directly
-  (`<base>?payTo=…`, never `<base>/?payTo=…`). Wire types
-  `FacilitatorCheckout{Request,Response}` in `@suize/shared`; E2E
-  `test/e2e/paylink.e2e.ts`**).
-- **Phishing rules (LAW):** a RAW `?payTo=0x…` link renders the address in FULL —
-  never truncated-only, never replaced by a merchant display-name (the human
-  confirms the exact address, because the address IS the account). **HANDLE-ONLY
-  (owner 2026-06-11):** when BOTH sides are Suize accounts — i.e. the link carries
-  a `to=` handle — the page shows the **handle ONLY**, NOT the resolved address
-  beneath it. The on-chain resolution is what prevents misdirection (the handle
-  deterministically resolves to one address on-chain; there is no spoof surface to
-  guard against by also showing the hex), and a 64-hex address under every handle
-  was noise that hurt the consumer read more than it helped. A raw `?payTo=0x…`
-  link (no resolvable handle) still shows the address — that path has no handle to
-  show. `memo` is HTML-escaped and rendered as inert text; NO merchant-supplied
-  markup/images/redirects except the post-payment `returnUrl`, navigated only
-  AFTER settlement with `?digest=` appended — never before.
-
-Settlement notice = the merchant's own `/verify` (on-retry via the middleware, or
-polling) or the Tier-0 history view in the wallet's business console (§7.6). **Webhooks are DELETED from v1** —
-push can return post-v1 if a paying merchant needs it; ground truth never moves off
-the receipt event. (Stripe phrasing law unchanged: Suize **COEXISTS** with Stripe —
-"keep Stripe for humans, add Suize for agents" — never claim integration INTO
-Stripe.)
+Still true and unchanged: **Webhooks are DELETED from v1** — settlement notice is the
+merchant's own `/verify` (on-retry via the middleware, or polling); ground truth never
+moves off the on-chain receipt. (Stripe phrasing law: Suize **COEXISTS** with Stripe —
+"keep Stripe for humans, add Suize for agents" — never claim integration INTO Stripe.)
 
 ### 7.4 The `@suize/pay` middleware (BUILT: `packages/pay`) — the whole merchant integration, one import
 
@@ -662,8 +599,8 @@ things:
 
 1. Request without valid payment → answer **402** with the x402 V2 `PaymentRequired` body
    (§7.2, `mintPaymentRequired`) + the `PAYMENT-REQUIRED` header. The declared
-   `extra.outputs` come from the merchant's own terms (`/terms` resolves the 2%/1¢ split,
-   or a single full-amount output for the free tier).
+   `extra.outputs` come from the merchant's own terms (`/terms` resolves the 2%/1¢ split
+   for EVERY merchant — no free tier; only a first-party merchant == treasury collapses to one leg).
 2. Request carrying the b64 `PaymentPayload` in the **`X-PAYMENT`** header → parse it →
    call the facilitator `POST /verify` + `POST /settle` against the merchant's OWN
    configured terms → serve ONLY when both succeed (the settled tx pays the EXACT
@@ -691,8 +628,8 @@ publish later needs a build step.)*
   assertions over the on-chain balance-change set; nothing else is trusted, nothing
   else is stored.
 - **TWO per-IP token buckets by cost** (the facilitator's OWN — `src/facilitator/index.ts`),
-  **both FAIL CLOSED on a null IP**: a **WRITE bucket** (`/settle` + `/build` + `/checkout`
-  — capacity 6, refill 0.5/s; each token is a broadcast/build/mint) and a separate,
+  **both FAIL CLOSED on a null IP**: a **WRITE bucket** (`/settle` + `/build`
+  — capacity 6, refill 0.5/s; each token is a broadcast/build) and a separate,
   **looser READ bucket** (`/verify` + `/terms` + `/tx` + `/supported` — capacity 30,
   refill 5/s; cheap simulate/reads so legit polling never trips). Validation precedes
   the bucket — a malformed request never burns a token.
@@ -703,8 +640,7 @@ publish later needs a build step.)*
 - **The exact-outputs check is the fee guard** — a single-output payment to a fee-tier
   merchant fails `assertOutputsExact` (the treasury leg is missing) → not verified, not
   settled. The fee can't be routed around.
-- **The hosted page** — the §7.3 phishing rules.
-- **Treasury fail-closed** — a fee-tier `/terms`/`/build` REFUSES (503) when the
+- **Treasury fail-closed** — `/terms`/`/build` REFUSES (503) when the
   SuiNS-resolved treasury is unknown (a fee with an unknown recipient would burn the rake
   or pay a squatter); free-tier (single-output) verify/settle/build never touch it.
 - **The multi-replica landmine** — the settle idempotency cache is per-replica in-memory:
@@ -717,25 +653,19 @@ Every tier lands on the SAME rail + receipt — the tiers only change WHO WRITES
 402:
 
 - **TIER 0 — INSTANT MERCHANT (a screen, not an API — lives in the WALLET's
-  business console, owner 2026-06-11; the pay surface is only for a customer to
-  pay a merchant).** Sign in with Google (zkLogin mints your `payTo` address) and
-  the console hands you your pay-link (§7.3) + a **READ-ONLY on-chain payment
+  business console, owner 2026-06-11).** Sign in with Google (zkLogin mints your
+  `payTo` address) and the console hands you a **READ-ONLY on-chain payment
   history** (the receipt events for that address, read straight from chain — no
   database, no merchant record server-side). Zero code, zero keys; vanilla x402
   pays any plain address, so *"your address is your account"* is literally true.
-  (A working prototype lived at the deleted apps/pay `/start` — handoff note at the
-  end of `apps/wallet/SPEC.md`.)
-- **TIER 1+2 — THE HOSTED PAY PAGE** (merged, §7.3): terms in the URL; humans tap,
-  agents content-negotiate the x402 V2 `PaymentRequired` body; `/checkout` = the
-  optional no-auth URL formatter.
 - **TIER 3 — THE 402 MIDDLEWARE** (`@suize/pay`, §7.4) — for merchants who own
-  their HTTP surface and serve agents directly.
+  their HTTP surface and serve agents directly. The agent pays it (or any merchant's
+  own x402 endpoint) by signing the gasless payment itself and presenting `X-PAYMENT`.
 - **TIER 4 — PLATFORM GATEWAY PLUGINS (ROADMAP).** Gateway plugins for hosted
-  commerce platforms, configured with the merchant's `payTo` (the pay page under
-  the hood — keyless). Per the standards-only law (root `CLAUDE.md`): **NO platform
-  names in public copy until a plugin ships** — internal note only:
-  WooCommerce/Wix/BigCommerce are the open-gateway candidates; Shopify is gated
-  (crypto-app program + rev-share).
+  commerce platforms, configured with the merchant's `payTo`. Per the standards-only
+  law (root `CLAUDE.md`): **NO platform names in public copy until a plugin ships** —
+  internal note only: WooCommerce/Wix/BigCommerce are the open-gateway candidates;
+  Shopify is gated (crypto-app program + rev-share).
 
 Anti-abuse everywhere = IP/volume rate limits (§7.5), never identity. The merchant
 copy law (lead with the fee delta, agents-first) lives in root `CLAUDE.md` —
@@ -760,6 +690,35 @@ referenced, not redeclared.
 
 ---
 
+### 7.8 directory — the agent-commerce surface for `agents.suize.io` (BUILT 2026-06-14)
+
+`src/directory/`. The read + ad-slot surface behind the directory app (`apps/agents/SPEC.md`).
+**Merchant-agnostic + stateless:** every Suize x402 payment carries a fee leg to the
+treasury (the fee is per-merchant variable but **never waived** — always ≥ the $0.01
+floor), so a single `queryTransactionBlocks({ ToAddress: treasury })` enumerates EVERY
+payment with zero per-merchant config. Treasury resolves LIVE from `treasury@suize`
+(cached ≤1h, fail-closed). The per-tx parse keys on a **positive** treasury USDC leg
+(treasury *received*); payer = the most-negative leg, merchant = the largest positive
+non-treasury leg (or treasury itself for a full-to-treasury deploy charge); `fee` is read
+from the actual treasury leg, `feeBps = round(fee/gross·10⁴)` — **never assumed 2%**. All
+endpoints are read-through cached (feed ~8s, rankings ~30s); the chain stays the database.
+
+| Endpoint | Shape |
+|---|---|
+| `GET /feed?limit=` | `{ payments:[{ digest, payer, payerHandle, merchant, merchantHandle, gross, fee, feeBps, timestampMs }] }` — newest x402 payments; handles reverse-resolved (cached, resilient). |
+| `GET /rankings?limit=` | `{ merchants:[{ merchant, handle, volume, count }] }` — per-merchant volume, desc (≈400-tx scan). |
+| `GET /stats` · `POST /stats/visit` | `{ visitorsToday }` — in-memory UTC-day counter (no DB; client dedupes per session). |
+| `GET /ads/slots` | `{ slots:[{ key,label,blurb,slotId,price,holder,holderHandle,creative,lastBidMs,minNextBid }], cheapest }` — each `AdSlot` read on-chain. |
+| `GET /ads/slots/:key` | `{ slot, bid:{ target, configObject, slotObject, coinType, minNextBid } }` (200); a **402** x402 challenge when `?x402=1` + `Accept: application/json`; 404 unknown key. The bid settles via the sponsored `auction::bid` Move call (`packages/move-auction`) — the route is the discovery/challenge front. |
+| `GET /directory.json` · `/directory.okf` | the merchant-agnostic catalog (JSON + an OKF markdown bundle) for agents — the "we speak Google's OKF" flag. |
+
+The ad-slot auction is a Suize-onboarded product on its own rail: each bid's net → the
+directory (`DIRECTORY_PAYTO`), the fee → treasury, so ad sales appear in `/feed` (dogfood).
+`AUCTION_MOVE_TARGETS` is unioned into the sponsor allow-list (§2). Reproducible
+post-publish config: `scripts/sync-auction-config.ts` (mirrors `sync-subs-config.ts`).
+
+---
+
 ## 8. Readiness + boot (BUILT)
 
 `src/index.ts`. Boot fails fast if `ENOKI_PRIVATE_API_KEY` is missing. Warns if
@@ -768,12 +727,10 @@ referenced, not redeclared.
 > **DEPLOY-CHECKLIST — `ALLOWED_ORIGINS` REPLACES the defaults.** When the env var
 > is set it OVERRIDES `DEFAULT_ALLOWED_ORIGINS` wholesale (`src/config.ts` ~L50 —
 > it is `fromEnv.length > 0 ? fromEnv : defaults`, never a union). So the prod/k8s
-> value MUST include **`https://pay.suize.io`** (the hosted pay page origin) and
-> **`https://wallet.suize.io`** (the SSO bridge host) or the facilitator's `/build`,
-> `/settle`, and `/verify` lose their CORS allow-origin and every browser call from
-> the pay page is blocked. Include every prod app origin you actually serve (pay,
-> wallet, deploy, crash, suize.io) — the default list is the reference for what a
-> complete override looks like.
+> value MUST include every prod app origin you actually serve (**`https://wallet.suize.io`**
+> for the wallet WS + browser calls, plus deploy, crash, suize.io) or the facilitator's
+> `/build`, `/settle`, and `/verify` lose their CORS allow-origin and the browser calls
+> are blocked. The default list is the reference for what a complete override looks like.
 
 | Probe | Gates |
 |---|---|
@@ -837,7 +794,7 @@ that file is now a pointer here, pending owner approval for deletion.)*
   (`facilitator.suize.io` is an alias) → `backend.internal:8080`.
   `GET /ws` (sponsor/execute + handle ops), `POST /mcp`, the `/deploy*` + `/domains*` +
   `/execute` HTTP surfaces, the facilitator (`POST /verify` + `POST /settle` +
-  `GET /supported` + `POST /build` + `GET /terms` + `GET /tx` + `POST /checkout` — §7),
+  `GET /supported` + `POST /build` + `GET /terms` + `GET /tx` — §7),
   and the health/readiness routes all live behind it — no separate sponsor host.
 - **Verify after deploy:** `curl /health` → `ok`; `/ready` reports per-component;
   `/ready/serve` is the k8s readinessProbe target (§8).
@@ -850,6 +807,6 @@ that file is now a pointer here, pending owner approval for deletion.)*
 
 The old `account.move` allow-list question is **MOOT**: the rail moved to vanilla x402
 V2 (a gasless `send_funds` needs no sponsor allow-list at all — the facilitator is
-keyless), and the sponsor allow-list is now `[...CRASH, ...WALLET, ...(SUBS_PUBLISHED ?
-SUBS : [])]` (§2). (The old §6 HTTP-only-refactor question stays CLOSED — LOCKED #14
-keeps the WS.)
+keyless), and the sponsor allow-list is now `[...CRASH, ...(SUBS_PUBLISHED ? SUBS : []),
+...(AUCTION_PUBLISHED ? AUCTION : []), ...MEMWAL]` (§2 — `WALLET` removed 2026-06-14). (The
+old §6 HTTP-only-refactor question stays CLOSED — LOCKED #14 keeps the WS.)

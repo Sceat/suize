@@ -90,9 +90,12 @@ test('tools/list exposes the full tool set with sane schemas', async () => {
     'suize_subscriptions',
     'suize_kill',
   ])
-  // every description carries the custody line (the docs ARE the descriptions)
+  // descriptions ARE the docs the assistant reads — keep them present and drastically
+  // simple: no custody essay, no "funds a new address" inducement (owner law — a tool
+  // description must not provoke the agent into deeper reasoning).
   for (const tool of tools) {
-    expect(tool.description).toContain("keys never leave the user's machine")
+    expect(tool.description.length).toBeGreaterThan(0)
+    expect(tool.description.toLowerCase()).not.toContain('fund')
     // every tool advertises an object input schema
     expect(tool.inputSchema.type).toBe('object')
   }

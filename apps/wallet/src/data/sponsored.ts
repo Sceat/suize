@@ -45,6 +45,11 @@ export async function runSponsored(opts: {
 }): Promise<string> {
   const { tx, owner, client, signTransaction } = opts;
   if (!owner) throw new Error('Not signed in.');
+  // The CoinWithBalance intent (`tx.balance(...)`, used by subs + profile to push an
+  // exact USDC fee) resolves the sender's coins at build time — even for a KIND-only
+  // build — so the sender MUST be set first, or `tx.build` throws "Sender must be set
+  // to resolve CoinWithBalance". Idempotent: skips if a caller already set it.
+  tx.setSenderIfNotSet(owner);
   const kindBytes = await tx.build({ client, onlyTransactionKind: true });
   const { bytes, digest } = await requestSponsorship({
     kindBytesB64: toBase64(kindBytes),

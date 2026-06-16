@@ -50,6 +50,7 @@ import {
 } from "@suize/x402";
 import { caip2, USDC_TYPES, type SuiNetwork } from "@suize/shared";
 import { config } from "../config";
+import { outputsFor } from "./fees";
 
 // ── network + the one gRPC client ─────────────────────────────────────────────
 export const FACILITATOR_NETWORK: Network = caip2(config.suiNetwork);
@@ -62,13 +63,6 @@ export const client = (): SuiGrpcClient => {
   if (!_client) _client = grpcClient(FACILITATOR_NETWORK);
   return _client;
 };
-
-/** The default output split for a PaymentRequirements with no explicit outputs:
- * a SINGLE output of the full amount to payTo (the free tier). */
-const defaultOutputs = (r: PaymentRequirements): Output[] =>
-  r.extra?.outputs && r.extra.outputs.length > 0
-    ? r.extra.outputs
-    : [{ to: r.payTo, amount: r.amount }];
 
 /** Shape guard for the inbound exact-Sui payload (both fields base64 strings). */
 const isExactPayload = (p: unknown): p is { signature: string; transaction: string } =>
@@ -132,7 +126,6 @@ export const doVerify = async (
   }
 
   const { signature, transaction } = payload.payload;
-  const outputs = defaultOutputs(requirements);
 
   try {
     // F3: POWER-door guard. The payer may have built its OWN PTB, so before the
@@ -142,6 +135,16 @@ export const doVerify = async (
     // through an unexpected path. Pure decode, no network. (The exact-fee check
     // below already binds every credit; this is defence-in-depth on the shape.)
     assertGaslessTxShape(transaction);
+
+    // FORCE THE FEE — Suize is NOT a free facilitator (owner law). The facilitator
+    // RECOMPUTES the canonical split from policy (outputsFor: the merchant's registry
+    // rate, else the default 2% with a $0.01 floor; a structural single output ONLY
+    // when payTo IS the treasury or a sub-unit amount), IGNORING whatever the merchant
+    // declared in requirements.extra.outputs. So a merchant cannot present fee-free
+    // terms and have us settle them — the payment must credit the treasury leg EXACTLY
+    // or verify rejects it (assertOutputsExact below). Fail-closed if `treasury@suize`
+    // is unresolved (outputsFor throws → the catch denies — never a silent free pass).
+    const outputs = await outputsFor(requirements.payTo, BigInt(requirements.amount));
 
     // REPLAY GUARD: simulation alone is NOT one for gasless Address-Balance txs (a
     // re-simulation of an already-settled gasless tx SUCCEEDS — no inputs consumed).

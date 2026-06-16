@@ -532,6 +532,7 @@ a {
   gap: 10px;
 }
 
+
 /* ==========================================================================
    CUSTOM CURSOR (fine pointers only) — a soft blue dot + lagging ring, ported
    from Crash. The OS cursor is hidden over the app; <CustomCursor> draws this.

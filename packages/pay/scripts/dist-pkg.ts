@@ -14,8 +14,8 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const dist = join(root, 'dist')
 
-if (!existsSync(join(dist, 'index.js')) || !existsSync(join(dist, 'subs.js'))) {
-  throw new Error('dist/index.js + dist/subs.js must exist — run tsup first (this script runs after it)')
+if (!existsSync(join(dist, 'index.js')) || !existsSync(join(dist, 'subs.js')) || !existsSync(join(dist, 'webhook.js'))) {
+  throw new Error('dist/index.js + dist/subs.js + dist/webhook.js must exist — run tsup first (this script runs after it)')
 }
 
 const src = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -31,6 +31,7 @@ const manifest = {
   exports: {
     '.': { types: './index.d.ts', import: './index.js' },
     './subs': { types: './subs.d.ts', import: './subs.js' },
+    './webhook': { types: './webhook.d.ts', import: './webhook.js' },
   },
   sideEffects: false,
   keywords: src.keywords,

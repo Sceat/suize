@@ -10,9 +10,10 @@ const Caret = () => (
   </span>
 )
 
-// The products mega-panel — the ADDITIONAL products only (Deploy + Crash). The
-// two audiences (Wallet/PAY · Charge/CHARGE) are the For users / For business
-// links, never repeated here. Order + membership come from NAV.products.routes.
+// The products mega-panel — the ADDITIONAL products only (Deploy · PolySui ·
+// Agents). The two audiences (Wallet/PAY · Charge/CHARGE) are the For users /
+// For business links, never repeated here. Each row is name + desc — no CHARGE
+// side-tag (it's jargon to a visitor). Order + membership: NAV.products.routes.
 const ProductsMenu = ({ onPick }) => {
   const rows = NAV.products.routes
     .map(r => PRODUCTS.find(p => p.id === r))
@@ -35,8 +36,6 @@ const ProductsMenu = ({ onPick }) => {
               <span className="sx-mega__name">{p.name}</span>
               <span className="sx-mega__desc">{p.desc}</span>
             </span>
-            <span className="sx-mega__lead" />
-            <span className="sx-mega__tag">{p.side}</span>
           </button>
         ))}
       </div>
@@ -157,8 +156,8 @@ export default function Nav() {
             {l.label}
           </a>
         ))}
-        {/* Products dropdown — the additional products only (Deploy + Crash).
-            Stays reachable in the retracted island (never folded away). */}
+        {/* Products dropdown — the additional products only (Deploy · PolySui ·
+            Agents). Stays reachable in the retracted island (never folded away). */}
         <span className="sx-products-wrap" ref={wrapRef}>
           <button
             type="button"

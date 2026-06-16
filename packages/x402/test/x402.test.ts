@@ -28,12 +28,15 @@ import {
   GASLESS_ALLOWED_TARGETS,
   OutputsError,
   normalizeBalanceChanges,
+  recoverPayer,
   // multisig sub-account
   formAgentSubaccount,
   deriveSubaccountAddress,
   combineForMultisig,
 } from '../src/index'
 import type { Output } from '../src/index'
+import { parseSerializedSignature } from '@mysten/sui/cryptography'
+import { MultiSigPublicKey } from '@mysten/sui/multisig'
 
 // ─── Fixture: a real testnet two-output send_funds tx (98% + 2% split) ────────
 // Captured author-time; the test never touches the network. Sender debited
@@ -449,5 +452,45 @@ describe('multisig agent sub-account', () => {
     // The OTHER member (B) signing alone also satisfies the 1-of-2 threshold.
     const bSig = (await B.signPersonalMessage(msg)).signature
     expect(await multisig.verifyPersonalMessage(msg, combineForMultisig(multisig, bSig))).toBe(true)
+  })
+})
+
+// ─── REGRESSION: recoverPayer on a real multisig-wrapping-zkLogin signature ───
+// The 2026-06-15 demo blocker: the Suize-door agent pays from its sub-account, a
+// 1-of-2 multisig of TWO zkLogin members. The OLD recoverPayer called
+// verifyTransactionSignature(), whose zkLogin-TRANSACTION path is a stub that
+// throws "does not support" — so the agent could never deploy. The fix derives the
+// payer ADDRESS structurally (no proof check; SETTLE is the validity gate). This
+// fixture is a REAL testnet multisig+zkLogin signature (flag 0x03) captured from
+// the sub-account's own gasless payment — an Ed25519 multisig would NOT reproduce
+// the bug (it verifies offline), so the regression MUST use zkLogin members.
+describe('recoverPayer — multisig+zkLogin (the demo-blocker regression)', () => {
+  // tx 5Q5vmz4kfRwJUpG1TXqySGWewoVNFBFQcSkPYBKrgcP, sender = the sub-account below.
+  const REAL_MULTISIG_ZKLOGIN_SIG =
+    'AwEDzgcFA0w2MDgyOTMzNzkxMjQxNzMxODk2NDc4MjM3MzkwNDEwOTQ3MDQwNDAwNjM3MDg4Mzk2NDMzOTkyNzk3MzIyNzE3MTQ0ODcxOTA2NDEyTTEwNjMzMDUzMDY1NzgyNjg2NTA3Nzk0MTE4NTY4NTI3MjM3Njc4MDMwNTg3MTE1ODYyNzMwMDczMDg2NTM1ODczNzc3NzI0NTc5ODk3ATEDAk0xNjA0NjE4NTIzOTkxOTM0NTE3Mjk4OTI0MDgyMjI2MjM1NTk3MjM0NzExNTU3MDEyOTM4MjM2MzE4NzE4NjU3Mzg1ODI3NjI3ODIwOU0xMTA0MTU2MzAzMjI0Njg5MTc2MDExMDczNTMzOTEwNjQwNTE1MTcxMzA0MDg5NzQ5ODE4NTEyMjMwMTUyNjYwMzE2ODE3NDg3Mjg1MwJMOTQ4NzMzNzQ3OTk4MTU5NzQ3MjcyMjY4NDY4Mzk4MzA3OTc2MjA1MzY0NDM4NTEwNTQ4MzQ0NTU1MTMzNjIyMDMwMTQ5ODgzNDM4Mkw3Mjg1ODc2NTU5NzkwMzczNTA1NTQwMDA0MzY2NDIwODk1MTUwMDcyNzk4MTkxMTg5ODg4NTIxNDcyODE1NDk4NjM4NTExMjUzMDAwAgExATADTTE0Mjc4MTM0NzAxMzQzMDMxNTEwMzE4MzU5NzIzNjc5NDAwMzYwMjgzMjM1NTI0NzgyNTE2NjEzMTIxNjM2NDgwNDE2NjgyMzM3OTcxTTEyMTIzNDAwMjY0MzI3MTg1MTAzOTI0MzEyOTQ1NTEwNTg0NzQ0OTI5NDE5MDU2NzIyMTkwMDk4MDc1NzU2OTA1NTgyMjE1MDQzNDQwATExeUpwYzNNaU9pSm9kSFJ3Y3pvdkwyRmpZMjkxYm5SekxtZHZiMmRzWlM1amIyMGlMQwFmZXlKaGJHY2lPaUpTVXpJMU5pSXNJbXRwWkNJNklqTXdNelZpWWpnMlpEazVaakl5WlRZeE16UTJOMkUyTmpnd09ESTFaV1ZpTUdRNE1UTTVZVElpTENKMGVYQWlPaUpLVjFRaWZRTTE0NDI3ODQyMjIyODU0MDg2MTU5NjEzMjU1NjU0NDg0Njk5MTI3MzgwNDk0OTIwNzYzNDA3ODUwNjc0MTAyNjYwODU3NTE3NjEwNDE5bQQAAAAAAABhAG6tHhWPH9lqfK4JCtqsHZobueKK+ZhX+J2fu+JcdPhMg8KhZx2C3rWN+gLJ2/w+1lO9RoI8fSCLjnAzmCLYUgWZ0h9dHOtc9483NUX9SQmg3yx23uR3fltGtIwFUfCuYQEAAgM8G2h0dHBzOi8vYWNjb3VudHMuZ29vZ2xlLmNvbR/l3oskPp9W67V7X5RwglkFEe+qVZvO7MCPfTHcNJWzAQM8G2h0dHBzOi8vYWNjb3VudHMuZ29vZ2xlLmNvbSxP4GziaguCiyiy3k1se5GcPbx5tGmk5Y4ifh9FqHQXAQEA'
+  const SUBACCOUNT = '0x0ab04ca6fa82ac54e4292bfd5a8cba4cc8631a877689df00fb2b7bcd40900301'
+  // The 1-of-2 committee members (both zkLogin) — the deploy dashboard's human↔agent link.
+  const MEMBERS = [
+    '0x069714573a14732decc49c7b4832a34cdfdf34308177dacc32303b4277c35855',
+    '0xca138e3043409d3035dbbe1d2ef8b8ac01e6b3dfb83ecdc553ec3088f88f9c0a',
+  ]
+
+  test('derives the sub-account address — never throws "does not support"', async () => {
+    // recoverPayer ignores the bytes on the MultiSig branch, so a placeholder is fine.
+    const payer = await recoverPayer('AA==', REAL_MULTISIG_ZKLOGIN_SIG)
+    expect(payer).toBe(SUBACCOUNT)
+  })
+
+  test('the multisig committee IS the on-chain human↔agent link (structural, no GraphQL)', () => {
+    // The exact primitive apps/deploy fetch_my_sites uses to recognize "my agent's
+    // sites": parse the committee from the signature, derive each member's address.
+    const parsed = parseSerializedSignature(REAL_MULTISIG_ZKLOGIN_SIG)
+    expect(parsed.signatureScheme).toBe('MultiSig')
+    const mpk = new MultiSigPublicKey(
+      (parsed as { multisig: { multisig_pk: ConstructorParameters<typeof MultiSigPublicKey>[0] } }).multisig.multisig_pk,
+    )
+    expect(mpk.toSuiAddress()).toBe(SUBACCOUNT)
+    const addrs = mpk.getPublicKeys().map((m) => m.publicKey.toSuiAddress()).sort()
+    expect(addrs).toEqual([...MEMBERS].sort())
   })
 })

@@ -15,6 +15,9 @@
 
 import { Transaction } from '@mysten/sui/transactions'
 import { verifyTransactionSignature } from '@mysten/sui/verify'
+import { parseSerializedSignature } from '@mysten/sui/cryptography'
+import { MultiSigPublicKey } from '@mysten/sui/multisig'
+import { ZkLoginPublicIdentifier } from '@mysten/sui/zklogin'
 import { fromBase64, normalizeStructTag } from '@mysten/sui/utils'
 import type { SuiGrpcClient } from '@mysten/sui/grpc'
 import type { Output } from './types'
@@ -77,8 +80,39 @@ export function gaslessShapeProblem(data: ReturnType<Transaction['getData']>): s
   return ''
 }
 
-/** Recover the payer address from a signed tx (the signature-verification step). */
+/**
+ * Derive the payer address from a signed deploy/charge payment — the on-chain `owner`
+ * (whoever pays, owns) and the no-proxy-debit cross-check (recovered == simulated sender).
+ *
+ * THE SDK CONSTRAINT (verified against @mysten/sui 2.17.0): a **zkLogin TRANSACTION**
+ * signature can NOT be verified by the SDK at all — `ZkLoginPublicIdentifier.verify`
+ * (the transaction path) is a stub that throws "does not support"; only PERSONAL-MESSAGE
+ * verification has the GraphQL/JWK path. A **multisig wrapping a zkLogin member** (the
+ * Suize MCP sub-account, 1-of-2 {MAIN, AGENT}) hits the same wall, because
+ * `MultiSigPublicKey.verify` delegates to each member's `verify`. A zkLogin proof is only
+ * checkable against the live JWK/epoch — which the CHAIN does, at SETTLE (broadcast). So:
+ *
+ *   - Ed25519 / Secp256k1 / Secp256r1 / Passkey (a Sui-aware agent's own key): verified
+ *     OFFLINE here — a forged single-key signature is rejected at /verify.
+ *   - MultiSig / ZkLogin: the payer ADDRESS is derived STRUCTURALLY from the signature's
+ *     committee / identifier (no proof check); the signature's VALIDITY is gated by
+ *     SETTLE. The deploy settles BEFORE the Walrus write + the on-chain mint, so a forged
+ *     zkLogin proof aborts at broadcast → nothing minted, nothing moved. The
+ *     recovered-address == simulated-sender check still binds the structural address to
+ *     the address the tx actually debits.
+ *
+ * Caveat: a merchant that serves BEFORE settling can't cryptographically pre-verify a
+ * zkLogin/multisig payer (the SDK offers no path) — validity lands at settle. The deploy
+ * flow and the facilitator's own settle are the gate.
+ */
 export async function recoverPayer(txBytesB64: string, signatureB64: string): Promise<string> {
+  const parsed = parseSerializedSignature(signatureB64)
+  if (parsed.signatureScheme === 'MultiSig') {
+    return new MultiSigPublicKey(parsed.multisig.multisig_pk).toSuiAddress()
+  }
+  if (parsed.signatureScheme === 'ZkLogin') {
+    return new ZkLoginPublicIdentifier(parsed.publicKey).toSuiAddress()
+  }
   const pk = await verifyTransactionSignature(fromBase64(txBytesB64), signatureB64)
   return pk.toSuiAddress()
 }

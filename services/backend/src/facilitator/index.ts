@@ -5,8 +5,9 @@
 // facilitator VERIFIES the signed-but-not-executed tx pays that split EXACTLY
 // (simulate + assertOutputsExact), then SETTLES by broadcasting it over gRPC — no
 // Enoki, no sponsor, no owner-tx signing. The 2% (+ $0.01 floor) lives in
-// extra.outputs (merchant-absorbed), facilitator-enforced; a single-output payment
-// (merchant not in the registry) is the FREE tier.
+// extra.outputs (merchant-absorbed), facilitator-enforced. NO free tier (owner law
+// 2026-06-14) — EVERY merchant pays (an unregistered one pays the default 2%); the only
+// single-output case is structural (merchant==treasury, or a sub-unit amount).
 //
 //   POST /verify  { x402Version, paymentPayload, paymentRequirements }
 //     → 200 VerifyResponse { isValid, payer } | { isValid:false, invalidReason, invalidMessage }
@@ -17,26 +18,22 @@
 //                       extensions:['payment-identifier'], signers:{'sui:*':[]} }
 //   POST /build   { sender, outputs? | requirements? } → { bytes } (unsigned gasless,
 //       THE PROBE RECIPE — the payer signs LOCALLY + runs assertUnsignedBytesSafe).
-//   GET  /terms?payTo&amount → { outputs|null, feeBps } — the declared split a
-//       merchant puts in its 402 (null = free tier, a single full-amount output).
+//   GET  /terms?payTo&amount → { outputs, feeBps } — the [merchant net, treasury fee]
+//       split EVERY merchant puts in its 402 (no free tier; 503 if treasury unresolved).
 //   GET  /tx?digest → a DESCRIPTIVE audit: { success, payer, transfers, coinType }
 //       from ONE getTransaction read of balanceChanges — never trusted, checkable.
-//   POST /checkout — KEPT VERBATIM from the prior build (the no-auth pay-link
-//       URL formatter, SPEC §7.3; pure string assembly, no store, no chain).
 //
 // HOSTING SHELL kept exactly: two per-IP token buckets (WRITE vs VERIFY), validate
 // BEFORE taking a token, json/getIp from http.ts, Retry-After on 429, boot log.
-// The 503 gates are now treasury-resolution readiness for FEE-TIER paths only —
-// free-tier verify/settle/build must work regardless of treasury state.
+// The 503 gates are treasury-resolution readiness for the SPLIT-MINTING paths (/terms,
+// /build). verify/settle now ENFORCE the fee too: they RECOMPUTE the canonical split
+// (outputsFor) and ignore the payer's declared outputs, so a fee-free payment is rejected
+// — Suize is not a free facilitator (no free tier). That makes verify treasury-dependent:
+// an unresolved treasury fails the payment closed (deny), never a silent free pass.
 import type { Server } from "bun";
-import { randomBytes } from "node:crypto";
 import {
-  caip2,
   SUI_ADDRESS_RE,
   USDC_DECIMAL_RE,
-  MAX_MEMO_LEN,
-  type FacilitatorCheckoutRequest,
-  type FacilitatorCheckoutResponse,
 } from "@suize/shared";
 import {
   usdcAtomic,
@@ -70,8 +67,8 @@ const parseAmount = (s: string): bigint | null => {
 // ---------------------------------------------------------------------------
 // Per-IP token buckets — the facilitator's OWN limiter. TWO buckets by cost.
 // A null IP FAILS CLOSED on both (per http.ts getIp). Kept exactly as before.
-//   WRITE bucket (/settle + /build + /checkout): each is real work (a broadcast,
-//   a build, a link mint) — TIGHT.
+//   WRITE bucket (/settle + /build): each is real work (a broadcast,
+//   a build) — TIGHT.
 //   READ bucket (/verify + /terms + /tx + /supported): cheaper, higher-volume
 //   simulate/read amplifiers — SEPARATE + LOOSER so legit polling never trips.
 // ---------------------------------------------------------------------------
@@ -196,8 +193,10 @@ const handleSettle = async (
 
 // ---------------------------------------------------------------------------
 // GET /terms?payTo&amount — the declared split a merchant drops into its 402.
-// READ-tier. Returns { outputs: Output[] | null, feeBps } — null = free tier
-// (the merchant declares a single full-amount output to payTo).
+// READ-tier. Returns { outputs: Output[], feeBps } — the [merchant net, treasury fee]
+// split EVERY merchant gets (NO free tier; the only single-output case is structural —
+// a first-party merchant==treasury, or a sub-unit amount). 503 if treasury@suize is
+// unresolved (a fee with no recipient would burn the rake).
 // ---------------------------------------------------------------------------
 
 const handleTerms = async (
@@ -317,9 +316,30 @@ const handleBuild = async (
     });
     return json({ bytes }, 200, origin);
   } catch (e) {
-    console.error("[facilitator/build]", (e as Error).message);
-    // A build failure is most often "sender holds no USDC for this amount" — 402.
-    return err(`build failed: ${(e as Error).message}`.slice(0, 200), 502, origin);
+    const msg = (e as Error).message ?? "";
+    console.error("[facilitator/build]", msg);
+    // A build/dry-run failure here is a PAYER-SIDE condition — the paying address
+    // can't fund the declared split (no/too little USDC of the asset), or the built
+    // tx doesn't pay it exactly — NOT a facilitator fault. Answer 402, never 5xx: a
+    // 5xx is stripped of its body AND its CORS headers by the CDN, so the browser
+    // sees only an opaque "failed to fetch" and the cause reads as a network blip.
+    // A 402 carries the readable reason through (CORS intact) so the payer learns to
+    // fund the address. (OutputsError.code is set by @suize/x402's exact-fee gate.)
+    const code = (e as { code?: string }).code;
+    const payerError =
+      /insufficient balance/i.test(msg) ||
+      code === "invalid_exact_sui_payload_transaction_dry_run_failed" ||
+      code === "invalid_exact_sui_payload_outputs_mismatch";
+    if (payerError) {
+      const need = formatUsdc(resolved.outputs.reduce((s, o) => s + BigInt(o.amount), 0n));
+      return err(
+        `the paying address can't cover this payment (needs ${need} USDC of the requested asset) — add funds and retry`,
+        402,
+        origin,
+      );
+    }
+    // Genuine facilitator fault (RPC unreachable, undecodable build) — keep 5xx.
+    return err(`build failed: ${msg}`.slice(0, 200), 502, origin);
   }
 };
 
@@ -371,70 +391,6 @@ const handleTx = async (
 };
 
 // ---------------------------------------------------------------------------
-// POST /checkout — the OPTIONAL no-auth URL FORMATTER (SPEC §7.3). KEPT VERBATIM
-// from the prior build: pure string assembly of the hosted pay-page URL, no
-// store, no session, no chain. Validation runs BEFORE the rate token.
-// ---------------------------------------------------------------------------
-
-const MAX_RETURN_URL_LEN = 2048;
-const HANDLE_RE = /^[a-z0-9][a-z0-9-]{1,18}[a-z0-9](@suize|\.suize\.sui)?$/;
-const mintPaymentId = (): string => `pay_${randomBytes(16).toString("hex")}`;
-
-const handleCheckout = async (
-  req: Request,
-  origin: string | null,
-  server?: Server<unknown>,
-): Promise<Response> => {
-  const body = (await readBody(req)) as Partial<FacilitatorCheckoutRequest> | null;
-  if (!body) return err("invalid JSON body", 400, origin);
-
-  const payTo = typeof body.payTo === "string" ? body.payTo.trim() : "";
-  const amountRaw = typeof body.amount === "string" ? body.amount.trim() : "";
-  const memo = typeof body.memo === "string" ? body.memo : "";
-  const returnUrlRaw = typeof body.returnUrl === "string" ? body.returnUrl.trim() : "";
-  const handle = typeof body.handle === "string" ? body.handle.trim() : "";
-
-  if (!SUI_ADDRESS_RE.test(payTo)) {
-    return err("missing or malformed payTo (0x…64-hex Sui address)", 400, origin);
-  }
-  if (handle && !HANDLE_RE.test(handle)) {
-    return err("malformed handle (a Suize handle like name@suize)", 400, origin);
-  }
-  if (parseAmount(amountRaw) === null) {
-    return err("missing or malformed amount (positive decimal USDC, ≤ 6 dp)", 400, origin);
-  }
-  if (memo.length > MAX_MEMO_LEN) {
-    return err(`oversized memo (max ${MAX_MEMO_LEN} chars)`, 400, origin);
-  }
-  let returnUrl = "";
-  if (returnUrlRaw) {
-    if (returnUrlRaw.length > MAX_RETURN_URL_LEN) {
-      return err(`oversized returnUrl (max ${MAX_RETURN_URL_LEN} chars)`, 400, origin);
-    }
-    try {
-      const u = new URL(returnUrlRaw);
-      if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("scheme");
-      returnUrl = u.toString();
-    } catch {
-      return err("malformed returnUrl (absolute http/https URL)", 400, origin);
-    }
-  }
-
-  if (!takeWriteToken(getIp(req, server))) return rateLimited(origin, WRITE_REFILL_PER_SEC);
-
-  const paymentId = memo || mintPaymentId();
-  const params = new URLSearchParams({ payTo, amount: amountRaw, memo: paymentId });
-  if (handle) params.set("to", handle);
-  if (returnUrl) params.set("returnUrl", returnUrl);
-
-  const responseBody: FacilitatorCheckoutResponse = {
-    sessionUrl: `${config.payPageUrl}?${params.toString()}`,
-    paymentId,
-  };
-  return json(responseBody, 200, origin);
-};
-
-// ---------------------------------------------------------------------------
 // Route matcher — same shape as the mcp/deploy modules: first non-null wins.
 // ---------------------------------------------------------------------------
 
@@ -450,18 +406,16 @@ export const handleFacilitatorRoute = (
   if (req.method === "GET" && url.pathname === "/terms") return handleTerms(req, url, origin, server);
   if (req.method === "POST" && url.pathname === "/build") return handleBuild(req, origin, server);
   if (req.method === "GET" && url.pathname === "/tx") return handleTx(req, url, origin, server);
-  if (req.method === "POST" && url.pathname === "/checkout") return handleCheckout(req, origin, server);
   return null;
 };
 
 /** Boot-log surface (mirrors mcpInfo/deployInfo). */
 export const facilitatorInfo = {
   network: FACILITATOR_NETWORK,
-  routes: ["POST /verify", "POST /settle", "GET /supported", "POST /build", "GET /terms", "GET /tx", "POST /checkout"],
+  routes: ["POST /verify", "POST /settle", "GET /supported", "POST /build", "GET /terms", "GET /tx"],
   scheme: "exact",
   merchantCount: feesInfo.merchantCount,
   treasuryName: feesInfo.treasuryName,
-  payPageUrl: config.payPageUrl,
 } as const;
 
 // Re-exported so the /ready probe + boot log can report fee-tier readiness without

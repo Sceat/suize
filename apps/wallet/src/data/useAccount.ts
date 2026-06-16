@@ -699,6 +699,19 @@ export function useAccount(ownerAddress?: string | null, handle?: string): PayAp
     [owner, sendGasless],
   );
 
+  // ── signBytesAsSubaccount — sign EXACT, off-wallet-built gasless bytes AS the
+  // sub-account multisig (MAIN member signs alone, combined; threshold 1). The agent's
+  // x402 spend signer for flows whose payment bytes are built off-wallet (Deploy's
+  // facilitator `/build`) with SENDER = the sub-account. Mirrors the `combine` leg of
+  // sendGasless; the caller has already proven the bytes safe + gasless + exact. ──
+  const signBytesAsSubaccount = useCallback(
+    async (multisig: MultiSigPublicKey, bytes: string): Promise<{ signature: string }> => {
+      const { signature } = await signTransaction({ transaction: bytes });
+      return { signature: combineForMultisig(multisig, signature) };
+    },
+    [signTransaction],
+  );
+
   // ── cancelSubscription — `subs::subscription::cancel` (sponsored). ──
   const cancelSubscription = useCallback(
     async (subId: string): Promise<string> => {
@@ -731,6 +744,7 @@ export function useAccount(ownerAddress?: string | null, handle?: string): PayAp
     pending,
     sendWallet,
     spendFromSubaccount,
+    signBytesAsSubaccount,
     cancelSubscription,
     refresh,
   };

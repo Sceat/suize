@@ -1,6 +1,6 @@
 {
   "name": "@suize/backend",
-  "version": "0.2.19",
+  "version": "0.2.37",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "deploy-as-agent": "bun run scripts/deploy-as-agent.ts",
     "subs:sync-config": "bun run scripts/sync-subs-config.ts",
+    "auction:sync-config": "bun run scripts/sync-auction-config.ts",
     "check:arity": "bun run scripts/check-ptb-arity.ts",
     "push": "bash scripts/push.sh",
     "push:patch": "bash scripts/push.sh patch",
@@ -17,7 +18,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
+    "@mysten-incubation/memwal": "^0.0.7",
     "@mysten/enoki": "^1.0.8",
+    "@mysten/seal": "^1.1.3",
     "@mysten/sui": "^2.17.0",
     "@mysten/suins": "^1.1.4",
     "@suize/pay": "workspace:*",

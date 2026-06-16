@@ -37,16 +37,18 @@ WALRUS_AGGREGATOR = "https://aggregator.walrus-testnet.walrus.space"
 # falls back to "suize.site" when unset, so the existing deploy is unchanged.
 BASE_DOMAIN = "suize.site"
 
-# The `deploy_sui` v2 Move package id (testnet republish 2026-06-10 — the v1
-# 0xadcc8d… publish is abandoned; its sites/domains are orphaned). Currently
-# unused at runtime by the worker (it reads the shared `Site`/`DomainRegistry`
-# objects by id), but kept here so the operator records the published id alongside
-# the other deploy config and a future type-checked resolve can use it.
-DEPLOY_PACKAGE_ID = "0x9a769a50014208e54c9deb446fd694e54e0d3000fd7d4ceebe5391df01a90ad4"
+# The `deploy_sui` Move package id (testnet republish 2026-06-14 `6kAxGVLn…` — adds
+# the DeployerCap mint gate; prior publishes are abandoned, their sites/domains
+# orphaned). MUST match @suize/shared `DEPLOY_PACKAGE`. Currently unused at runtime
+# by the worker (it reads the shared `Site`/`DomainRegistry` objects by id), but kept
+# here so the operator records the published id and a future type-checked resolve can use it.
+DEPLOY_PACKAGE_ID = "0x5cbf0ce0a2f56128ef0d7679aab8f3a8ba690533163dc2524754fd40f27faf0b"
 
-# The shared `DomainRegistry` object id (created at the v2 publish init). Required
-# for custom-domain resolution; subdomain serving works without it.
-DOMAIN_REGISTRY_ID = "0x7e7fe6245aed8ed86b81bb0c793de06639a2eb595fbe17700f5be6599151041e"
+# The shared `DomainRegistry` object id (created at the publish init). MUST match
+# @suize/shared `DEPLOY_DOMAIN_REGISTRY_OBJECT` — a fresh publish mints a NEW registry,
+# so this is repinned at every republish. Required for custom-domain resolution;
+# subdomain serving works without it.
+DOMAIN_REGISTRY_ID = "0xec0565e9c27ab340595a26b8b823ed681e36616f32ebf4aba20a0193574d4c08"
 
 # Durable global blob cache (edge cache → R2 → aggregator; see src/index.ts).
 # Keys are content sha256 (verified on every fill) so the bucket can never serve

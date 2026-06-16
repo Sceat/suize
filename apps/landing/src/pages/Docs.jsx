@@ -6,8 +6,8 @@ import '../docs.css'
 
 // ============================================================================
 // #/docs — HOW SUIZE WORKS. The demoable VISUAL explainer (docs + quickstart
-// MERGED): the four-tier merchant onboarding ladder (Tier 3 = the one-liner
-// snippet + the animated 402 loop), the three doors onto the rail, the
+// MERGED): the two-tier merchant onboarding ladder (Tier 2 = the one-liner
+// snippet + the animated 402 loop), the two doors onto the rail, the
 // consumer controls, the MCP quickstart, and the two-door close. Copy lives
 // in DOCS (config.js — LOCKED #14, never hardcode here).
 //
@@ -189,6 +189,19 @@ function Tier({ t, labels }) {
           <p className="dxd-tier__v">{t.paid}</p>
         </div>
       </div>
+      {/* Tier 1's language-agnostic example — a bordered ink panel (NOT a nested
+          glass card), proving the Suize-specific step is one HTTP POST. */}
+      {t.example && (
+        <div className="dxd-tier__example">
+          <div className="dxd-tier__example-head">
+            <span className="dxd-code__file">{t.example.file}</span>
+            <CopyButton value={t.example.code} label="Copy the example" />
+          </div>
+          <pre className="dxd-code__pre">
+            <code>{t.example.code}</code>
+          </pre>
+        </div>
+      )}
       {t.note && <p className="dxd-tier__note">{t.note}</p>}
       {t.demo && <LoopDemo />}
     </Reveal>
@@ -202,6 +215,16 @@ function MerchantLadder() {
       <div className="sx-wrap">
         <Marker no="//01" label={m.marker} />
         <SectionHead eyebrow={m.eyebrow} head={m.head} sub={m.sub} />
+
+        {/* the premise — nothing to sign up for — before the rungs */}
+        {m.premise && (
+          <Reveal className="dxd-premise" lines>
+            <span className="dxd-premise__kicker">{m.premise.kicker}</span>
+            <h3 className="dxd-premise__statement">{m.premise.statement}</h3>
+            <p className="dxd-premise__body">{m.premise.body}</p>
+            <p className="dxd-premise__ledger">{m.premise.ledger.join('   ·   ')}</p>
+          </Reveal>
+        )}
 
         <div className="dxd-ladder">
           {m.tiers.map(t => (
@@ -219,10 +242,14 @@ function MerchantLadder() {
   )
 }
 
-// ---- SECTION 2 · THREE WAYS AN AGENT PAYS ------------------------------------
+// ---- SECTION 2 · TWO DOORS ONTO THE RAIL -------------------------------------
+// The two canonical payer doors (CLAUDE.md, owner-locked): the agent has its
+// OWN Sui key (it signs — Suize builds the tx or it builds its own), or it
+// borrows one from Suize via the MCP wallet. Section 4 below is that MCP door's
+// setup detail, not a third door.
 // Small inline flow glyphs — line-art strokes, currentColor, no diode dots.
 const GLYPHS = {
-  // it signs (a signature stroke), Suize carries it to the chain
+  // door 1 — its own key: a signature stroke Suize carries to the chain
   sign: (
     <svg viewBox="0 0 48 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M3 16c3-7 6-7 7 0s4 7 6 0" />
@@ -230,22 +257,13 @@ const GLYPHS = {
       <path d="M35 7l5 5-5 5" />
     </svg>
   ),
-  // it pays directly — one straight shot onto the rail
-  direct: (
+  // door 2 — it borrows a key from Suize (the MCP wallet)
+  key: (
     <svg viewBox="0 0 48 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 12h34" />
-      <path d="M33 7l5 5-5 5" />
-      <path d="M44 5v14" />
-    </svg>
-  ),
-  // it asks its human — the link forks to a tap that settles it
-  human: (
-    <svg viewBox="0 0 48 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 12h12" />
-      <path d="M16 12c6 0 6-7 12-7" />
-      <path d="M16 12c6 0 6 7 12 7h6" />
-      <path d="M30 5h6" />
-      <path d="M40 16l3 3 5-7" />
+      <circle cx="9" cy="12" r="6" />
+      <path d="M15 12h29" />
+      <path d="M38 12v6" />
+      <path d="M44 12v4" />
     </svg>
   ),
 }

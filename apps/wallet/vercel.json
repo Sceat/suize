@@ -3,28 +3,12 @@
   "buildCommand": "bun run build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "redirects": [
-    { "source": "/pay/:path*", "destination": "https://pay.suize.io/:path*", "permanent": false }
-  ],
   "rewrites": [
-    { "source": "/bridge", "destination": "/bridge.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
     {
-      "source": "/bridge",
-      "headers": [
-        { "key": "Content-Security-Policy", "value": "frame-ancestors 'self' https://pay.suize.io https://deploy.suize.io https://crash.suize.io" }
-      ]
-    },
-    {
-      "source": "/bridge.html",
-      "headers": [
-        { "key": "Content-Security-Policy", "value": "frame-ancestors 'self' https://pay.suize.io https://deploy.suize.io https://crash.suize.io" }
-      ]
-    },
-    {
-      "source": "/confirm",
+      "source": "/confirm-subscribe",
       "headers": [
         { "key": "Content-Security-Policy", "value": "frame-ancestors 'none'" },
         { "key": "X-Frame-Options", "value": "DENY" }

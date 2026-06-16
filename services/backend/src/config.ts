@@ -25,19 +25,16 @@ const suiRpcUrls: string[] = (() => {
 // Defaults cover ALL apps:
 //   - Crash:  https://crash.suize.io  + http://localhost:5173
 //   - Wallet: https://wallet.suize.io + http://localhost:5180
-//   - Pay:    https://pay.suize.io (the STANDALONE hosted pay page, apps/pay —
-//             identity via the wallet-origin SSO bridge; calls the x402 V2
-//             facilitator /terms·/build·/settle). Dev pay app: http://localhost:5173
-//             (the SAME entry as crash dev — they share the port, never run both).
 //   - Deploy: https://deploy.suize.io + http://localhost:5183
 //   - Landing/redirect: https://suize.io
 // Override via ALLOWED_ORIGINS (comma-separated) in prod/k8s — and keep
 // https://wallet.suize.io in that override or the deployed wallet WS gets 403'd.
 const DEFAULT_ALLOWED_ORIGINS = [
+  "https://polysui.suize.io",
   "https://crash.suize.io",
   "https://wallet.suize.io",
-  "https://pay.suize.io",
   "https://deploy.suize.io",
+  "https://agents.suize.io",
   "https://suize.io",
   "http://localhost:5173",
   "http://localhost:5180",
@@ -81,14 +78,6 @@ export const config = {
   // src/facilitator/fees.ts); a malformed entry is skipped loudly, never fatal.
   suizeMerchants: process.env.SUIZE_MERCHANTS,
 
-  // --- facilitator: the hosted pay page (apps/pay) ---
-  // Base URL POST /checkout (and the deploy 402 challenge) assembles pay-links
-  // against (SPEC §7.3 — pure string assembly, no store). The page is the
-  // STANDALONE pay origin (pay.suize.io, live since 2026-06-11); the query is
-  // appended directly: <base>?payTo=…. Override for dev/preview
-  // (PAY_PAGE_URL=http://localhost:5173). Trailing slashes stripped.
-  payPageUrl: (process.env.PAY_PAGE_URL ?? "https://pay.suize.io").replace(/\/+$/, ""),
-
   // --- handle (self-custody SuiNS) module ---
   // Handle issuance is now FULLY ON-CHAIN — no Redis. The module is ENABLED only
   // when all three knobs below are set; otherwise every /handle/* op returns a
@@ -97,6 +86,13 @@ export const config = {
   suinsParentNftId: process.env.SUINS_PARENT_NFT_ID,         // parent `suize.sui` SuinsRegistration object id
   handleIssuerKey: process.env.HANDLE_ISSUER_PRIVATE_KEY,    // secret — env only; signs leaf-subname mints (parent-NFT holder)
   suinsParentDomain: process.env.SUINS_PARENT_DOMAIN ?? "suize.sui",
+
+  // --- charge module (the no-code hosted merchant door) ---
+  // ONE Ed25519 key (separate secret — never reuse). Signs the stateless charge
+  // token (`api.suize.io/charge/<token>`, facilitator-verified) AND the settled-order
+  // webhook (merchant-verified via @suize/pay verifyWebhook). Public key published at
+  // GET /charge/pubkey. Unset → the /charge door answers 503 (the rest boots fine).
+  chargeKey: process.env.SUIZE_CHARGE_PRIVATE_KEY, // secret — bech32 `suiprivkey…`
 
   // --- deploy module (Suize Deploy — "Vercel for Sui") ---
   // The deploy module orchestrates: unpack a posted tar → Walrus quilt upload →
@@ -171,4 +167,18 @@ export const config = {
   brainDailyTokenMax: Number(process.env.BRAIN_DAILY_TOKEN_MAX ?? 60_000),
   // Hard ceiling on one turn's output so a single prompt can't burn the budget.
   brainMaxOutputTokens: Number(process.env.BRAIN_MAX_OUTPUT_TOKENS ?? 1_024),
+
+  // --- memory (MemWal — Walrus's agent-memory SDK; the brain's "it remembers you") ---
+  // The brain recalls + stores the user's memory via MemWal (default mode). The
+  // per-user delegate key is DERIVED (HKDF) from this ONE master secret — no per-user
+  // secret store (stateless / chain-derivable, fits our laws). DEFAULT MODE: the MemWal
+  // relayer does embed+Seal+Walrus and SEES PLAINTEXT in transit (owner-accepted
+  // 2026-06-14; the manual / self-hosted-embedder upgrade = relayer-sees-only-ciphertext
+  // is the documented improve-later). Memory is BEST-EFFORT (never blocks a payment).
+  // ENABLED only when MEMWAL_MASTER_KEY + the contract ids are all set; OFF otherwise.
+  memwalMasterKey: process.env.MEMWAL_MASTER_KEY, // secret — env only; the HKDF root for every user's delegate key
+  memwalRelayerUrl: (process.env.MEMWAL_RELAYER_URL ?? "https://relayer.memwal.ai").replace(/\/+$/, ""),
+  memwalPackageId: process.env.MEMWAL_PACKAGE_ID, // the MemWal contract package id (fill per network from the MemWal docs)
+  memwalRegistryId: process.env.MEMWAL_REGISTRY_ID, // the AccountRegistry shared object id (for createAccount)
+  memwalNamespace: process.env.MEMWAL_NAMESPACE ?? "suize",
 } as const;

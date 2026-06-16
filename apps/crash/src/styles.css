@@ -730,3 +730,120 @@ input {
   background: rgba(30, 127, 214, 0.12);
   border-color: var(--blue);
 }
+
+/* ============================================================================
+   PREMIUM SURFACE / TEXTURE SYSTEM (polysui-premium-design, 2026-06-14).
+   Appended on purpose: later :root blocks ADD the new tokens; the dark re-casts
+   override the flat-slab values above with veil-over-navy elevation (the #1 fix
+   for the "lazy/cheap" dark theme). Family tokens (--paper/--ink/--blue/fonts)
+   are untouched. Surfaces consume the veil + top-light tokens; ambient layers
+   mount once in the shell. This is what separates editorial from boxed-UI.
+   ========================================================================== */
+:root {
+  --veil-1: rgba(10, 27, 46, 0.015);
+  --veil-2: rgba(10, 27, 46, 0.03);
+  --veil-3: rgba(10, 27, 46, 0.05);
+  --top-light: inset 0 1px 0 rgba(255, 255, 255, 0.7); /* lit edge, not a shadow */
+  --grain-opacity: 0.04;
+  --grid-line: rgba(10, 27, 46, 0.03);
+  --floor-glow: radial-gradient(900px 320px at 50% 100%, var(--blue-wash), transparent 70%);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur: 200ms;
+}
+:root[data-theme='dark'] {
+  --veil-1: rgba(234, 241, 250, 0.02);
+  --veil-2: rgba(234, 241, 250, 0.035);
+  --veil-3: rgba(234, 241, 250, 0.06);
+  --top-light: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --grain-opacity: 0.05;
+  --grid-line: rgba(234, 241, 250, 0.035);
+  --floor-glow: radial-gradient(900px 320px at 50% 100%, rgba(234, 241, 250, 0.04), transparent 70%);
+  /* re-cast raised tokens as veils, not solid slabs — the cure for the flat dark */
+  --card: #0e1828;
+  --paper-3: rgba(234, 241, 250, 0.03);
+  --hair: rgba(234, 241, 250, 0.1);
+  --hair-strong: rgba(234, 241, 250, 0.22);
+}
+
+/* the universal raised surface — replaces solid card fills (lifts by light) */
+.surface {
+  background: linear-gradient(180deg, var(--veil-2), var(--veil-1)), var(--paper);
+  border: 1px solid var(--hair);
+  box-shadow: var(--top-light);
+  border-radius: 10px;
+}
+/* hero surface: + a directional accent bloom (generalised from .hs-vault) */
+.surface-mesh {
+  background:
+    radial-gradient(130% 150% at 85% -20%, var(--blue-wash), transparent 55%),
+    linear-gradient(180deg, var(--veil-2), var(--veil-1)), var(--paper);
+  border: 1px solid var(--hair);
+  box-shadow: var(--top-light);
+  border-radius: 10px;
+}
+.ed-gloss {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+/* hairline state-chip — replaces pills + diodes */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--hair);
+  border-radius: 3px;
+  font: 10px/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.chip.live {
+  color: var(--blue-deep);
+  border-color: var(--hair-blue);
+}
+.chip.live::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--blue);
+  flex: 0 0 auto;
+}
+/* gradient text — the wordmark accent + the @suize handle */
+.grad-text {
+  background: linear-gradient(135deg, var(--blue-bright), var(--blue) 45%, var(--blue-deep));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+/* ---- the ambient layers (mounted once in the shell, behind content) ---- */
+.ps-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 80px 100%,
+    var(--floor-glow);
+}
+.ps-grain {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+  opacity: var(--grain-opacity);
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+/* content rides above the z0 backdrop, below the z2 grain */
+.ps-page,
+.hs,
+.lb,
+.mk,
+.ps-nav { position: relative; z-index: 1; }

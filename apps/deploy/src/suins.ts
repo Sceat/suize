@@ -11,7 +11,8 @@
 // ===========================================================================
 import { useSuiClient } from '@mysten/dapp-kit'
 import { useQuery } from '@tanstack/react-query'
-import { resolveSuizeHandle } from './chain'
+import { resolveSuizeHandle, resolveOwnerIdentity } from './chain'
+import type { OwnerIdentity } from './chain'
 
 const cacheKey = (address: string): string =>
   `suize:handle:${address.toLowerCase()}`
@@ -56,5 +57,22 @@ export const useSuizeHandle = (
     },
   })
 
+  return q.data ?? null
+}
+
+// The site owner as a human identity — a person (their own handle/hex) OR a
+// person's Suize agent (the sub-account's MAIN member handle). Chain-derived, NO
+// localStorage (the owner law) — react-query holds the in-memory cache only.
+// Returns null while unresolved; callers degrade to a plain address.
+export const useOwnerIdentity = (
+  owner: string | null | undefined,
+): OwnerIdentity | null => {
+  const client = useSuiClient()
+  const q = useQuery({
+    queryKey: ['owner-identity', owner],
+    enabled: !!owner,
+    retry: false,
+    queryFn: () => resolveOwnerIdentity(owner as string, client),
+  })
   return q.data ?? null
 }

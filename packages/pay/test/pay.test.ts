@@ -15,6 +15,12 @@ const PAYER = "0x" + "a".repeat(64);
 const FACILITATOR = "https://facil.test";
 const USDC_TESTNET =
   "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC";
+// The canonical 2-leg split for MERCHANT @ "0.50" (2% = the $0.01 floor). The facilitator
+// now ENFORCES the fee, so /terms ALWAYS returns a split — tests stub THIS, never [].
+const SPLIT: Output[] = [
+  { to: MERCHANT, amount: "490000" },
+  { to: TREASURY, amount: "10000" },
+];
 
 // ─── fetch stubbing ───────────────────────────────────────────────────────────
 const realFetch = globalThis.fetch;
@@ -43,7 +49,7 @@ const unb64json = <T>(s: string) => JSON.parse(decodeURIComponent(escape(atob(s)
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe("mintPaymentRequired (x402 V2 shape)", () => {
-  test("free tier: vanilla single output, valid V2 body", () => {
+  test("structural single output (no /terms split passed): valid V2 body", () => {
     const body = mintPaymentRequired({ to: MERCHANT, price: "0.50", facilitator: FACILITATOR });
     expect(body.x402Version).toBe(2);
     expect(body.accepts).toHaveLength(1);
@@ -55,7 +61,8 @@ describe("mintPaymentRequired (x402 V2 shape)", () => {
     expect(req.amount).toBe("500000"); // 0.50 → atomic
     expect(req.maxTimeoutSeconds).toBe(120);
     expect(req.extra.buildUrl).toBe(`${FACILITATOR}/build`);
-    // single vanilla output = the whole price to the merchant (the free tier)
+    // a structural single output = the whole price to the merchant (used when merchant ==
+    // treasury, e.g. the deploy charge; NOT a free tier — the facilitator enforces the fee)
     expect(req.extra.outputs).toEqual([{ to: MERCHANT, amount: "500000" }]);
     // payment-identifier extension carries an in-spec id
     const id = (body.extensions[`payment-identifier`] as { info: { id: string; required: boolean } }).info;
@@ -109,7 +116,7 @@ describe("mintPaymentRequired (x402 V2 shape)", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("suize() — challenge minting + the PAYMENT-REQUIRED header", () => {
   test("a bare request → 402 with both the body and the base64 header", async () => {
-    stubFetch({ "/terms": { body: { outputs: [] } } });
+    stubFetch({ "/terms": { body: { outputs: SPLIT } } });
     const pay = suize({ to: MERCHANT, price: "0.50", facilitator: FACILITATOR });
     const res = await pay.wrap(() => new Response("secret"))(new Request("https://m.test/x"));
     expect(res.status).toBe(402);
@@ -133,12 +140,15 @@ describe("suize() — challenge minting + the PAYMENT-REQUIRED header", () => {
     ]);
   });
 
-  test("terms FETCH FAILURE → fail-open to the free tier (the sale survives)", async () => {
+  test("terms FETCH FAILURE (cold, no cache) → fail-CLOSED: never a free sale", async () => {
     stubFetch({ "/terms": { throw: true } });
     const pay = suize({ to: MERCHANT, price: "0.50", facilitator: FACILITATOR });
-    const body = await pay.challenge("https://m.test/x");
-    // no fee leg — merchant absorbs no fee rather than refusing to serve
-    expect(body.accepts[0].extra.outputs).toEqual([{ to: MERCHANT, amount: "500000" }]);
+    // Suize is NOT a free facilitator: challenge() REFUSES to mint a fee-free quote.
+    await expect(pay.challenge("https://m.test/x")).rejects.toThrow();
+    // and an UNPAID request gets a transient 503 (retry), not a free 402.
+    const res = await pay.wrap(() => new Response("secret"))(new Request("https://m.test/x"));
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("2");
   });
 
   test("malformed config throws at boot", () => {
@@ -169,7 +179,7 @@ const headerFor = (payload: PaymentPayload) =>
 describe("suize() — verify → settle → serve (the happy path)", () => {
   test("a verified+settled payment serves the handler with both receipt headers", async () => {
     stubFetch({
-      "/terms": { body: { outputs: [] } },
+      "/terms": { body: { outputs: SPLIT } },
       "/verify": { body: { isValid: true, payer: PAYER } },
       "/settle": { body: { success: true, transaction: "DIGEST123", network: "sui:testnet" } },
     });
@@ -189,7 +199,7 @@ describe("suize() — the SYNCHRONOUS denies (no network)", () => {
   test("an unknown payment-identifier → fresh 402, NO verify call", async () => {
     let verifyCalled = false;
     stubFetch({
-      "/terms": { body: { outputs: [] } },
+      "/terms": { body: { outputs: SPLIT } },
       "/verify": { get body() { verifyCalled = true; return { isValid: true }; } },
     });
     const pay = suize({ to: MERCHANT, price: "0.50", facilitator: FACILITATOR });
@@ -211,7 +221,7 @@ describe("suize() — the SYNCHRONOUS denies (no network)", () => {
   test("tampered terms (deep-equal mismatch) → 402, NO verify call", async () => {
     let verifyCalled = false;
     stubFetch({
-      "/terms": { body: { outputs: [] } },
+      "/terms": { body: { outputs: SPLIT } },
       "/verify": { get body() { verifyCalled = true; return { isValid: true }; } },
     });
     const pay = suize({ to: MERCHANT, price: "0.50", facilitator: FACILITATOR });
@@ -227,7 +237,7 @@ describe("suize() — the SYNCHRONOUS denies (no network)", () => {
 
   test("replay: the SAME settled tx is denied the second time", async () => {
     stubFetch({
-      "/terms": { body: { outputs: [] } },
+      "/terms": { body: { outputs: SPLIT } },
       "/verify": { body: { isValid: true } },
       "/settle": { body: { success: true, transaction: "D", network: "sui:testnet" } },
     });
@@ -254,7 +264,7 @@ describe("suize() — F4 concurrent same-payment (the TOCTOU close)", () => {
     let handlerCalls = 0;
 
     stubFetch({
-      "/terms": { body: { outputs: [] } },
+      "/terms": { body: { outputs: SPLIT } },
       "/verify": { body: { isValid: true } },
       "/settle": { body: { success: true, transaction: "D_concurrent", network: "sui:testnet" } },
     });
@@ -288,20 +298,20 @@ describe("suize() — F4 concurrent same-payment (the TOCTOU close)", () => {
     // First attempt: settle throws (transient) → 503 AND the claim is released.
     // Second attempt with the SAME header then settles cleanly → 200 (not stuck 409).
     const pay = suize({ to: MERCHANT, price: "0.50", facilitator: FACILITATOR });
-    const { payload } = await issueAndForge(pay, "tx_release_retry");
 
     stubFetch({
-      "/terms": { body: { outputs: [] } },
+      "/terms": { body: { outputs: SPLIT } },
       "/verify": { body: { isValid: true } },
       "/settle": { throw: true },
     });
+    const { payload } = await issueAndForge(pay, "tx_release_retry");
     const first = await pay.wrap(() => new Response("ok"))(
       new Request("https://m.test/x", { headers: headerFor(payload) }),
     );
     expect(first.status).toBe(503); // transient — claim released, not consumed
 
     stubFetch({
-      "/terms": { body: { outputs: [] } },
+      "/terms": { body: { outputs: SPLIT } },
       "/verify": { body: { isValid: true } },
       "/settle": { body: { success: true, transaction: "D_retry", network: "sui:testnet" } },
     });
@@ -314,7 +324,7 @@ describe("suize() — F4 concurrent same-payment (the TOCTOU close)", () => {
 
 describe("suize() — fail-closed transient handling (the double-pay guard)", () => {
   test("/verify network error → 503 (resend), NEVER a fresh 402", async () => {
-    stubFetch({ "/terms": { body: { outputs: [] } }, "/verify": { throw: true } });
+    stubFetch({ "/terms": { body: { outputs: SPLIT } }, "/verify": { throw: true } });
     const pay = suize({ to: MERCHANT, price: "0.50", facilitator: FACILITATOR });
     const { payload } = await issueAndForge(pay);
     const res = await pay.wrap(() => new Response("ok"))(
@@ -326,7 +336,7 @@ describe("suize() — fail-closed transient handling (the double-pay guard)", ()
 
   test("/verify non-2xx → 503 transient (not a definitive no)", async () => {
     stubFetch({
-      "/terms": { body: { outputs: [] } },
+      "/terms": { body: { outputs: SPLIT } },
       "/verify": { body: { isValid: false }, status: 502 },
     });
     const pay = suize({ to: MERCHANT, price: "0.50", facilitator: FACILITATOR });
@@ -339,7 +349,7 @@ describe("suize() — fail-closed transient handling (the double-pay guard)", ()
 
   test("/settle network error → 503 (resend same header)", async () => {
     stubFetch({
-      "/terms": { body: { outputs: [] } },
+      "/terms": { body: { outputs: SPLIT } },
       "/verify": { body: { isValid: true } },
       "/settle": { throw: true },
     });
@@ -353,7 +363,7 @@ describe("suize() — fail-closed transient handling (the double-pay guard)", ()
 
   test("a DEFINITIVE !isValid → fresh 402 with the reason", async () => {
     stubFetch({
-      "/terms": { body: { outputs: [] } },
+      "/terms": { body: { outputs: SPLIT } },
       "/verify": { body: { isValid: false, invalidReason: "outputs_mismatch" } },
     });
     const pay = suize({ to: MERCHANT, price: "0.50", facilitator: FACILITATOR });
@@ -374,7 +384,7 @@ describe("suize() — terms cache", () => {
       const url = input.toString();
       if (url.includes("/terms")) {
         termsHits++;
-        return new Response(JSON.stringify({ outputs: [] }), { status: 200 });
+        return new Response(JSON.stringify({ outputs: SPLIT }), { status: 200 });
       }
       throw new Error("unstubbed");
     }) as typeof fetch;

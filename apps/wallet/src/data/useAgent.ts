@@ -46,6 +46,9 @@ const ZERO_BALANCE: UsdcBalance = { raw: '0', ui: 0, usd: 0 };
 export interface UseAgent {
   /** the derived sub-account (multisig) address, or null until the agent is armed. */
   agentAddress: string | null;
+  /** the sub-account's 1-of-2 MultiSigPublicKey (for signing spends FROM it), or null
+   *  until armed. Pure function of the two members — re-derived, never trusted state. */
+  multisig: MultiSigPublicKey | null;
   /** true once both members are known (the agent OAuth has run once) → the
    *  sub-account exists and can be funded / withdrawn. */
   armed: boolean;
@@ -195,6 +198,7 @@ export function useAgent(
 
   return {
     agentAddress,
+    multisig: subaccount?.multisig ?? null,
     armed,
     balance,
     loading: Boolean(agentAddress) && balanceQuery.isLoading,

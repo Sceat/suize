@@ -1,0 +1,380 @@
+/* ============================================================================
+   House (PLP vault) — scoped to .hs. Concept: one gradient "vault card" with TVL
+   as the oversized navy-ink hero, supporting stats, and the share-price curve as
+   its base. LPing is NOT a bet → ZERO green/red; one blue accent spent ~3× (the
+   value-per-share stat · the chart line · the Supply button). Numerals = Martian
+   Mono via `.num`. Reuses styles.css tokens. House law: texture not blandness,
+   flat hairlines not shadows, generous whitespace.
+   ========================================================================== */
+.hs {
+  position: relative;
+  z-index: 1; /* ride above the ambient backdrop, below the grain */
+  min-height: 100dvh;
+  padding: calc(var(--ps-nav) + clamp(30px, 5vh, 60px)) clamp(18px, 5vw, 64px) 100px;
+  font-family: var(--sans);
+  color: var(--ink);
+}
+.hs-wrap { max-width: 1080px; margin: 0 auto; }
+.hs .num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.02em;
+}
+
+/* ---- masthead ---- */
+.hs-head { max-width: 60ch; }
+.hs-kick {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 14px;
+}
+.hs-title {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(40px, 6vw, 72px);
+  letter-spacing: -0.025em;
+  line-height: 1;
+  color: var(--ink);
+  margin: 0 0 18px;
+}
+.hs-lede {
+  font-size: clamp(15px, 1.4vw, 17px);
+  line-height: 1.62;
+  color: var(--ink-2);
+  margin: 0;
+  max-width: 58ch;
+}
+
+/* ---- THE VAULT CARD — TVL hero + stats + the share-price base ---- */
+.hs-vault {
+  margin-top: clamp(32px, 5.5vh, 60px);
+  border: 1px solid var(--hair);
+  border-radius: 14px;
+  box-shadow: var(--top-light);
+  overflow: hidden;
+  /* texture, not a flat dead box: a soft blue bloom top-right over a paper→inset
+     vertical wash. No glow, no shadow — a carbon-style gradient surface. */
+  background:
+    radial-gradient(130% 150% at 88% -25%, var(--blue-wash), transparent 58%),
+    linear-gradient(180deg, var(--card), var(--paper-2));
+}
+/* a colossal ghost ₿ watermark behind the hero (clipped by the card overflow) */
+.hs-vault-lead { position: relative; z-index: 1; }
+.hs-vault-lead::before {
+  content: '\20BF';
+  position: absolute;
+  right: -1vw;
+  top: -4vh;
+  font-family: var(--serif);
+  font-size: clamp(200px, 28vw, 420px);
+  line-height: 0.8;
+  color: var(--ink);
+  opacity: 0.022;
+  z-index: 0;
+  pointer-events: none;
+  user-select: none;
+}
+:root[data-theme='dark'] .hs-vault-lead::before { opacity: 0.04; }
+.hs-vault-grid {
+  position: relative;
+  z-index: 1;
+  padding: clamp(28px, 4vw, 48px) clamp(24px, 4vw, 48px) clamp(22px, 3vw, 32px);
+}
+.hs-vault-label {
+  font-size: 11.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 14px;
+}
+.hs-vault-tvl {
+  font-size: clamp(46px, 8.4vw, 104px);
+  line-height: 0.86;
+  font-weight: 400;
+  color: var(--ink); /* navy-ink money — the strongest thing on the page */
+  letter-spacing: -0.045em;
+}
+.hs-vault-tvl.is-load { color: var(--ink-4); }
+.hs-vault-foot {
+  margin-top: 20px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-3);
+  max-width: 52ch;
+}
+/* the supporting stats — a 3-up row BELOW the hero, hairline-divided */
+.hs-vault-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(16px, 3vw, 44px);
+  margin-top: clamp(26px, 3.6vw, 38px);
+  padding-top: clamp(20px, 2.6vw, 28px);
+  border-top: 1px solid var(--hair);
+  text-align: left;
+}
+.hs-vstat-label {
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+}
+.hs-vstat-val {
+  font-size: clamp(22px, 2.6vw, 30px);
+  color: var(--ink);
+  line-height: 1;
+  white-space: nowrap;
+}
+.hs-vstat-val.is-accent { color: var(--blue); }
+.hs-vstat-unit {
+  margin-top: 5px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+}
+
+/* the share-price base — sits flush in the card, divided by a hairline */
+.hs-band {
+  padding: 18px clamp(24px, 4vw, 48px) clamp(18px, 2.5vw, 26px);
+  border-top: 1px solid var(--hair);
+  background: linear-gradient(180deg, transparent, rgba(30, 127, 214, 0.025));
+}
+.hs-band-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.hs-band-title { font-size: 12px; letter-spacing: 0.02em; color: var(--ink-3); }
+.hs-band-now { font-size: 13px; color: var(--blue-deep); }
+.hs-area { display: block; width: 100%; height: clamp(110px, 16vh, 150px); }
+.hs-area-par { stroke: var(--hair); stroke-width: 1; stroke-dasharray: 3 4; }
+.hs-area-line {
+  fill: none;
+  stroke: var(--blue);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.hs-area-dot { fill: var(--blue); stroke: var(--card); stroke-width: 2; }
+.hs-band-base {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.hs-band-base .num { color: var(--ink-3); }
+.hs-band-base-lbl { letter-spacing: 0.08em; text-transform: uppercase; font-size: 9.5px; }
+
+/* ---- your position ---- */
+.hs-pos { margin-top: clamp(30px, 4.5vh, 48px); }
+.hs-pos-head {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 16px;
+}
+.hs-pos-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--hair);
+  border-bottom: 1px solid var(--hair);
+}
+.hs-pcell { padding: 22px clamp(14px, 2vw, 26px) 22px 0; }
+.hs-pcell + .hs-pcell { padding-left: clamp(18px, 3vw, 32px); border-left: 1px solid var(--hair); }
+.hs-pcell-label {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 12px;
+}
+.hs-pcell-val { font-size: clamp(24px, 3vw, 34px); color: var(--ink); line-height: 1; }
+.hs-pcell.is-lead .hs-pcell-val { color: var(--blue); }
+.hs-pcell-foot { margin-top: 9px; font-size: 11.5px; color: var(--ink-3); }
+
+.hs-pos-empty {
+  margin-top: clamp(28px, 4vh, 44px);
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 18px 20px;
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  background: var(--paper-2);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink-3);
+  max-width: 64ch;
+}
+.hs-pos-empty-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+
+/* ---- projection: per day / month / year ---- */
+.hs-proj {
+  margin-top: clamp(28px, 4vh, 44px);
+  padding: clamp(22px, 3vw, 30px);
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  box-shadow: var(--top-light);
+  background:
+    radial-gradient(120% 170% at 92% -35%, var(--blue-wash), transparent 60%),
+    linear-gradient(180deg, var(--veil-2), var(--veil-1)),
+    var(--card);
+}
+.hs-proj-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+.hs-proj-kick { font-size: 14px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+.hs-proj-basis { font-size: 12px; color: var(--ink-3); }
+.hs-proj-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(14px, 2vw, 28px);
+  border-top: 1px solid var(--hair);
+  padding-top: 20px;
+}
+.hs-proj-label {
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 9px;
+}
+.hs-proj-val { font-size: clamp(23px, 3vw, 32px); line-height: 1; color: var(--ink-2); }
+.hs-proj-cell.is-lead .hs-proj-val { font-size: clamp(30px, 4.4vw, 48px); color: var(--blue); }
+.hs-proj-soon {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink-3);
+  padding: 4px 0;
+  max-width: 56ch;
+}
+.hs-proj-note { margin: 18px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--ink-4); max-width: 66ch; }
+.hs-proj-note .num { font-family: var(--mono); color: var(--ink-3); }
+@media (max-width: 560px) {
+  .hs-proj-grid { grid-template-columns: 1fr; gap: 16px; }
+}
+
+/* ---- console ---- */
+.hs-console {
+  margin-top: clamp(30px, 4.5vh, 48px);
+  padding: clamp(22px, 3vw, 30px);
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  background: var(--card);
+}
+.hs-console-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.hs-console-title { font-size: 14px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+.hs-field-max {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--ink-3);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.18s;
+}
+.hs-field-max:hover { color: var(--blue-deep); }
+.hs-field-max .num { color: var(--ink-2); }
+.hs-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--hair-strong);
+  flex-wrap: wrap;
+}
+.hs-field:focus-within { border-bottom-color: var(--blue); }
+.hs-field-sign { font-family: var(--mono); font-size: clamp(26px, 4vw, 38px); color: var(--ink-4); }
+.hs-field-input {
+  flex: 1;
+  min-width: 80px;
+  font-size: clamp(28px, 4.5vw, 42px);
+  color: var(--ink);
+  background: none;
+  border: 0;
+  outline: none;
+  padding: 0;
+}
+.hs-field-input::placeholder { color: var(--ink-4); }
+.hs-chips { display: flex; gap: 8px; }
+.hs-chip {
+  font-family: var(--sans);
+  color: var(--ink-2);
+  background: var(--paper-3);
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: border-color 0.18s, color 0.18s, background 0.18s;
+}
+.hs-chip:hover { border-color: var(--hair-blue); color: var(--blue-deep); background: var(--blue-wash); }
+
+.hs-actions { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; margin-top: 20px; }
+.hs-btn {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  height: 54px;
+  border-radius: 9px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  transition: background 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s, color 0.2s, opacity 0.2s;
+}
+.hs-btn:disabled { opacity: 0.45; cursor: default; }
+.hs-btn-supply { color: #fff; background: var(--blue); border: 1px solid var(--blue-deep); }
+.hs-btn-supply:not(:disabled):hover { background: var(--blue-deep); }
+.hs-btn-amt { font-weight: 600; opacity: 0.85; }
+.hs-btn-redeem { color: var(--ink); background: transparent; border: 1px solid var(--hair-strong); }
+.hs-btn-redeem:not(:disabled):hover { border-color: var(--ink-3); background: var(--paper-2); }
+
+.hs-note { font-size: 12.5px; line-height: 1.5; color: var(--ink-3); margin: 16px 0 0; max-width: 58ch; }
+/* error text stays NEUTRAL ink — red is reserved for a true DOWN/loss outcome
+   (green/red quarantine); the wording carries the alert, not colour. */
+.hs-error { font-size: 12.5px; color: var(--ink-2); margin-top: 8px; }
+
+/* ---- spinner ---- */
+.hs-spin {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  animation: hs-spin 0.7s linear infinite;
+}
+.hs-spin.is-dim { border-color: var(--hair); border-top-color: var(--ink-2); }
+@keyframes hs-spin { to { transform: rotate(360deg); } }
+
+/* ---- responsive ---- */
+@media (max-width: 760px) {
+  .hs-vault-grid { grid-template-columns: 1fr; gap: 24px; }
+  .hs-vault-stats { flex-direction: row; flex-wrap: wrap; gap: 26px 40px; text-align: left; }
+  .hs-actions { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .hs { padding-bottom: calc(60px + env(safe-area-inset-bottom, 0) + 28px); }
+  .hs-pos-grid { grid-template-columns: 1fr; }
+  .hs-pcell { padding: 18px 0; }
+  .hs-pcell + .hs-pcell { padding-left: 0; border-left: 0; border-top: 1px solid var(--hair); }
+}

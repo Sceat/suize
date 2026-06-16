@@ -14,6 +14,10 @@ import {
   CRASH_MOVE_TARGETS,
   SUBS_MOVE_TARGETS,
   SUBS_PUBLISHED,
+  AUCTION_MOVE_TARGETS,
+  AUCTION_PUBLISHED,
+  PROFILE_MOVE_TARGETS,
+  PROFILE_PUBLISHED,
 } from "@suize/shared";
 import type { SponsorRequest, SponsorResponse, ExecuteRequest, ExecuteResponse } from "@suize/shared";
 import { config } from "../config";
@@ -46,11 +50,29 @@ export const maskKey = (key: string) => (key.length <= 6 ? "***" : `***${key.sli
 // x402 V2 settles KEYLESS over gRPC, NOT via the sponsor — so the rail's payment
 // verbs are never Enoki-sponsored. CRASH stays (its gasless router writes); SUBS is
 // unioned in only once published (the renewal/create PTBs are user-signed +
-// Enoki-sponsored). A `0x0::subs::*` target would poison the list, so the
-// SUBS_PUBLISHED guard fences it.
+// Enoki-sponsored). AUCTION (the directory's ad-slot `bid`) is the SAME shape —
+// user-signed + Enoki-sponsored — unioned in only once published. A `0x0::subs::*`
+// or `0x0::auction::*` target would poison the list, so the *_PUBLISHED guards fence them.
+// MEMWAL (the wallet memory onboarding): the user's zkLogin wallet signs ONE
+// sponsored createAccount + addDelegateKey to authorize the backend's derived
+// MEMORY delegate key (NOT a money key — see src/memory). Built from the env
+// package id, gated so an unset MEMWAL_PACKAGE_ID never poisons the list.
+const MEMWAL_MOVE_TARGETS: string[] = config.memwalPackageId
+  ? [
+      `${config.memwalPackageId}::account::create_account`,
+      `${config.memwalPackageId}::account::add_delegate_key`,
+    ]
+  : [];
+
 const ALLOWED_MOVE_TARGETS: string[] = [
   ...CRASH_MOVE_TARGETS,
   ...(SUBS_PUBLISHED ? SUBS_MOVE_TARGETS : []),
+  ...(AUCTION_PUBLISHED ? AUCTION_MOVE_TARGETS : []),
+  // PROFILE (the BusinessProfile mint/edit): create_profile/edit_profile each push a
+  // $0.10 Balance<USDC> → treasury, USER-SIGNED + Enoki-sponsored — same shape as subs.
+  // Unioned in only once published (a `0x0::profile::*` target would poison the list).
+  ...(PROFILE_PUBLISHED ? PROFILE_MOVE_TARGETS : []),
+  ...MEMWAL_MOVE_TARGETS,
 ];
 
 // ---------------------------------------------------------------------------
@@ -240,6 +262,10 @@ export const sponsorInfo = {
   // renewal/create PTBs are user-signed + Enoki-sponsored. Report the gate state.
   subsPublished: SUBS_PUBLISHED,
   subsTargetCount: SUBS_PUBLISHED ? SUBS_MOVE_TARGETS.length : 0,
+  // AUCTION (the directory ad-slot `bid`) — same user-signed + Enoki-sponsored shape;
+  // in the effective list only once published. Report the gate state.
+  auctionPublished: AUCTION_PUBLISHED,
+  auctionTargetCount: AUCTION_PUBLISHED ? AUCTION_MOVE_TARGETS.length : 0,
 };
 
 /**

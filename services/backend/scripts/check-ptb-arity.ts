@@ -24,9 +24,16 @@ const EXPECT: { target: string; args: number; typeArgs: number; where: string }[
   { target: PACKAGE_IDS.DEPLOY.TARGETS.CREATE_SITE, args: 13, typeArgs: 0, where: "deploy/index.ts createSiteOnChain" },
   { target: PACKAGE_IDS.DEPLOY.TARGETS.LINK_DOMAIN, args: 5, typeArgs: 0, where: "deploy/index.ts linkDomainOnChain" },
   { target: PACKAGE_IDS.DEPLOY.TARGETS.UNLINK_DOMAIN, args: 4, typeArgs: 0, where: "deploy/index.ts unlinkDomainOnChain" },
-  { target: PACKAGE_IDS.SUBS.TARGETS.CREATE, args: 7, typeArgs: 1, where: "deploy/subscribe.ts buildSubscribeKind (+ wallet/data/subs buildCreate)" },
-  { target: PACKAGE_IDS.SUBS.TARGETS.RENEW, args: 4, typeArgs: 1, where: "wallet/data/subs buildRenew (+ relayer)" },
-  { target: PACKAGE_IDS.SUBS.TARGETS.CANCEL, args: 1, typeArgs: 1, where: "wallet/data/subs buildCancel" },
+  // SUBS — version-gated (2026-06-15 republish): each entry now threads `version: &Version`
+  // FIRST, so every count is +1 vs the pre-gate values (create 7→8, renew 4→5, cancel 1→2).
+  { target: PACKAGE_IDS.SUBS.TARGETS.CREATE, args: 8, typeArgs: 1, where: "deploy/subscribe.ts buildSubscribeKind (+ wallet/data/subs buildCreate)" },
+  { target: PACKAGE_IDS.SUBS.TARGETS.RENEW, args: 5, typeArgs: 1, where: "wallet/data/subs buildRenew (+ relayer)" },
+  { target: PACKAGE_IDS.SUBS.TARGETS.CANCEL, args: 2, typeArgs: 1, where: "wallet/data/subs buildCancel" },
+  // PROFILE — the BusinessProfile mint/edit (version-gated). create_profile: version, config,
+  // payment, name, description, image_url, banner_url, website (8 + 1 type). edit_profile adds
+  // the &mut BusinessProfile (9 + 1 type). Builders: apps/wallet/src/data/profile.ts.
+  { target: PACKAGE_IDS.PROFILE.TARGETS.CREATE_PROFILE, args: 8, typeArgs: 1, where: "wallet/data/profile buildCreateProfile" },
+  { target: PACKAGE_IDS.PROFILE.TARGETS.EDIT_PROFILE, args: 9, typeArgs: 1, where: "wallet/data/profile buildEditProfile" },
 ];
 
 /** A parameter type that is the runtime-injected `&mut TxContext` (never a PTB arg). */

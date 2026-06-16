@@ -37,7 +37,16 @@ Pick the `exact` requirement on the Sui network and read these fields:
 - `extra.buildUrl` — an optional Suize helper that builds the exact gasless
   transaction for you (see below). Plain x402 clients can skip it.
 
-### Door 1 — Suize builds it, you sign (zero gas, zero Sui transaction code)
+There are two doors onto the rail, and the agent signs the payment itself at
+both — there is no human relay. Door 1: your agent has its OWN Sui key. Door 2:
+it has none and borrows one from Suize via the MCP wallet.
+
+### Door 1 — your agent has its own Sui key
+
+It signs the gasless payment with its own key and presents `X-PAYMENT`. It can
+let Suize build the transaction, or build it itself — both settle identically.
+
+**Let Suize build it** (zero Sui transaction code):
 
 1. `POST https://api.suize.io/build`
    `{ "sender": "<your Sui address>", "payTo": "<from challenge>", "amount": "<decimal USDC>" }`
@@ -53,20 +62,24 @@ Pick the `exact` requirement on the Sui network and read these fields:
    the facilitator, which verifies and settles (idempotent — a retry is never a
    double charge).
 
-### Door 2 — you pay directly
+**Or build it yourself** (you already speak Sui): build the same gasless
+`send_funds` transfer that pays the declared `extra.outputs`, sign it with your
+own key, and present the x402 `PaymentPayload` in the `X-PAYMENT` header exactly
+as above. The on-chain balance-change set is the only ground truth.
 
-You already speak Sui: build the same gasless `send_funds` transfer that pays
-the declared `extra.outputs`, sign it with your own key, and present the x402
-`PaymentPayload` in the `X-PAYMENT` header exactly as above. The on-chain
-balance-change set is the only ground truth.
+### Door 2 — no Sui key? Use the Suize MCP wallet
 
-### Door 3 — you ask your human
+If you are an assistant like Claude or Codex with no Sui key of your own,
+install the Suize MCP — a local wallet that signs Door 1 for you:
 
-The challenge carries a `payLink` (or build one yourself). It hands the purchase
-to your user — a hosted one-tap pay page
-(`https://pay.suize.io?payTo=…&amount=…&memo=…` — the terms live entirely in
-the URL). Your user signs in with Google or connects a wallet, taps once, and
-is returned with `?digest=`.
+    claude mcp add suize -- npx -y @suize/mcp
+
+Run `authenticate` (a Google sign-in opens; the session stays on your machine),
+fund the agent address it shows you, then call `suize_pay { url }` — it reads any
+402, signs with your LOCAL zkLogin session, and settles. Keys never leave your
+machine; Suize never signs for you. The same wallet also exposes `suize_balance`,
+`suize_receipts`, `suize_subscriptions`, and `suize_kill` (sweep the balance back
+and disarm). Works in any MCP client, not just Claude.
 
 The facilitator's own endpoints (any of which you may call directly):
 `GET /supported` (the schemes + networks it serves), `POST /verify` and
@@ -84,7 +97,7 @@ the chain.
     const paywall = suize({ to: '0xYOUR_SUI_ADDRESS', price: '0.10' })
 
     // fetch-style (Bun / Hono / Next):
-    Bun.serve({ fetch: paywall(handler) })
+    Bun.serve({ fetch: paywall.wrap(handler) })
 
     // Express:
     app.use(paywall.express)
@@ -101,12 +114,11 @@ changes against YOUR price and address and settles it → the request is served.
 One settlement = one serve (replay-safe). Your settlement notice is the verify
 answer — or read the on-chain balance changes yourself.
 
-The fee (when one applies) is merchant-absorbed: it is carved as a second
-declared output inside the SAME atomic gasless transaction, so the payer always
-pays exactly the listed `amount` and the fee is visible in the on-chain balance
-changes. A vanilla single-output payment (no extra outputs) carries no fee. The
-rate lives on the pricing page — an agent never needs it: pay the declared
-`amount`, honor the declared `extra.outputs`.
+The fee is merchant-absorbed: it is carved as a second declared output inside
+the SAME atomic gasless transaction, so the payer always pays exactly the listed
+`amount` and the fee is visible in the on-chain balance changes. The rate lives
+on the pricing page — an agent never needs it: pay the declared `amount`, honor
+the declared `extra.outputs`.
 
 Subscriptions (recurring billing): the user creates one on-chain subscription
 object (a fixed merchant, amount, and period) and signs each renewal itself —
@@ -118,15 +130,18 @@ object on-chain. Merchants self-index subscription state from chain events.
 
 - Deploy — agents ship static sites to decentralized hosting, paid on the rail.
   https://deploy.suize.io · agent contract: https://deploy.suize.io/llms.txt
-- Crash — one-tap BTC up/down, Google sign-in, gasless.
-  https://crash.suize.io · https://crash.suize.io/llms.txt
+- Agents — the live, on-chain directory of agent commerce: read the payment feed
+  and merchant rankings, or advertise via an on-chain ad slot.
+  https://agents.suize.io · https://agents.suize.io/llms.txt
+- PolySui — one-tap BTC up/down, Google sign-in, gasless.
+  https://polysui.suize.io · https://polysui.suize.io/llms.txt
 - Wallet — the consumer (human) side: a wallet you talk to that funds a capped
   account for your AI to pay from. If you are a person rather than an agent,
   start there. https://wallet.suize.io · https://wallet.suize.io/llms.txt
 
 ## Links
 
-- How the whole machine works: https://suize.io/#/docs
-- Pricing (all fees live here): https://suize.io/#/pricing
+- How the whole machine works: https://suize.io/docs
+- Pricing (all fees live here): https://suize.io/pricing
 - Home: https://suize.io
 - This file: https://suize.io/llms.txt

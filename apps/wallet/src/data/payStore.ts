@@ -87,6 +87,154 @@ export function clearApprovedTerms(owner: string, subId: string): void {
   }
 }
 
+// ── Spending dials — the agent's autonomy policy (CLIENT-SIDE, the second of the
+//    two control layers; the first is funding physics). Governs send_usdc ONLY:
+//    cancel / sweep / deploy / subscribe ALWAYS confirm. A send to a NEW payee
+//    ALWAYS confirms even in full-auto (the cheapest partial allow-list). ──
+
+export type DialMode = 'each' | 'under' | 'full';
+
+export interface Dials {
+  /** 'each' = confirm every send (default) · 'under' = auto-approve KNOWN payees
+   *  under the threshold · 'full' = auto-approve KNOWN payees (new payee still confirms). */
+  mode: DialMode;
+  /** the auto-approve ceiling for 'under', in whole USDC. */
+  thresholdUsd: number;
+}
+
+const DEFAULT_DIALS: Dials = { mode: 'each', thresholdUsd: 20 };
+const DIALS_KEY = (owner: string) => `suize:dials:${owner.toLowerCase()}`;
+
+export function getDials(owner: string): Dials {
+  if (!owner) return DEFAULT_DIALS;
+  try {
+    const raw = localStorage.getItem(DIALS_KEY(owner));
+    if (!raw) return DEFAULT_DIALS;
+    const d = JSON.parse(raw) as Partial<Dials>;
+    const mode: DialMode = d.mode === 'under' || d.mode === 'full' ? d.mode : 'each';
+    const thresholdUsd = typeof d.thresholdUsd === 'number' && d.thresholdUsd > 0 ? d.thresholdUsd : DEFAULT_DIALS.thresholdUsd;
+    return { mode, thresholdUsd };
+  } catch {
+    return DEFAULT_DIALS;
+  }
+}
+
+export function setDials(owner: string, dials: Dials): void {
+  if (!owner) return;
+  try {
+    localStorage.setItem(DIALS_KEY(owner), JSON.stringify(dials));
+  } catch {
+    /* private mode — the in-memory state still carries it this session */
+  }
+}
+
+// ── Known payees — addresses the user has successfully sent to before. A send to
+//    a NEW payee always confirms (even in full-auto); known payees are eligible
+//    for the dials. Capped so the list can't grow unbounded. ──
+const PAYEES_KEY = (owner: string) => `suize:payees:${owner.toLowerCase()}`;
+
+function readPayees(owner: string): string[] {
+  try {
+    const raw = localStorage.getItem(PAYEES_KEY(owner));
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function isKnownPayee(owner: string, address: string): boolean {
+  if (!owner || !address) return false;
+  return readPayees(owner).includes(address.toLowerCase());
+}
+
+export function addKnownPayee(owner: string, address: string): void {
+  if (!owner || !address) return;
+  const a = address.toLowerCase();
+  const list = readPayees(owner);
+  if (list.includes(a)) return;
+  list.push(a);
+  try {
+    localStorage.setItem(PAYEES_KEY(owner), JSON.stringify(list.slice(-200)));
+  } catch {
+    /* private mode */
+  }
+}
+
+// ── Repeat-action guard — a LOOP-BREAKER, not a money cap (owner law 2026-06-14).
+//    The agent may auto-approve a known-payee send under the dials, but if it sends to
+//    the SAME payee repeatedly (ANY amount — keyed per-recipient so a vary-by-a-cent
+//    loop can't dodge it), the Nth send in a short window STOPS auto-approving and falls
+//    through to the confirm card — the cheap guard against a runaway loop draining to a
+//    known payee. The wallet balance + the (coming) Walrus action-log are the real
+//    backstops; this just probes intent on a repeat. Per-owner, rolling short window. ──
+interface AutoAction {
+  sig: string;
+  at: number;
+}
+const AUTOACT_KEY = (owner: string) => `suize:autoact:${owner.toLowerCase()}`;
+const AUTOACT_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const AUTOACT_DUP_LIMIT = 3; // the 3rd identical auto-action in the window forces a confirm
+
+function readAutoActions(owner: string): AutoAction[] {
+  try {
+    const raw = localStorage.getItem(AUTOACT_KEY(owner));
+    const list = raw ? (JSON.parse(raw) as AutoAction[]) : [];
+    const cutoff = Date.now() - AUTOACT_WINDOW_MS;
+    return list.filter((a) => a && typeof a.at === 'number' && a.at >= cutoff && typeof a.sig === 'string');
+  } catch {
+    return [];
+  }
+}
+
+/** A stable signature for an auto-approvable action, keyed PER RECIPIENT (NOT amount) —
+ *  so N auto-sends to the same payee trip the loop-breaker regardless of amount, closing
+ *  the vary-by-a-cent dodge. (today the only auto-approvable action is a send.) */
+export function autoActionSig(recipient: string): string {
+  return `send:${recipient.toLowerCase()}`;
+}
+
+/** True once `sig` has already auto-fired enough times in the window that THIS one is
+ *  a repeat — the caller must show the confirm card instead of auto-approving. */
+export function autoActionIsRepeat(owner: string, sig: string): boolean {
+  if (!owner) return false;
+  return readAutoActions(owner).filter((a) => a.sig === sig).length >= AUTOACT_DUP_LIMIT - 1;
+}
+
+/** Record an auto-approved action against the rolling window (call AFTER it lands). */
+export function recordAutoAction(owner: string, sig: string): void {
+  if (!owner) return;
+  const next = [...readAutoActions(owner), { sig, at: Date.now() }].slice(-50);
+  try {
+    localStorage.setItem(AUTOACT_KEY(owner), JSON.stringify(next));
+  } catch {
+    /* private mode */
+  }
+}
+
+// ── Agent on/off (the Pause kill switch) — persisted per-owner so a Pause survives a
+//    reload: a killed switch stays killed (in-memory state alone would silently re-arm
+//    to the saved dials on refresh). Default ON. ──
+const AGENTON_KEY = (owner: string) => `suize:agenton:${owner.toLowerCase()}`;
+
+export function getAgentEnabled(owner: string): boolean {
+  if (!owner) return true;
+  try {
+    const raw = localStorage.getItem(AGENTON_KEY(owner));
+    return raw === null ? true : raw === '1';
+  } catch {
+    return true;
+  }
+}
+
+export function setAgentEnabled(owner: string, on: boolean): void {
+  if (!owner) return;
+  try {
+    localStorage.setItem(AGENTON_KEY(owner), on ? '1' : '0');
+  } catch {
+    /* private mode */
+  }
+}
+
 // ── Agent-members store (the sub-account multisig committee) ──────────────────
 
 /** The two zkLogin public keys (Sui-serialized base64, `PublicKey.toSuiPublicKey()`)

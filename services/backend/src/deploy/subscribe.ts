@@ -20,7 +20,7 @@
 //     src/data/subs.ts buildCreate → runSponsored) — unchanged by this module.
 //   - a RAW HTTP AGENT uses THIS helper: POST /deploy/subscribe/build returns sponsored
 //     signable bytes, the agent signs locally, POST /deploy/subscribe/submit executes.
-//   Both produce the IDENTICAL create<USDC>(config, merchant, amount, period, ref,
+//   Both produce the IDENTICAL create<USDC>(version, config, merchant, amount, period, ref,
 //   payment, clock) call — this file mirrors buildCreate verbatim (the single source of
 //   the create PTB shape) so the two buyers are wire-identical.
 //
@@ -52,6 +52,7 @@ const USDC_TYPE = USDC_TYPES[config.suiNetwork as SuiNetwork];
 
 const SUBS_PUBLISHED = PACKAGE_IDS.SUBS.PACKAGE !== "0x0";
 const SUBS_CONFIG = PACKAGE_IDS.SUBS.CONFIG_OBJECT;
+const SUBS_VERSION = PACKAGE_IDS.SUBS.VERSION_OBJECT;
 const SUBS_CREATE = PACKAGE_IDS.SUBS.TARGETS.CREATE;
 const CLOCK_ID = "0x6";
 
@@ -76,7 +77,7 @@ const siteOwner = async (siteId: string): Promise<string | null> => {
 
 // ---------------------------------------------------------------------------
 // The create<USDC> kind-tx — mirrors apps/wallet/src/data/subs.ts buildCreate
-// EXACTLY (arg order: config, merchant, amount, period_ms, ref, payment, clock;
+// EXACTLY (arg order: version, config, merchant, amount, period_ms, ref, payment, clock;
 // the payment is tx.balance, NOT a coin split; ref = the siteId's 32 bytes). The
 // amount/period are the deterministic shared consts (the number wall) read through
 // config (config.deploySubPriceUsdc / deploySubPeriodMs — the env override exists
@@ -103,6 +104,7 @@ const buildSubscribeKind = (siteId: string, merchant: string, sender: string): T
   tx.moveCall({
     target: SUBS_CREATE,
     arguments: [
+      tx.object(SUBS_VERSION),
       tx.object(SUBS_CONFIG),
       tx.pure.address(merchant),
       tx.pure.u64(amount),

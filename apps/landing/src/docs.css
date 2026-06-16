@@ -107,6 +107,51 @@
 }
 
 /* ==========================================================================
+   THE PREMISE — an editorial statement between the section head and the
+   ladder: there is nothing to sign up for. Breathes wide; NOT a glass card —
+   a mono kicker, a big serif line, a body, and a quiet mono ledger of what
+   you DON'T need (no diode dots, no card chrome).
+   ========================================================================== */
+.dxd-premise {
+  max-width: 62ch;
+  margin: 0 0 clamp(40px, 5.5vw, 76px);
+  padding-top: clamp(20px, 2.6vw, 30px);
+  border-top: 1px solid transparent;
+  border-image: var(--rule-fade) 1;
+}
+.dxd-premise__kicker {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.dxd-premise__statement {
+  font-family: var(--serif);
+  font-size: clamp(1.7rem, 3.4vw, 2.7rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+  color: var(--fg);
+  margin: 14px 0 0;
+}
+.dxd-premise__body {
+  font-family: var(--sans);
+  font-size: clamp(14.5px, 1.6vw, 17px);
+  line-height: 1.6;
+  color: var(--fg-2);
+  margin: 16px 0 0;
+}
+.dxd-premise__ledger {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+  margin: 22px 0 0;
+}
+
+/* ==========================================================================
    SECTION 1 · THE ONBOARDING LADDER — four glass rungs, high-level → low-
    level. Each rung: the tier head (mono tier no + serif title + who line)
    over three labeled fact columns (you / Suize / paid). Tier 3 embeds the
@@ -211,6 +256,21 @@
   line-height: 1.55;
   color: var(--fg-3);
   margin: 14px 0 0;
+}
+/* Tier 1's language-agnostic example — a bordered ink panel (reusing the
+   .dxd-code__pre surface), NOT a nested glass card (glass-on-glass is banned). */
+.dxd-tier__example {
+  margin-top: clamp(16px, 2.2vw, 22px);
+}
+.dxd-tier__example-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.dxd-tier__example .dxd-code__pre {
+  margin: 0;
 }
 /* Tier 3's embedded demo — the approved loop, breathing inside the rung */
 .dxd-tier .dxd-loop {
@@ -532,12 +592,12 @@
 }
 
 /* ==========================================================================
-   SECTION 2 · THREE WAYS — three glass cards, depth-staggered (asymmetric,
-   not a flat centered row).
+   SECTION 2 · TWO DOORS — two glass cards (own Sui key / Suize MCP), depth-
+   staggered (asymmetric, not a flat centered row).
    ========================================================================== */
 .dxd-ways {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: clamp(16px, 2.4vw, 28px);
   align-items: start;
 }

@@ -9,11 +9,15 @@
  * bytes and never a network call. The sponsored transport lives in `sponsored.ts`.
  *
  * THE ON-CHAIN INTERFACE (verified against packages/move-subs/sources/subscription.move):
- *   create<T>(config: &SubsConfig, merchant: address, amount: u64, period_ms: u64,
- *             ref: vector<u8>, payment: Balance<T>, clock: &Clock, ctx)  — owner mints + pays period 1
- *   renew<T>(sub: &mut Subscription<T>, config: &SubsConfig,
+ *   create<T>(version: &Version, config: &SubsConfig, merchant: address, amount: u64,
+ *             period_ms: u64, ref: vector<u8>, payment: Balance<T>, clock: &Clock, ctx)  — owner mints + pays period 1
+ *   renew<T>(version: &Version, sub: &mut Subscription<T>, config: &SubsConfig,
  *             payment: Balance<T>, clock: &Clock, ctx)                   — pay one more period (owner-signed, relayer-sponsored)
- *   cancel<T>(sub: Subscription<T>, ctx)                                 — destroy (the only exit)
+ *   cancel<T>(version: &Version, sub: Subscription<T>, ctx)             — destroy (the only exit)
+ *
+ * VERSION GATE: every entry takes the shared `Version` FIRST (assert_latest) — a stale
+ * package version (after an upgrade / admin freeze) aborts EWrongVersion before any money
+ * moves. The id is PACKAGE_IDS.SUBS.VERSION_OBJECT.
  *
  * PUSH-NOT-PULL: each period's `Balance<USDC>` is PUSHED into create/renew via the
  * SDK's `tx.balance({ type, balance })` intent (materialized from the sender's own
@@ -36,6 +40,7 @@ import type { Subscription } from './payTypes';
 
 const T = PACKAGE_IDS.SUBS.TARGETS;
 const SUBS_CONFIG = PACKAGE_IDS.SUBS.CONFIG_OBJECT;
+const SUBS_VERSION = PACKAGE_IDS.SUBS.VERSION_OBJECT;
 const SUBS_PKG = PACKAGE_IDS.SUBS.PACKAGE;
 
 /** The settlement coin type arg for the production `Subscription<USDC>`. */
@@ -90,6 +95,7 @@ export function buildCreate(opts: {
   tx.moveCall({
     target: T.CREATE,
     arguments: [
+      tx.object(SUBS_VERSION),
       tx.object(SUBS_CONFIG),
       tx.pure.address(opts.merchant),
       tx.pure.u64(amount),
@@ -122,7 +128,7 @@ export function buildRenew(opts: { subId: string; amountRaw: bigint | number }):
   const payment = tx.balance({ type: USDC.type, balance: amount });
   tx.moveCall({
     target: T.RENEW,
-    arguments: [tx.object(opts.subId), tx.object(SUBS_CONFIG), payment, tx.object(CLOCK_ID)],
+    arguments: [tx.object(SUBS_VERSION), tx.object(opts.subId), tx.object(SUBS_CONFIG), payment, tx.object(CLOCK_ID)],
     typeArguments: [USDC.type],
   });
   return tx;
@@ -137,7 +143,7 @@ export function buildCancel(opts: { subId: string }): Transaction {
   const tx = new Transaction();
   tx.moveCall({
     target: T.CANCEL,
-    arguments: [tx.object(opts.subId)],
+    arguments: [tx.object(SUBS_VERSION), tx.object(opts.subId)],
     typeArguments: [USDC.type],
   });
   return tx;
