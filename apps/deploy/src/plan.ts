@@ -27,7 +27,6 @@ import {
   resolveTreasury,
 } from '@suize/shared'
 import { suizeSubs, type SubStatus } from '@suize/pay/subs'
-import { fetch_site } from './api'
 import { SUI_NETWORK } from './config'
 
 const USDC_TYPE = USDC_TYPES[SUI_NETWORK].toLowerCase()
@@ -103,19 +102,4 @@ export const useDeploySub = (
     loading:
       treasuryQ.isLoading || (Boolean(merchant) && list.length > 0 && subQ.isLoading),
   }
-}
-
-// A site's live Walrus storage-end wall-clock (ms), or null while unresolved /
-// unknown. Backend-backed (GET /sites/:id computes it from the blobs' end epoch),
-// best-effort, react-query-cached under the SAME key the dossier uses → one fetch
-// shared between a site's card and its detail page. The card still renders from
-// chain without it (a backend blip just hides the expiry line).
-export const useSiteExpiry = (siteId: string): number | null => {
-  const q = useQuery({
-    queryKey: ['site-storage', siteId],
-    queryFn: () => fetch_site(siteId),
-    staleTime: 60_000,
-    retry: false,
-  })
-  return q.data?.expiresAtMs ?? null
 }

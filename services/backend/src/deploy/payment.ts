@@ -49,7 +49,7 @@ import { formatUsdc } from "@suize/x402";
 import { config } from "../config";
 import { doVerify, doSettle } from "../facilitator/x402";
 import { recoverPayer } from "@suize/x402";
-import { treasuryAddress, treasuryReady } from "../facilitator/fees";
+import { outputsFor, treasuryAddress, treasuryReady } from "../facilitator/fees";
 
 // ---------------------------------------------------------------------------
 // The gate. The join is LIVE only when the treasury fee-recipient is resolvable
@@ -74,18 +74,27 @@ export const chargeGateReady = (): Promise<boolean> => treasuryReady();
 export const chargeGateReason = (): string =>
   "rail not configured: Deploy treasury (fee_recipient) unresolved";
 
-/** The Deploy treasury (merchant) the settlement must pay — resolved from SuiNS,
- * falling back to the network address (the same resolver the facilitator fee tier
- * uses). "" when unresolved (fail-closed: no terms minted). */
-export const deployMerchant = (): Promise<string> => treasuryAddress();
+/** The Deploy MERCHANT — the address the deploy revenue pays. When SUIZE_DEPLOY_MERCHANT
+ * is set to a valid address, that's the merchant (a REAL third-party merchant: net →
+ * merchant, the 2%/$0.01 fee leg → treasury — so the deploy lands in the merchant's
+ * business ledger as a `charged` payment). UNSET → the treasury itself (FIRST-PARTY: a
+ * single full-amount output, deploy income IS treasury income). "" when the treasury is
+ * unresolved (fail-closed: no terms minted). NOTE: the split only carves a fee leg when
+ * merchant ≠ treasury — if they're the same address, outputsFor merges to one output. */
+export const deployMerchant = async (): Promise<string> => {
+  const m = config.deployMerchant?.trim();
+  if (m && /^0x[0-9a-f]{1,64}$/i.test(m)) return m.toLowerCase();
+  return treasuryAddress();
+};
 
 // ---------------------------------------------------------------------------
 // deployRequirements — the x402 V2 PaymentRequired body POST /deploy answers when
-// no payment proof is presented. SINGLE OUTPUT (first-party — 100% of the $0.50 to
-// the Deploy treasury; the fees /terms tier is irrelevant here, so we build the
-// requirement directly with no extra.outputs split). The buildUrl / facilitator
-// point back at THIS process's own origin (merchant and facilitator are one process
-// here), derived from the request URL so local dev self-targets too.
+// no payment proof is presented. The outputs are whatever `outputsFor(merchant, amount)`
+// resolves: a [merchant net, treasury fee] SPLIT when SUIZE_DEPLOY_MERCHANT names a real
+// third-party merchant (≠ treasury), or a SINGLE full-amount output when unset (merchant
+// == treasury, first-party). The buildUrl / facilitator point back at THIS process's own
+// origin (merchant and facilitator are one process here), derived from the request URL so
+// local dev self-targets too.
 // ---------------------------------------------------------------------------
 
 /** Restore the real scheme behind the CF tunnel (the pod sees plain http);
@@ -111,10 +120,12 @@ const DEPLOY_RIDER =
   "One payment mints one site.";
 
 /**
- * Mint the x402 V2 PaymentRequired POST /deploy answers when unpaid. The merchant
- * is the resolved Deploy treasury; the requirement is a SINGLE full-amount output
- * (first-party). The facilitator (build/verify/settle) is THIS process's origin.
- * Returns null when the treasury is unresolved (gate off → un-gated deploy).
+ * Mint the x402 V2 PaymentRequired POST /deploy answers when unpaid. The outputs are
+ * the resolved fee split for the merchant (outputsFor): [merchant net, treasury fee]
+ * when the merchant ≠ treasury (a real third-party merchant), or a SINGLE full-amount
+ * output when merchant == treasury (first-party). The facilitator (build/verify/settle)
+ * is THIS process's origin. Returns null when the treasury is unresolved (gate off →
+ * un-gated deploy) — outputsFor throws fail-closed, which we map to the same gate-off.
  */
 export const deployRequirements = async (
   requestUrl: string,
@@ -126,6 +137,13 @@ export const deployRequirements = async (
 ): Promise<(PaymentRequired & { error: string }) | null> => {
   const merchant = await deployMerchant();
   if (!merchant) return null; // gate off — caller falls through to un-gated deploy
+  const amountStr = premium ? PREMIUM_AMOUNT_STR : STD_AMOUNT_STR;
+  let outputs: Output[];
+  try {
+    outputs = await outputsFor(merchant, BigInt(amountStr));
+  } catch {
+    return null; // treasury unresolved → gate off (un-gated deploy), same as before
+  }
   const origin = originOf(requestUrl, forwardedProto);
   const body = mintPaymentRequired(
     {
@@ -134,9 +152,7 @@ export const deployRequirements = async (
       facilitator: origin,
       network: NETWORK,
     },
-    { resourceUrl: requestUrl },
-    // NOTE: no `outputs` → mintPaymentRequired builds the single full-amount output
-    // (first-party). The fee /terms tier is intentionally skipped here.
+    { resourceUrl: requestUrl, outputs },
   );
   return {
     ...body,
@@ -201,19 +217,17 @@ const deepEqual = (a: unknown, b: unknown): boolean => {
   );
 };
 
-/** Build the requirement WE expect the payer to have accepted (the single full-amount
- * output to the resolved Deploy treasury, for the given decimal price). The presented
- * `accepted` must deep-equal it. */
-const expectedRequirement = (merchant: string, price: string): PaymentRequirements =>
+/** Build the requirement WE expect the payer to have accepted (the merchant's resolved
+ * fee split for the given decimal price). The presented `accepted` must deep-equal it. */
+const expectedRequirement = (
+  merchant: string,
+  price: string,
+  outputs: Output[],
+): PaymentRequirements =>
   mintPaymentRequired(
     { to: merchant, price, network: NETWORK },
-    { paymentId: "pay_" + "0".repeat(32) }, // id is NOT compared (stripped below)
+    { paymentId: "pay_" + "0".repeat(32), outputs }, // id is NOT compared (stripped below)
   ).accepts[0];
-
-/** The single declared output (the chosen amount to the Deploy treasury). */
-const deployOutputs = (merchant: string, amountStr: string): Output[] => [
-  { to: merchant, amount: amountStr },
-];
 
 /** A verified (NOT-yet-settled) deploy payment — the payer the recovered signature
  * proves (→ the on-chain owner) plus the payload + requirements to settle later. */
@@ -285,15 +299,20 @@ export const gateDeployPayment = async (
   }
 
   // The presented `accepted` must match OUR terms (rebuilt for the chosen amount) on
-  // the LOAD-BEARING fields: scheme/network/asset/payTo/amount + the single declared
-  // output to the Deploy treasury. A tampered split is rejected before any chain read.
-  // The advisory fields (extra.buildUrl, the payment-identifier extension) are NOT
-  // compared — they don't affect settlement, and the buildUrl varies by origin.
-  // amountStr is already proven to be exactly STD or PREMIUM, so pick its decimal
-  // constant directly (no bigint→Number→string laundering).
+  // the LOAD-BEARING fields: scheme/network/asset/payTo/amount + the declared fee split
+  // (merchant net + treasury fee leg, or a single output when merchant == treasury). A
+  // tampered split is rejected before any chain read. The advisory fields (extra.buildUrl,
+  // the payment-identifier extension) are NOT compared — they don't affect settlement, and
+  // the buildUrl varies by origin. amountStr is already proven to be exactly STD or
+  // PREMIUM, so pick its decimal constant directly (no bigint→Number→string laundering).
   const priceStr = amountStr === PREMIUM_AMOUNT_STR ? DEPLOY_PREMIUM_PRICE_DECIMAL : DEPLOY_PRICE_DECIMAL;
-  const expected = expectedRequirement(merchant, priceStr);
-  const ours = deployOutputs(merchant, amountStr);
+  let ours: Output[];
+  try {
+    ours = await outputsFor(merchant, BigInt(amountStr));
+  } catch {
+    throw new DeployPaymentError(chargeGateReason(), 503);
+  }
+  const expected = expectedRequirement(merchant, priceStr, ours);
   const termsMatch =
     !!accepted &&
     accepted.scheme === expected.scheme &&
@@ -306,8 +325,8 @@ export const gateDeployPayment = async (
     throw new DeployPaymentError("presented terms do not match the Deploy quote", 402, true);
   }
 
-  // The requirements the facilitator core verifies against (the single declared
-  // output — the source of truth for the exact-fee check).
+  // The requirements the facilitator core verifies against (the declared fee split —
+  // the source of truth for the exact-fee check).
   const requirements: PaymentRequirements = {
     ...expected,
     extra: { ...expected.extra, outputs: ours },

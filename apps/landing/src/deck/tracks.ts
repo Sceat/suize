@@ -1,5 +1,17 @@
-import { PACKAGE_IDS, USDC_TYPE, TREASURY_SUINS_NAME } from '@suize/shared';
 import type { TrackPage } from './types';
+
+// Public on-chain ids, inlined (snapshot from @suize/shared) so the deck carries
+// no workspace dependency now that it lives inside the landing app — keeps the
+// landing's Vercel build dependency-free. Display/links only; source of truth
+// remains @suize/shared.
+const USDC_TYPE = '0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC';
+const TREASURY_SUINS_NAME = 'treasury@suize';
+const PACKAGE_IDS = {
+  SUBS: { PACKAGE: '0x759105b5f7382cb22533e8a5282e90c92c558edb1bc2eaa0904247914082d821' },
+  DEPLOY: { PACKAGE: '0x5cbf0ce0a2f56128ef0d7679aab8f3a8ba690533163dc2524754fd40f27faf0b' },
+  AUCTION: { PACKAGE: '0xa7151d699c93e48e5f502759d4de704ba4b8f22111b3d0b5a60c265ff2d37869' },
+  CRASH: { PACKAGE: '0x16eb262d69300c4291beab7e9f27b2b94640124a290f373230c5c8a3d3d50c26' },
+};
 
 // ── live, real, reachable surfaces (verified up 2026-06-15) ──────────────────
 const sv = (path: string) => `https://testnet.suivision.xyz/${path}`;
@@ -35,11 +47,11 @@ export const tracks: TrackPage[] = [
     trackline: 'Programmable money on Sui — payments that are financial actions, not static transfers.',
     productName: 'The building blocks for agentic payments on Sui.',
     pitch:
-      'Every AI agent that can hold USDC on Sui can pay any merchant — gasless, in one atomic transaction, with the fee enforced on-chain. The x402 “exact” payment layer for the agentic economy on Sui.',
+      'Every AI agent that can hold USDC on Sui can pay any merchant — gasless, in one atomic transaction, settled on-chain. The x402 “exact” payment layer for the agentic economy on Sui.',
     proof: [
       'We authored the x402 “exact” scheme for Sui — open PRs upstream (#2615 + #2616)',
       'A live x402 facilitator for Sui — /verify /settle /build /terms /supported /tx',
-      'The fee is enforced at verify — a merchant cannot zero it',
+      'Settlement is exact — enforced at verify, idempotent by digest',
       '21/21 end-to-end green on real Sui testnet',
       '@suize/pay + @suize/mcp — published on npm',
       'Zero gas · zero custody · zero database — the chain is the ledger',
@@ -64,7 +76,7 @@ export const tracks: TrackPage[] = [
         overview:
           'The merchant mints an x402 V2 “exact” PaymentRequired. This single response is the whole contract — the agent reads it and knows exactly what to pay, to whom, with what idempotency.',
         points: [
-          'What it carries: scheme=exact · network · the amount · the asset (native USDC) · payTo · and extra.outputs — the exact declared split the agent must reproduce on-chain.',
+          'What it carries: scheme=exact · network · the amount · the asset (native USDC) · payTo · and the exact outputs the agent must reproduce on-chain.',
           'Idempotency rides the payment-identifier extension — a stable id, so a retry is never a double charge.',
           'What the agent extracts: the outputs it must credit, the buildUrl, and the payment id.',
           'Two ways to respond: call POST /build for unsigned gasless bytes, OR self-build the send_funds PTB with @x402/sui (the Sui scheme we authored). The agent is never locked into our tooling.',
@@ -74,7 +86,7 @@ export const tracks: TrackPage[] = [
           { kind: 'spec', label: '@x402/sui', note: 'the x402 “exact” Sui scheme we authored — open upstream (PR #2616)', href: 'https://github.com/x402-foundation/x402/pull/2616' },
         ],
         artifact: {
-          caption: 'the real challenge — live from api.suize.io',
+          caption: 'the x402 V2 “exact” challenge — the contract every merchant mints',
           body: `{
   "x402Version": 2,
   "accepts": [{
@@ -83,13 +95,7 @@ export const tracks: TrackPage[] = [
     "amount": "1000000",
     "asset": "0x…::usdc::USDC",
     "payTo": "0xMERCHANT…",
-    "extra": {
-      "outputs": [
-        { "to": "0xMERCHANT…", "amount": "980000" },
-        { "to": "0xTREASURY…", "amount":  "20000" }
-      ],
-      "buildUrl": "https://api.suize.io/build"
-    }
+    "extra": { "buildUrl": "https://api.suize.io/build" }
   }],
   "extensions": {
     "payment-identifier": { "info": { "id": "pay_…" } }
@@ -101,9 +107,9 @@ export const tracks: TrackPage[] = [
         actor: 'Agent',
         title: 'Builds the gasless payment',
         overview:
-          'The agent assembles one Programmable Transaction Block — a send_funds per declared output, gas budget zero. Pay + fee + receipt become a single atomic financial action.',
+          'The agent assembles one Programmable Transaction Block — a send_funds per declared output, gas budget zero. Pay + receipt become a single atomic financial action.',
         points: [
-          '0x2::balance::send_funds for each output — the merchant leg and the treasury fee leg — in ONE atomic transaction.',
+          '0x2::balance::send_funds for each declared output — in ONE atomic transaction.',
           'setGasBudget(0) forces Sui’s protocol-level gasless election — no gas token, ever.',
           'This is the “programmable money” the track asks for: not three transfers, one composable action.',
         ],
@@ -128,12 +134,12 @@ export const tracks: TrackPage[] = [
       },
       {
         actor: 'Facilitator',
-        title: '/verify — the fee is physics',
+        title: '/verify — settlement is exact',
         overview:
           'Keyless and stateless. The facilitator simulates the signed transaction and refuses anything that does not pay exactly right.',
         points: [
-          'Simulates over gRPC (no broadcast) and asserts the balance-change set matches the canonical split EXACTLY — assertOutputsExact.',
-          'The fee is recomputed server-side and enforced: skip the treasury leg and the payment fails verify. A merchant cannot zero it.',
+          'Simulates over gRPC (no broadcast) and asserts the balance-change set matches the declared outputs EXACTLY — assertOutputsExact.',
+          'The declared outputs are enforced server-side — anything that does not pay exactly right fails verify.',
           'Recovers the payer from the signature and checks payer == sender — no proxy debits.',
           'Replay guard: a digest already executed on-chain is rejected before settle.',
         ],
@@ -146,7 +152,7 @@ export const tracks: TrackPage[] = [
           'The facilitator broadcasts the agent’s own signed transaction. It never holds a key and never stores a payment record.',
         points: [
           'Idempotent by digest — replay the same payload and you get the first result back, never a second charge.',
-          'No webhooks, no session store, no server-minted ids. The chain is the database.',
+          'No session store, no server-minted ids — the chain is the database.',
         ],
         tech: [{ kind: 'endpoint', label: 'POST /settle', note: 'keyless gRPC broadcast · idempotent by digest' }],
       },
@@ -154,13 +160,29 @@ export const tracks: TrackPage[] = [
         actor: 'Sui',
         title: 'The balance change IS the receipt',
         overview:
-          'The settled transaction’s balance-change set is the receipt — public, verifiable, the fee visible. And the recurring half rides the same rail.',
+          'The settled transaction’s balance-change set is the receipt — public, verifiable. And the recurring half rides the same rail.',
         points: [
-          'Merchant credited, treasury fee leg credited, payer debited exactly the listed price.',
+          'Merchant credited, payer debited exactly the listed price.',
           'Recurring: subs::subscription makes a subscription a soulbound on-chain object — push renewals the user signs each period, cancel = delete the object.',
         ],
         tech: [
           { kind: 'module', label: 'subs::subscription', note: 'published testnet — the on-chain recurring rail (push, user-signed, cancel = delete)', href: sv(`package/${PACKAGE_IDS.SUBS.PACKAGE}`) },
+        ],
+      },
+      {
+        actor: 'The landscape',
+        title: 'AP2 authorizes · x402 settles · Suize enforces',
+        overview:
+          'Agentic commerce has two halves: who authorized the agent, and how it pays. Suize runs the second on Sui — and adds what neither standard does on its own: on-chain enforcement.',
+        points: [
+          'AP2 (Google, 60+ partners) signs cryptographic mandates off-chain — an intent and a cart — for authorization and accountability.',
+          'x402 (Coinbase) is the settlement rail; Suize runs the only live x402 facilitator for Sui — and AP2 is payment-method-agnostic, so it can settle over a stablecoin rail like ours.',
+          'Suize’s edge is enforcement: the funded sub-account IS the spend cap, the on-chain receipt IS the audit trail — what custodial stacks promise off-chain, we enforce on-chain.',
+          'Complementary, not competitive — the crypto-native settlement + enforcement layer in an AP2 world.',
+        ],
+        tech: [
+          { kind: 'spec', label: 'AP2', note: 'Google’s agent-authorization mandates (W3C VCs) — the layer above the rail' },
+          { kind: 'spec', label: 'x402 “exact” · Sui', note: 'the settlement rail we run — the only live facilitator for Sui' },
         ],
       },
     ],
@@ -174,7 +196,7 @@ export const tracks: TrackPage[] = [
         name: 'The Agents Directory',
         tagline: 'agents.suize.io — the discovery layer for agent commerce on Sui.',
         points: [
-          'Because every payment carves a fee-leg to one treasury, the entire stream of agent commerce is readable on-chain — merchant-agnostic, no opt-in.',
+          'Because every payment settles on-chain, the entire stream of agent commerce is readable — merchant-agnostic, no opt-in.',
           'A live feed of every payment, per-merchant volume rankings, and an on-chain ad auction merchants bid into to get discovered.',
           'The ad sale is itself a payment on the rail — it appears in the directory’s own feed. A flywheel that monetizes itself.',
           '(The on-chain auction is live on testnet; the public feed deploys with its backend route group.)',
@@ -187,7 +209,7 @@ export const tracks: TrackPage[] = [
     ],
     stack: [
       { kind: 'spec', label: '@x402/sui · upstream', note: 'the Sui “exact” scheme we authored — open PRs on x402-foundation/x402 (#2615 spec + #2616 mechanism)', href: 'https://github.com/x402-foundation/x402/pull/2616' },
-      { kind: 'npm', label: '@suize/pay', note: 'the ~60-line merchant middleware — live on npm (0.3.1)', href: npm('@suize/pay') },
+      { kind: 'npm', label: '@suize/pay', note: 'the ~60-line merchant middleware — live on npm (0.4.1)', href: npm('@suize/pay') },
       { kind: 'npm', label: '@suize/mcp', note: 'the agent wallet — 6 tools, live on npm (0.2.3)', href: npm('@suize/mcp') },
       { kind: 'endpoint', label: 'api.suize.io', note: 'the live x402 facilitator for Sui' },
       { kind: 'module', label: 'subs::subscription', note: 'the on-chain recurring rail — published testnet', href: sv(`package/${PACKAGE_IDS.SUBS.PACKAGE}`) },
@@ -212,6 +234,7 @@ export const tracks: TrackPage[] = [
       'Shipped our OWN production landing this way',
       'Pay → mint → serve, end-to-end on testnet',
       'The site’s owner = the address that paid — the payment is the login',
+      'Custom domains, agent-owned — live',
       'Double-hash verified by a Cloudflare worker on every request',
     ],
     journey: [
@@ -273,8 +296,8 @@ export const tracks: TrackPage[] = [
     ],
     roadmap: [
       'Mainnet — a republish away (the flagship demo)',
-      'Custom domains, agent-owned',
-      'MemWal — agent memory + a verifiable action-log on Walrus',
+      'Auto-renewed Walrus storage, so a site never expires',
+      'Framework adapters for agent build pipelines',
     ],
   },
 
@@ -291,7 +314,7 @@ export const tracks: TrackPage[] = [
       'DeepBook Predict integration, end-to-end on testnet',
       'Gasless one-tap bets + live cash-out',
       'Permissionless auto-claim — no keeper',
-      'A 3% rake, atomic and non-bypassable',
+      'A built-in rake, atomic and non-bypassable',
     ],
     journey: [
       {
@@ -310,9 +333,9 @@ export const tracks: TrackPage[] = [
       },
       {
         actor: 'Router',
-        title: 'Skims 3%, routes to Predict',
-        overview: 'Every action flows through PolySui’s router, which carves its 3% rake atomically inside the bet.',
-        points: ['The 3% rake is non-bypassable: the gasless path is allowlisted to router::* only.', 'One sponsored transaction does it all — deposit, quote, mint.'],
+        title: 'Takes its cut, routes to Predict',
+        overview: 'Every action flows through PolySui’s router, which carves its rake atomically inside the bet.',
+        points: ['The rake is non-bypassable: the gasless path is allowlisted to router::* only.', 'One sponsored transaction does it all — deposit, quote, mint.'],
         tech: [{ kind: 'module', label: 'router (PolySui)', note: 'the non-bypassable rake gateway — version-gated', href: sv(`package/${PACKAGE_IDS.CRASH.PACKAGE}`) }],
       },
       {
@@ -355,7 +378,7 @@ export const tracks: TrackPage[] = [
     roadmap: [
       'Vault backtest / simulation curve',
       'An agent that trades it from a capped wallet',
-      'Mainnet on Predict, day one',
+      'Mainnet the day DeepBook Predict ships there',
     ],
   },
 
@@ -406,7 +429,7 @@ export const tracks: TrackPage[] = [
       {
         actor: 'Wallet',
         title: 'Re-derives the numbers — you confirm',
-        overview: 'The number wall: the wallet computes the real amount, recipient and fee from chain truth, shows you a card, and signs locally on confirm.',
+        overview: 'The number wall: the wallet computes the real amount and recipient from chain truth, shows you a card, and signs locally on confirm.',
         points: ['The AI’s words never become the transaction — the wallet owns every on-chain number.', 'This separation is the whole safety story the track rewards: autonomy you can trust.'],
         tech: [{ kind: 'primitive', label: 'the number wall', note: 'on-chain numbers come from chain truth, never the LLM' }],
       },

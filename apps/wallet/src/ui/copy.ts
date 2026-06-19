@@ -250,8 +250,9 @@ export const ACTIONS = {
     /** person-to-person requests ride the FREE rail verb (spend) — this is the
      *  wallet surface, NEVER the merchant pay-link (which takes the 2%). */
     linkBase: 'wallet.suize.io/',
-    /** the network warning — the one line every wallet needs */
-    network: 'Send only USDC on Sui — other coins or networks may be lost.',
+    /** the network warning — short; on Sui you don't "lose" USDC sent to a Sui
+     *  address, so no false scare tail, just the rule that matters */
+    network: 'Send only USDC on Sui',
     more: 'More ways to add',
     soonTag: 'Soon',
     soon: ['Bank transfer', 'Apple Pay', 'Card'],
@@ -351,6 +352,8 @@ export const CONSOLE = {
     },
     mint: 'Create profile · $0.10',
     edit: 'Save changes · $0.10',
+    editProfile: 'Edit profile',
+    cancel: 'Cancel',
     feeNote: 'A one-time $0.10, paid from your wallet — keeps the directory clean.',
     minting: 'Signing…',
     nameRequired: 'Add a business name first.',

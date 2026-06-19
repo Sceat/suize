@@ -14,13 +14,22 @@
 // Cash-out is HONEST single-source: the position + its live value are real
 // (on-chain redeem quote), and the Cash Out button hands the user to Play — where
 // the battle-tested gasless cash-out flow already runs. We never duplicate the
-// sponsor/sign machinery here (single source of truth).
+// sponsor/sign machinery here.
+//
+// CLAIM is the ONE write this screen makes: settled+won funds that were never
+// redeemed (the on-chain payout sitting outside the wallet) get a "Non-redeemed
+// funds" line + a Claim button that force-triggers the redeem. It reuses the
+// SHARED gasless path (useGaslessSign — the same hook House uses), not a private
+// copy, so there is still one signing machine; build_claim_tx is the same
+// allowlisted redeem the Play auto-claim fires.
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useSuiClient } from '@mysten/dapp-kit'
 import { useAuth } from '../auth'
+import { useGaslessSign } from '../useGaslessSign'
+import { build_claim_tx } from '../sui'
 import {
   fmt_amount,
   fmt_countdown,
@@ -124,10 +133,66 @@ export function Portfolio() {
 
   const now = useCountdown(data.open)
 
+  // ---- CLAIM non-redeemed funds (the ONE write on this screen) ----------------
+  // Reuses the shared gasless path. De-atomized like Play's on-load sweep: one tx
+  // per position so a single already-redeemed leg (e.g. the Play auto-claim raced
+  // us) only skips itself instead of aborting the batch. Claimed keys are remembered
+  // for the session so the line never flickers back while the redeemed feed catches
+  // up; a full reload reconciles the wallet balance + drops them from chain truth.
+  const { signAndExecute } = useGaslessSign()
+  const [claiming, setClaiming] = useState(false)
+  const [claimError, setClaimError] = useState<string | null>(null)
+  const claimedKeys = useRef<Set<string>>(new Set())
+
+  const claimAll = useCallback(async () => {
+    const positions = data.claimable.filter(c => !claimedKeys.current.has(c.key))
+    if (positions.length === 0 || claiming) return
+    setClaiming(true)
+    setClaimError(null)
+    let ok = 0
+    let lastErr = ''
+    for (const p of positions) {
+      try {
+        const tx = build_claim_tx({
+          manager_id: p.managerId,
+          oracle_id: p.oracleId,
+          expiry_ms: p.expiryMs,
+          strike_1e9: p.strike1e9,
+          is_up: p.isUp,
+          quantity: p.quantity,
+        })
+        const res = await signAndExecute({ transaction: tx })
+        await client.waitForTransaction({
+          digest: res.digest,
+          options: { showEffects: true },
+        })
+        claimedKeys.current.add(p.key)
+        ok++
+      } catch (e) {
+        const msg = (e as Error).message ?? ''
+        // Already redeemed elsewhere (the Play auto-claim got it first) is terminal,
+        // not a failure — hide it too. Anything else is a real, retryable error.
+        if (/already|redeem|moveabort|aborted/i.test(msg)) {
+          claimedKeys.current.add(p.key)
+          ok++
+        } else {
+          lastErr = msg
+        }
+      }
+    }
+    if (ok === 0 && lastErr)
+      setClaimError('Couldn’t claim those funds — try again in a moment.')
+    setClaiming(false)
+    reload() // re-reconcile: claimed payout lands in the wallet, feed drops the row
+  }, [data.claimable, claiming, signAndExecute, client, reload])
+
   if (!address) return <SignedOut />
 
   const hero = data.netUsd
   const heroSign = hero > 0 ? 'pos' : hero < 0 ? 'neg' : 'flat'
+  // session-claimed rows stay hidden so the line never flickers back pre-reindex
+  const claimable = data.claimable.filter(c => !claimedKeys.current.has(c.key))
+  const claimableUsd = claimable.reduce((s, c) => s + c.grossUsd, 0)
 
   return (
     <main className="pf">
@@ -159,6 +224,32 @@ export function Portfolio() {
           </div>
         </dl>
       </header>
+
+      {/* ---- NON-REDEEMED FUNDS: settled wins not yet pulled to the wallet ---- */}
+      {claimable.length > 0 && (
+        <section className="pf-claim">
+          <div className="pf-claim-row">
+            <div className="pf-claim-l">
+              <span className="pf-claim-lbl">Non-redeemed funds</span>
+              <span className="pf-claim-sub">
+                {claimable.length === 1
+                  ? 'A settled win is waiting — claim it to your wallet.'
+                  : `${claimable.length} settled wins waiting — claim them to your wallet.`}
+              </span>
+            </div>
+            <span className="pf-claim-amt tnum">{fmt_usd_amount(claimableUsd)}</span>
+            <button
+              type="button"
+              className="pf-claim-btn"
+              onClick={claimAll}
+              disabled={claiming}
+            >
+              {claiming ? 'Claiming…' : 'Claim'}
+            </button>
+          </div>
+          {claimError && <p className="pf-claim-err">{claimError}</p>}
+        </section>
+      )}
 
       {/* ---- SKILL: the cumulative-profit curve + a stat strip ---- */}
       {data.history.length > 0 && <Skills data={data} />}

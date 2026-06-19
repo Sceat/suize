@@ -27,6 +27,27 @@ export default defineConfig({
         })
       },
     },
+    {
+      // Dev parity for the deck's live-facilitator ping (/deck). In prod the
+      // edge function apps/landing/api/live.ts serves it; in dev there is no
+      // Vercel runtime, so mirror it here.
+      name: 'suize-live-proxy-dev',
+      apply: 'serve',
+      configureServer(server) {
+        server.middlewares.use('/api/live', async (_req, res) => {
+          try {
+            const r = await fetch('https://api.suize.io/supported', { headers: { accept: 'application/json' } })
+            const data = await r.json()
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify({ ok: r.ok, status: r.status, endpoint: 'GET /supported', data }))
+          } catch (e) {
+            res.statusCode = 502
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify({ ok: false, error: e.message }))
+          }
+        })
+      },
+    },
   ],
   build: {
     rollupOptions: {

@@ -13,7 +13,8 @@
 //               run over the authenticated WebSocket (ws/index.ts) where
 //               ws.data.address is the verified subject. The module is still
 //               imported for readiness/info only.
-//   - agent   : (stub, not wired yet)           (wallet AI brain — see src/agent)
+//   - brain   : the wallet AI brain — keyless Anthropic loop over the authenticated
+//               WS (ws.data.address identity); proposes tool calls, never signs.
 //   - shared  : GET /health, GET /ready
 //
 // The waitlist (api) module + its Redis dependency have been REMOVED entirely
@@ -27,6 +28,7 @@ import { sponsorReady, sponsorInfo, maskKey } from "./sponsor";
 import { handleReady, handleInfo } from "./handle";
 import { handleDeployRoute, deployReady, deployInfo } from "./deploy";
 import { handleChargeRoute, chargeInfo } from "./charge";
+import { handleTraceRoute } from "./trace";
 import { startStorageCron, storageInfo } from "./deploy/extend";
 import { subscribeInfo } from "./deploy/subscribe";
 import { handleMcpRoute, mcpInfo } from "./mcp";
@@ -118,6 +120,14 @@ Bun.serve({
       const ok = await deployReady();
       return json({ deploy: ok }, ok ? 200 : 503, origin);
     }
+    if (req.method === "GET" && url.pathname === "/ready/brain") {
+      // Gates ONLY the wallet AI brain (ANTHROPIC_API_KEY present at boot). 503 when
+      // unset — a no-auth confirmation that the conversational wallet is live, with
+      // no signed WS chat turn needed. Brain absence never 503s the rest of the
+      // backend (it is an optional feature, deliberately NOT folded into /ready).
+      const ok = brainInfo.enabled;
+      return json({ brain: ok }, ok ? 200 : 503, origin);
+    }
     if (req.method === "GET" && url.pathname === "/ready/ws") {
       // Gates ONLY the WebSocket transport. wsConnectionCount() being callable
       // proves the ws module imported AND websocketHandler is wired into this
@@ -161,7 +171,7 @@ Bun.serve({
     if (mcp) return mcp;
 
     // Facilitator module — x402 V2 'exact', KEYLESS: POST /verify, POST /settle,
-    // GET /supported, POST /build, GET /terms, GET /tx, POST /checkout. Payments
+    // GET /supported, POST /build, GET /terms, GET /tx. Payments
     // settle by broadcasting the payer's signed gasless send_funds PTB over gRPC —
     // no Enoki, no account.move. `server` is threaded for the per-IP limiter.
     const facilitated = handleFacilitatorRoute(req, url, origin, server);
@@ -189,6 +199,11 @@ Bun.serve({
     // generalized to any {merchant, price, webhook} carried in a Suize-signed token.
     const charged = handleChargeRoute(req, url, origin);
     if (charged) return charged;
+
+    // The wallet's encrypted-history relay — POST /trace stores opaque Seal
+    // ciphertext to Walrus, owned by the verified signer. Blind + stateless.
+    const traced = handleTraceRoute(req, url, origin);
+    if (traced) return traced;
 
     // NOTE: the waitlist (POST /waitlist) route has been REMOVED with the api
     // module. The LIVE landing page that posts to /waitlist will 404 until the
@@ -311,12 +326,12 @@ console.log(
 console.log(
   `[backend] routes: GET /ws (websocket — incl. sponsor/execute + handle ops), ` +
     `POST /mcp, POST /verify, POST /settle, GET /supported, POST /build, ` +
-    `GET /terms, GET /tx, POST /checkout, ` +
+    `GET /terms, GET /tx, GET /charge/:token, POST /charge/:token, ` +
     `GET /feed, GET /rankings, GET /stats, POST /stats/visit, ` +
     `GET /ads/slots, GET /ads/slots/:key, GET /directory.json, GET /directory.okf, ` +
     `POST /deploy, POST /deploy/subscribe/build, POST /deploy/subscribe/submit, ` +
     `GET /sites, GET /sites/:id, POST /sites/:id/extend, ` +
     `POST /domains, DELETE /domains/:domain, ` +
     `GET /health, GET /ready, GET /ready/serve, GET /ready/sponsor, ` +
-    `GET /ready/handle, GET /ready/deploy, GET /ready/ws`,
+    `GET /ready/handle, GET /ready/deploy, GET /ready/brain, GET /ready/ws`,
 );

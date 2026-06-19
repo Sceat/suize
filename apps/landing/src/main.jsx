@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { Analytics } from '@vercel/analytics/react'
 import { boot } from './lib/theme'
 import './theme.css'
 import './sections.css'
@@ -12,5 +13,6 @@ boot()
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />
+    <Analytics />
   </StrictMode>,
 )

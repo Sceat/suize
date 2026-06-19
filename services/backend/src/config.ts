@@ -2,7 +2,7 @@
 // here instead of touching process.env directly, so the env contract lives in
 // one place (mirrored by .env.example).
 
-import { fullnodeUrl, resolveNetwork, WALRUS_DEFAULTS, DEPLOY_SUB_PERIOD_MS, DEPLOY_SUB_PRICE_USDC } from "@suize/shared";
+import { fullnodeUrl, resolveNetwork, WALRUS_DEFAULTS, DEPLOY_SUB_PERIOD_MS, DEPLOY_SUB_PRICE_USDC, DEPLOY_STORAGE_EPOCHS } from "@suize/shared";
 
 const csv = (v: string | undefined): string[] =>
   (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -93,6 +93,8 @@ export const config = {
   // webhook (merchant-verified via @suize/pay verifyWebhook). Public key published at
   // GET /charge/pubkey. Unset → the /charge door answers 503 (the rest boots fine).
   chargeKey: process.env.SUIZE_CHARGE_PRIVATE_KEY, // secret — bech32 `suiprivkey…`
+  // The public origin the hosted charge link is built on (api.suize.io/charge/<token>).
+  chargeBaseUrl: process.env.SUIZE_PUBLIC_BASE ?? "https://api.suize.io",
 
   // --- deploy module (Suize Deploy — "Vercel for Sui") ---
   // The deploy module orchestrates: unpack a posted tar → Walrus quilt upload →
@@ -108,7 +110,14 @@ export const config = {
   // modules" — keep them separate for prod; one key is fine for the demo. (The agent
   // module is still a stub, so AGENT_PRIVATE_KEY isn't otherwise consumed yet.)
   deployWalletKey: process.env.DEPLOY_WALLET_PRIVATE_KEY ?? process.env.AGENT_PRIVATE_KEY, // secret — bech32 `suiprivkey…`; signs Site PTBs (pays own gas).
-  deployEpochs: Number(process.env.DEPLOY_EPOCHS ?? 30),     // Walrus storage (epochs). 30 ≈ ~1 month at testnet's ~1-day epochs. Env-tunable (DEPLOY_EPOCHS).
+  // The Deploy MERCHANT address — who the deploy revenue pays. UNSET (or == treasury)
+  // → FIRST-PARTY: a single full-amount output, the deploy fee IS treasury income.
+  // Set to a REAL merchant address (≠ treasury) → each deploy becomes a rail charge to
+  // that merchant: net → merchant, the 2%/$0.01 fee leg → treasury (the on-chain leg the
+  // wallet reads as a `charged` merchant payment, so it lands in the business ledger).
+  // On mainnet this is the real Deploy merchant; on testnet, the demo merchant (e.g. sceat).
+  deployMerchant: process.env.SUIZE_DEPLOY_MERCHANT,
+  deployEpochs: Number(process.env.DEPLOY_EPOCHS ?? DEPLOY_STORAGE_EPOCHS),     // Walrus storage (epochs). Default = shared DEPLOY_STORAGE_EPOCHS (the UI/llms.txt quote it). ~1 month at testnet's ~1-day epochs. Env-tunable (DEPLOY_EPOCHS).
   deployBaseDomain: process.env.DEPLOY_BASE_DOMAIN ?? "suize.site", // served-site base: <base36(siteId)>.<this> — its own zone for free first-level wildcard SSL (the dashboard itself stays deploy.suize.io)
   // Walrus aggregator base — env override (WALRUS_AGGREGATOR), defaulting to the
   // public aggregator for the CONFIGURED network (shared WALRUS_DEFAULTS table).

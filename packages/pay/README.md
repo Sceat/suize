@@ -80,6 +80,41 @@ Bun.serve({ fetch: premium });
 
 A cancelled subscription still carries its paid-through time, so you may keep serving a cancelled-but-not-yet-expired customer with `graceMs`.
 
+## No code? Use a hosted charge link
+
+Don't want to run a server? Sign into the **Suize wallet** (`wallet.suize.io`) → **Accept a payment** → set a price + your webhook URL → you get a link:
+
+```
+https://api.suize.io/charge/<token>
+```
+
+Hand that link to an agent (or embed it). The agent pays it in USDC, Suize settles on-chain, and **POSTs the order to your webhook** — you fulfil. No SDK, no keys, no signup. The price and your payout address are baked into the signed link; nothing is stored. (Prefer code? `suize()` above is the same thing in your own backend.)
+
+## Verify a charge webhook
+
+When an agent pays your hosted link, Suize POSTs the settled order to your webhook, signed with the Suize charge key. Verify it in one line:
+
+```ts
+import { verifyWebhook } from "@suize/pay/webhook";
+
+app.post("/fulfill", async (req) => {
+  const order = await verifyWebhook(req);          // throws if not from Suize
+  if (await alreadyHandled(order.txDigest)) return; // DEDUPE — we deliver at-least-once
+  await fulfil(order.order);                        // ship it
+  await markHandled(order.txDigest);
+});
+```
+
+`order` is `{ txDigest, payer, amount, merchant, chargeRef, order, asset, network, paidAt }`.
+
+**The trust contract (read once):**
+
+1. The signature proves **origin** (it came from Suize) — `verifyWebhook` checks it against our published key (`/charge/pubkey`, auto-fetched + cached, `keyId`-rotatable).
+2. The on-chain **`txDigest` is the sole proof of payment**. For physical / high-value goods, read it on-chain and confirm it credits your address before you fulfil — then even a leaked key can't conjure money that isn't on the chain.
+3. **Dedupe on `txDigest`** — we deliver at-least-once; fulfil exactly once per digest.
+
+Zero-dep: `node:crypto` + `fetch` only. `verifyWebhook(req, { facilitator?, maxAgeMs?, publicKey? })`; `verifyWebhookBody(rawBody, sigHeader, opts?)` if you already have the raw body.
+
 ## Guarantees
 
 - **Non-custodial** — the payer signs locally; `@suize/pay` and the facilitator never hold a key.

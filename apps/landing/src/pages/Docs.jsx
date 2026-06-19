@@ -64,9 +64,9 @@ function DocsHero() {
 }
 
 // ---- SECTION 1 · THE ONBOARDING LADDER ---------------------------------------
-// "Get paid, whatever your stack." — four precise tiers, high-level (no code)
+// "Get paid, whatever your stack." — three precise tiers, high-level (no code)
 // → low-level. Each tier states WHO it's for, WHAT YOU DO, WHAT SUIZE DOES,
-// and HOW YOU KNOW YOU'RE PAID (the three labeled fact columns). Tier 3 keeps
+// and HOW YOU KNOW YOU'RE PAID (the three labeled fact columns). Tier 2 keeps
 // the one-liner glass code card + the auto-playing five-step sequence as its
 // demo: the sequence lights step by step on a 12s CSS loop — a payment packet
 // travelling the rail; reduced motion shows the five steps fully lit and
@@ -92,7 +92,7 @@ function ChallengeCard() {
   )
 }
 
-// Tier 3's demo — the APPROVED one-liner + animated 402 loop, verbatim (pure
+// Tier 2's demo — the APPROVED one-liner + animated 402 loop, verbatim (pure
 // CSS keyframes, no second rAF; reduced motion ⇒ static, fully lit).
 function LoopDemo() {
   const m = DOCS.merchant
@@ -121,7 +121,7 @@ function LoopDemo() {
               <span className="c-fn">suize</span>({'{ '}to:{' '}
               <span className="c-str">'0xYOU'</span>, price:{' '}
               <span className="c-str">'0.10'</span>
-              {' }'}))
+              {' }).'}<span className="c-fn">express</span>)
             </code>
           </pre>
         </div>
@@ -292,6 +292,18 @@ function Ways() {
             {w.fee}{' '}
             <a className="sx-ghost" href={w.pricing.href}>
               {w.pricing.label}
+            </a>
+          </p>
+          {/* the reference pointer — /docs is the showroom; llms.txt is the
+              field-by-field contract a dev/agent integrates against. */}
+          <p className="dxd-foot dxd-foot--fee">
+            <a
+              className="sx-ghost"
+              href={w.contract.href}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {w.contract.label}
             </a>
           </p>
         </Reveal>

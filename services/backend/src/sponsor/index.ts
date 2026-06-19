@@ -18,6 +18,8 @@ import {
   AUCTION_PUBLISHED,
   PROFILE_MOVE_TARGETS,
   PROFILE_PUBLISHED,
+  TRACE_MOVE_TARGETS,
+  TRACE_PUBLISHED,
 } from "@suize/shared";
 import type { SponsorRequest, SponsorResponse, ExecuteRequest, ExecuteResponse } from "@suize/shared";
 import { config } from "../config";
@@ -72,6 +74,10 @@ const ALLOWED_MOVE_TARGETS: string[] = [
   // $0.10 Balance<USDC> → treasury, USER-SIGNED + Enoki-sponsored — same shape as subs.
   // Unioned in only once published (a `0x0::profile::*` target would poison the list).
   ...(PROFILE_PUBLISHED ? PROFILE_MOVE_TARGETS : []),
+  // TRACE (the wallet's encrypted-history anchor): `trace::anchor` is USER-SIGNED +
+  // Enoki-sponsored (it moves no coins). `seal_approve` is dry-run, never sponsored.
+  // Unioned in only once published (a `0x0::trace::anchor` target would poison the list).
+  ...(TRACE_PUBLISHED ? TRACE_MOVE_TARGETS : []),
   ...MEMWAL_MOVE_TARGETS,
 ];
 
@@ -125,9 +131,12 @@ export const sponsorReady = async (): Promise<boolean> => {
 // errorResponse frame; the `.status` field is the HTTP-equivalent code).
 // ---------------------------------------------------------------------------
 
-/** A validation/Enoki failure with the client-safe message + HTTP-equivalent status. */
+/** A validation/Enoki failure with the client-safe message + HTTP-equivalent status.
+ *  `reason` is a machine-readable category (never abort-code detail) the client keys
+ *  on: `'tx-would-revert'` = the tx is deterministically doomed (terminal, don't retry);
+ *  `'sponsor-unavailable'` = a transient sponsor/Enoki failure (safe to retry). */
 export class SponsorError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly reason?: string) {
     super(message);
     this.name = "SponsorError";
   }
@@ -158,8 +167,16 @@ const enokiFailure = (tag: string, err: unknown, fallback: string): SponsorError
     detail,
     cause: e?.cause,
   });
-  // Client gets the category only. No Enoki/Move-abort detail leaks off-box.
-  return new SponsorError(fallback, 502);
+  // A dry-run MoveAbort means the tx would REVERT on-chain (e.g. a claim/cash_out
+  // against an already-redeemed or stale position) — a DETERMINISTIC client error,
+  // not a transient sponsor outage. Tag it `tx-would-revert` (a 422) so the caller
+  // resolves it terminally and never retries a doomed tx. We still echo NO abort
+  // code/module/function — only the safe category. Everything else is treated as a
+  // transient sponsor/Enoki failure (`sponsor-unavailable`, 502) the caller may retry.
+  if (detail && /dry run failed|moveabort/i.test(detail)) {
+    return new SponsorError("the transaction would not succeed on-chain", 422, "tx-would-revert");
+  }
+  return new SponsorError(fallback, 502, "sponsor-unavailable");
 };
 
 /**

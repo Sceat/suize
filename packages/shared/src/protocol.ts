@@ -179,6 +179,29 @@ export interface HandleClaimRequest {
   name: string;
 }
 
+// ===========================================================================
+// CHARGE — the no-code merchant door. The merchant (an authenticated wallet
+// session) creates a "charge" (price + webhook); the server returns a hosted
+// link `api.suize.io/charge/<token>` an agent pays. `merchant` is ALWAYS the
+// session address (ws.data.address) — never the frame — so a charge can only
+// ever pay YOU. Nothing is stored: the config rides inside the signed token.
+// ===========================================================================
+
+export interface CreateChargeRequest {
+  /** Listed price, decimal USDC string, ≤6dp (e.g. "0.10"). */
+  price: string;
+  /** The https URL Suize POSTs the settled order to (the merchant's endpoint). */
+  webhook: string;
+  /** Opaque merchant label/SKU echoed into every webhook (≤256 chars). */
+  ref?: string;
+  /** Optional epoch-ms expiry; omitted = no expiry. */
+  exp?: number;
+}
+export interface CreateChargeResponse {
+  /** The hosted charge link to hand to agents: `https://api.suize.io/charge/<token>`. */
+  url: string;
+}
+
 export type {
   HandleAvailableResponse as WsHandleAvailableResponse,
   HandleMeResponse as WsHandleMeResponse,
@@ -378,6 +401,10 @@ export type HandleMeResponseFrame = Frame<'handleMeResponse', HandleMeResponse>;
 export type HandleClaimRequestFrame = Frame<'handleClaimRequest', HandleClaimRequest>;
 export type HandleClaimResponseFrame = Frame<'handleClaimResponse', HandleClaimResponse>;
 
+// ── CHARGE (RPC: create a hosted no-code charge link) ───────────────────────
+export type CreateChargeRequestFrame = Frame<'createChargeRequest', CreateChargeRequest>;
+export type CreateChargeResponseFrame = Frame<'createChargeResponse', CreateChargeResponse>;
+
 // ── ERROR (server→client, echoes the failed request's `id`) ─────────────────
 export type ErrorResponseFrame = Frame<'errorResponse', ErrorResponse>;
 
@@ -406,6 +433,7 @@ export type ClientPacket =
   | HandleAvailableRequestFrame
   | HandleMeRequestFrame
   | HandleClaimRequestFrame
+  | CreateChargeRequestFrame
   | BrainChatRequestFrame
   | BrainToolResultFrame
   | MemwalDelegateRequestFrame;
@@ -420,6 +448,7 @@ export type ServerPacket =
   | HandleAvailableResponseFrame
   | HandleMeResponseFrame
   | HandleClaimResponseFrame
+  | CreateChargeResponseFrame
   | ErrorResponseFrame
   | BalanceUpdateFrame
   | AgentActivityFrame

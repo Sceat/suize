@@ -197,21 +197,28 @@ function RealApp() {
   };
   return (
     <Chassis business={face === 'business'}>
-      {face === 'wallet' ? (
+      {/* The wallet face stays MOUNTED across the switch (hidden via display, not
+          unmounted), so its live AI chat — a pending confirm card, the in-flight brain
+          turn, the transcript, scroll — survives a trip to the business console and back.
+          `display: contents` keeps WalletDeck the direct flex child of .rd-stage for
+          layout (no .rd-stage>child selectors exist, so this is safe). The business face
+          mounts on demand on top. */}
+      <div style={{ display: face === 'wallet' ? 'contents' : 'none' }}>
         <WalletDeck
           ownerAddress={owner}
           handle={displayHandle}
           onOpenBusiness={() => setFace('business')}
           onSignOut={signOut}
         />
-      ) : (
+      </div>
+      {face === 'business' ? (
         <BusinessConsole
           ownerAddress={owner}
           handle={displayHandle}
           onBack={() => setFace('wallet')}
           onSignOut={signOut}
         />
-      )}
+      ) : null}
     </Chassis>
   );
 }

@@ -37,7 +37,7 @@
 // object's `package_id` (survives Walrus upgrades). The current Walrus epoch is
 // computed from genesis math (testnet: 1-day epochs; mainnet: 14-day epochs).
 import { Transaction } from "@mysten/sui/transactions";
-import { PACKAGE_IDS, SUBS_PUBLISHED, DEPLOY_RENEW_MAX_BYTES, type SuiNetwork } from "@suize/shared";
+import { PACKAGE_IDS, SUBS_PUBLISHED, DEPLOY_RENEW_MAX_BYTES, WALRUS_EPOCHS, type SuiNetwork } from "@suize/shared";
 import { config } from "../config";
 import { deploySuiClient, deployWallet, deployServiceAddress, sitesForOwner } from "./index";
 import { deployMerchant } from "./payment";
@@ -65,10 +65,8 @@ export const storageEnabled = (): boolean =>
 // pass needs no extra RPC just to know "now" in epochs.
 // ---------------------------------------------------------------------------
 
-const WALRUS_EPOCHS: Record<SuiNetwork, { genesisMs: number; durationMs: number }> = {
-  testnet: { genesisMs: Date.parse("2024-10-17T00:00:00Z"), durationMs: 24 * 60 * 60 * 1000 },
-  mainnet: { genesisMs: Date.parse("2025-03-25T15:00:24Z"), durationMs: 14 * 24 * 60 * 60 * 1000 },
-};
+// WALRUS_EPOCHS (genesis + epoch duration per network) is the single source of truth
+// in @suize/shared — shared with the deploy dashboard's chain-derived expiry.
 
 export const currentWalrusEpoch = (): number => {
   const e = WALRUS_EPOCHS[config.suiNetwork as SuiNetwork];

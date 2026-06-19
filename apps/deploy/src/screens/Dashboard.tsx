@@ -10,7 +10,7 @@ import {
 import { fetch_my_sites, computeStats } from '../chain'
 import { DEPLOY_BASE_DOMAIN, SUIZE_WALLET_URL } from '../config'
 import { useSuizeHandle } from '../suins'
-import { useDeploySub, planOwnersOf, useSiteExpiry } from '../plan'
+import { useDeploySub, planOwnersOf } from '../plan'
 import {
   fmt_id,
   fmt_bytes,
@@ -69,8 +69,7 @@ type Tab = 'overview' | 'sites' | 'analytics'
 const RECENT_STRIP_CAP = 6
 
 // Shorten a site's live URL to its host's leading label + the base domain, e.g.
-// "5i0i…4a.suize.site" — a tight, recognisable host for a card subline. (Mirrors
-// SitesList's short_host so the chrome reads identically across screens.)
+// "5i0i…4a.suize.site" — a tight, recognisable host for a card subline.
 const short_host = (url: string): string => {
   const host = url.replace(/^https?:\/\//, '').replace(/\/$/, '')
   const sub = host.endsWith(`.${DEPLOY_BASE_DOMAIN}`)
@@ -97,9 +96,9 @@ const SiteCard = ({
   onOpen: (id: string) => void
   eager?: boolean
 }) => {
-  // The site's live Walrus storage window — lazy, best-effort (the card still
-  // renders from chain without it). Same query key as the dossier → one cache.
-  const expiresAtMs = useSiteExpiry(site.siteId)
+  // The site's live Walrus storage window — populated by fetch_my_sites in one
+  // batched on-chain pass (best-effort; absent → the card just hides the line).
+  const expiresAtMs = site.expiresAtMs ?? null
   return (
     <article className="cx-card ed-stream">
       <button
@@ -291,7 +290,7 @@ const RecentCard = ({
   onOpen: (id: string) => void
   eager: boolean
 }) => {
-  const expiresAtMs = useSiteExpiry(site.siteId)
+  const expiresAtMs = site.expiresAtMs ?? null
   return (
     <article className="cx-strip__card ed-stream">
       <button

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { SuiClientProvider, WalletProvider, createNetworkConfig } from '@mysten/dapp-kit'
 import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { registerEnokiWallets, isEnokiNetwork } from '@mysten/enoki'
+import { Analytics } from '@vercel/analytics/react'
 import '@mysten/dapp-kit/dist/index.css'
 import './styles.css'
 import { ENOKI_API_KEY, GOOGLE_CLIENT_ID, NETWORK, RPC_URL } from './config'
@@ -81,5 +82,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         </WalletProvider>
       </SuiClientProvider>
     </QueryClientProvider>
+    <Analytics />
   </React.StrictMode>,
 )

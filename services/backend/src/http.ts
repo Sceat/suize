@@ -14,8 +14,10 @@ export const corsHeaders = (origin: string | null): Record<string, string> => {
     // `X-PAYMENT` (+ its `PAYMENT-SIGNATURE` alias) is the x402 payment header a
     // BROWSER payer (the wallet's agent publish) sends on POST /deploy — without it
     // in this allow-list the preflight blocks the payment-carrying retry.
+    // `x-trace-ts` / `x-trace-sig` are the signed-upload headers the wallet sends on
+    // POST /trace (the encrypted-history relay) — same preflight requirement.
     "Access-Control-Allow-Headers":
-      "Content-Type, mcp-session-id, mcp-protocol-version, authorization, X-PAYMENT, PAYMENT-SIGNATURE",
+      "Content-Type, mcp-session-id, mcp-protocol-version, authorization, X-PAYMENT, PAYMENT-SIGNATURE, x-trace-ts, x-trace-sig",
     "Access-Control-Expose-Headers": "mcp-session-id",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",

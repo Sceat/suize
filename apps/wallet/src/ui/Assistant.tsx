@@ -18,6 +18,9 @@ import { Divider, Row, Spark, TypingRow, rich } from './bits';
 import { wsBrainChat, wsBrainToolResult } from '../data/ws';
 import type { AgentToolRunner, ToolRun } from '../data/agentTools';
 import type { BrainMessage } from '@suize/shared/protocol';
+import { useSuiClient, useSignTransaction, useSignPersonalMessage } from '@mysten/dapp-kit';
+import { EXPLORER_TX } from '../lib/env';
+import { readTraceBuffer, setTraceBuffer, flushAndAnchor, fetchLatestAnchor, restoreFromChain, type TraceEntry } from '../data/trace';
 
 const reduceMotion = () =>
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -45,6 +48,9 @@ export interface AssistantPanelProps {
   /** the user's MemWal memory account id (if onboarded) — sent with each turn so the
    *  brain recalls/stores memory under it. Undefined = no memory this session. */
   memwalAccountId?: string;
+  /** the signed-in wallet address — keys the in-session transcript store so the chat
+   *  survives switching to the business face and back (the panel unmounts there). */
+  ownerAddress?: string;
 }
 
 export function AssistantPanel(props: AssistantPanelProps) {
@@ -56,11 +62,17 @@ export function AssistantPanel(props: AssistantPanelProps) {
         agentOn={props.agentOn}
         runAgentTool={props.runAgentTool}
         memwalAccountId={props.memwalAccountId}
+        ownerAddress={props.ownerAddress ?? ''}
       />
     );
   }
   return <LegacyAssistant {...props} />;
 }
+
+// In-session transcript store — keeps the chat alive across unmounts (e.g. switching to
+// the business console and back, which unmounts the whole wallet panel). Keyed by owner;
+// in-memory only (cleared on reload), so no chat history is persisted to disk.
+const TRANSCRIPTS = new Map<string, Turn[]>();
 
 function LegacyAssistant({ agentOn, onBooked, demo = false }: AssistantPanelProps) {
   const reduce = useMemo(reduceMotion, []);
@@ -362,10 +374,14 @@ const TOOL_STATUS: Record<string, string> = {
 };
 const THINKING_VERBS = ['Thinking', 'Working it out', 'One moment', 'Putting it together'];
 
-/** The agentic loader — a pulsing spark, a shimmering status verb, an animated
- *  ellipsis, and an elapsed beat (Claude-Code style). `label` pins a step-specific
- *  verb; without one it cycles the generic thinking verbs. Real model thinking runs
- *  under the hood — this is the on-screen treatment, no raw reasoning shown. */
+/** The agentic loader — an EDITORIAL-TERMINAL treatment: a fixed tabular elapsed clock
+ *  on the LEFT (gutter-ruled), a mono `>` prompt caret in the family blue, then a
+ *  bracketed `[ verb… ]` plate whose verb is read by a single travelling highlight (the
+ *  "scanline"). `label` pins a step-specific verb; without one it cycles the generic
+ *  thinking verbs. Real model thinking runs under the hood — this is the on-screen
+ *  treatment, no raw reasoning shown. (Styling: `.rd-loader*` in rd.css — the brackets
+ *  are drawn by `.rd-loader__label`'s ::before/::after; the verb's sweep lives on
+ *  `.rd-loader__verb`; the ellipsis dots fill via `.rd-loader__ell`'s ::after.) */
 function LoaderRow({ label }: { label?: string | null }) {
   const [tick, setTick] = useState(0);
   const start = useRef(Date.now());
@@ -383,9 +399,11 @@ function LoaderRow({ label }: { label?: string | null }) {
     <div className="rd-row rd-row--ai is-in">
       <span className="rd-loader" aria-live="polite" aria-label={`${verb}…`}>
         <span className="rd-loader__t">{elapsed >= 1 ? `${elapsed}s` : ''}</span>
-        <span className="rd-loader__spark">
-          <Spark />
+        {/* a quiet breathing shell prompt */}
+        <span className="rd-loader__spark" aria-hidden="true">
+          &gt;
         </span>
+        {/* the typed status verb + a blinking block cursor */}
         <span className="rd-loader__label">
           {verb}
           <i className="rd-loader__ell" aria-hidden="true" />
@@ -395,16 +413,79 @@ function LoaderRow({ label }: { label?: string | null }) {
   );
 }
 
+// A published Walrus site lives at <base36>.suize.site (served by the deploy-worker).
+// Any trailing path must start with `/` — so markdown emphasis the model wraps the URL
+// in (`**…**`) can NEVER attach to the URL (it would otherwise become `%2A%2A` in the
+// href and 404). Excludes markdown/quote chars from the path for the same reason.
+const SITE_URL_RE = /https?:\/\/[a-z0-9-]+\.suize\.site(?:\/[^\s)*\]"'<>`]*)?/i;
+const PREV_W = 1024; // the iframe's logical desktop width, scaled down to the chat column
+const PREV_H = 640; // 16:10
+
+/** A live, auto-scaled preview of a just-published site — mirrors the Deploy app's
+ *  SitePreview (a framed iframe thumbnail) so a publish shows the actual page instead of
+ *  a raw overflowing URL. The iframe is decorative (pointer-events off); the card opens
+ *  the live site in a new tab. */
+function SitePreview({ url, title }: { url: string; title?: string }) {
+  const wrap = useRef<HTMLSpanElement>(null);
+  const [scale, setScale] = useState(0.32);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    const el = wrap.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      const w = el.clientWidth;
+      if (w > 0) setScale(w / PREV_W);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  let host = url;
+  try {
+    host = new URL(url).host;
+  } catch {
+    /* keep the raw string */
+  }
+  return (
+    <a className="rd-siteprev is-in" href={url} target="_blank" rel="noopener noreferrer" title={title || host}>
+      <span className="rd-siteprev__frame" ref={wrap}>
+        {!loaded ? <span className="rd-siteprev__skel" /> : null}
+        <iframe
+          className={`rd-siteprev__if${loaded ? ' is-on' : ''}`}
+          src={url}
+          title={title || 'Site preview'}
+          loading="lazy"
+          tabIndex={-1}
+          scrolling="no"
+          sandbox="allow-scripts allow-same-origin"
+          referrerPolicy="no-referrer"
+          style={{ width: PREV_W, height: PREV_H, transform: `scale(${scale})` }}
+          onLoad={() => setLoaded(true)}
+        />
+      </span>
+      <span className="rd-siteprev__bar">
+        <span className="rd-siteprev__host">{host}</span>
+        <span className="rd-siteprev__open">Open ↗</span>
+      </span>
+    </a>
+  );
+}
+
 function BrainAssistant({
   agentOn,
   runAgentTool,
   memwalAccountId,
+  ownerAddress,
 }: {
   agentOn: boolean;
   runAgentTool: AgentToolRunner;
   memwalAccountId?: string;
+  ownerAddress: string;
 }) {
-  const [turns, setTurns] = useState<Turn[]>([]);
+  // Restore the in-session transcript so switching faces (wallet ↔ business) and back
+  // doesn't wipe the chat. (Card/streaming state is transient and intentionally not kept.)
+  const [turns, setTurns] = useState<Turn[]>(() => TRANSCRIPTS.get(ownerAddress) ?? []);
   const [thinking, setThinking] = useState(false);
   const [status, setStatus] = useState<string | null>(null); // current loader verb (step-specific)
   const [workingLabel, setWorkingLabel] = useState<string | null>(null); // live progress on a committing card
@@ -413,6 +494,143 @@ function BrainAssistant({
   const threadRef = useRef<HTMLDivElement>(null);
   const aiIdxRef = useRef(-1); // index of the streaming AI turn in `turns`
   const busy = thinking || card != null;
+
+  // ── Verifiable history (trace) — ADDITIVE + non-blocking; never touches the chat
+  // or money flow. capture → IndexedDB → Seal-encrypt → Walrus → on-chain anchor.
+  // See data/trace.ts. (`as never` bridges the @mysten/seal↔dapp-kit client type — the
+  // runtime client is the real one; the mismatch is only the cross-package nominal type.)
+  const suiClient = useSuiClient();
+  const { mutateAsync: signTx } = useSignTransaction();
+  const { mutateAsync: signPM } = useSignPersonalMessage();
+  const [traceBadge, setTraceBadge] = useState<{ count: number; digest: string } | null>(null);
+  const [traceSaving, setTraceSaving] = useState(false);
+  const tracedCountRef = useRef(0);
+  const restoredRef = useRef(false);
+
+  // Cold-reload restore from the local buffer + the badge from public chain (no decrypt).
+  useEffect(() => {
+    if (!ownerAddress) return;
+    let alive = true;
+    void (async () => {
+      if (!restoredRef.current && turns.length === 0) {
+        restoredRef.current = true;
+        const buf = await readTraceBuffer(ownerAddress);
+        const restored: Turn[] = buf
+          .filter((e) => (e.text ?? '').trim())
+          .map((e) => ({ who: e.role === 'user' ? 'you' : 'ai', text: e.text ?? '' }));
+        if (alive && restored.length) setTurns(restored);
+      }
+      const a = await fetchLatestAnchor(ownerAddress, suiClient as never);
+      if (alive && a) {
+        setTraceBadge({ count: a.count, digest: a.digest });
+        // Auto cross-device restore: the chain is AHEAD of our local buffer (a fresh
+        // device or a cleared cache) → silently decrypt the latest blob (the zkLogin
+        // session signs the Seal SessionKey — no popup, same path as silent-renew) and
+        // rehydrate. Never fires same-device (local == chain), so zero common-case cost.
+        // `tracedCountRef` (the flush "what's anchored" guard) is primed ONLY when we are
+        // actually in sync — a FAILED restore keeps it at the local count so this device
+        // still anchors its own new history instead of going silent.
+        const local = await readTraceBuffer(ownerAddress);
+        if (a.count > local.length) {
+          try {
+            const entries = await restoreFromChain({
+              owner: ownerAddress,
+              anchor: a,
+              suiClient: suiClient as never,
+              signPersonalMessage: signPM,
+            });
+            if (alive && entries && entries.length) {
+              restoredRef.current = true;
+              await setTraceBuffer(ownerAddress, entries);
+              tracedCountRef.current = entries.length; // now in sync with the chain
+              setTurns(
+                entries
+                  .filter((e) => (e.text ?? '').trim())
+                  .map((e) => ({ who: e.role === 'user' ? 'you' : 'ai', text: e.text ?? '' })),
+              );
+            } else {
+              tracedCountRef.current = local.length; // restore returned nothing → anchor local
+            }
+          } catch (e) {
+            console.warn('[trace] cross-device restore skipped (non-fatal):', (e as Error).message);
+            tracedCountRef.current = local.length; // restore failed → keep anchoring local content
+          }
+        } else {
+          tracedCountRef.current = a.count; // local at/ahead of chain — in sync
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // once per owner — intentionally not re-running on `turns`
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownerAddress]);
+
+  // Mirror the transcript into the durable buffer on every SETTLED change (overwrite —
+  // idempotent). Skipped while `thinking` so we don't rewrite IndexedDB on every
+  // streaming token; the `thinking` dep fires it once when the turn settles.
+  useEffect(() => {
+    if (!ownerAddress || turns.length === 0 || thinking) return;
+    const entries: TraceEntry[] = turns
+      .filter((t) => t.text.trim())
+      .map((t, seq) => ({
+        seq,
+        ts: Date.now(),
+        kind: 'msg',
+        role: t.who === 'you' ? 'user' : 'assistant',
+        text: t.text,
+      }));
+    void setTraceBuffer(ownerAddress, entries);
+  }, [ownerAddress, turns, thinking]);
+
+  // Flush + anchor on tab-hide (+ a coarse 2-min backstop). Background, non-fatal.
+  useEffect(() => {
+    if (!ownerAddress) return;
+    let flushing = false;
+    const flush = async () => {
+      if (flushing) return;
+      const buf = await readTraceBuffer(ownerAddress);
+      if (buf.length === 0 || buf.length <= tracedCountRef.current) return; // nothing new
+      flushing = true;
+      setTraceSaving(true);
+      try {
+        const r = await flushAndAnchor({
+          owner: ownerAddress,
+          suiClient: suiClient as never,
+          signPersonalMessage: signPM,
+          signTransaction: signTx,
+        });
+        if (r) {
+          tracedCountRef.current = r.count;
+          setTraceBadge({ count: r.count, digest: r.digest });
+        }
+      } catch (e) {
+        console.warn('[trace] flush pending (non-fatal):', (e as Error).message);
+      } finally {
+        flushing = false;
+        setTraceSaving(false);
+      }
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') void flush();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    const id = window.setInterval(() => void flush(), 120_000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownerAddress]);
+
+  // Persist the transcript on every change so a remount (after the business switch)
+  // rehydrates it; drop the trailing empty AI placeholder so it doesn't restore blank.
+  useEffect(() => {
+    if (!ownerAddress) return;
+    const last = turns[turns.length - 1];
+    TRANSCRIPTS.set(ownerAddress, last && last.who === 'ai' && !last.text.trim() ? turns.slice(0, -1) : turns);
+  }, [ownerAddress, turns]);
 
   useEffect(() => {
     const el = threadRef.current;
@@ -429,16 +647,6 @@ function BrainAssistant({
     });
   }, []);
 
-  const setAi = useCallback((text: string) => {
-    setTurns((prev) => {
-      const i = aiIdxRef.current;
-      if (i < 0 || !prev[i]) return prev;
-      const next = prev.slice();
-      next[i] = { ...next[i]!, text };
-      return next;
-    });
-  }, []);
-
   // Run one proposed tool. Reads answer immediately; writes surface a confirm card.
   const onToolUse = useCallback(
     async (toolUseId: string, tool: string, input: Record<string, unknown>) => {
@@ -451,12 +659,17 @@ function BrainAssistant({
         return;
       }
       if (run.kind === 'immediate') {
+        // An auto-approved money action (no card) still leaves a visible ✓ receipt.
+        if (run.receipt) {
+          const r = run.receipt;
+          setTurns((prev) => [...prev, { who: 'ai', kind: 'receipt', text: r.title, meta: r.meta }]);
+        }
         wsBrainToolResult(toolUseId, run.content, run.isError ?? false);
         setThinking(true); // keep the loader up while the model reasons about the next step
         return;
       }
-      // a money action — show the confirm card and wait for the user's tap.
-      setThinking(false);
+      // a money action — show the confirm card and wait for the user's tap. (Keep
+      // `thinking` true so the turn stays "active"; the card hides the loader anyway.)
       setStatus(null);
       setCard({
         toolUseId,
@@ -475,31 +688,55 @@ function BrainAssistant({
     (messages: BrainMessage[]) => {
       wsBrainChat(messages, {
         onChunk: (delta) => {
-          setThinking(false);
+          // keep `thinking` true for the whole turn (the loader hides itself once text
+          // is streaming, via `awaitingOutput`) so a multi-step turn never goes blank
           setStatus(null);
           appendAi(delta);
         },
         onToolUse: (id, tool, input) => void onToolUse(id, tool, input),
-        onDone: () => {
+        onDone: (stopReason) => {
           setThinking(false);
           setStatus(null);
           aiIdxRef.current = -1;
-          // drop a trailing empty AI bubble (the model acted silently then ended).
-          setTurns((prev) =>
-            prev.length && prev[prev.length - 1]!.who === 'ai' && !prev[prev.length - 1]!.text.trim()
-              ? prev.slice(0, -1)
-              : prev,
-          );
+          // NEVER vanish into nothing. If the trailing AI bubble is still empty: when the
+          // turn was CUT OFF (max_tokens / max_steps) fill it with a recoverable line
+          // (belt-and-braces with the backend guard); only a genuine silent SUCCESS
+          // (clean end_turn after a card/read) drops the empty bubble.
+          setTurns((prev) => {
+            const last = prev[prev.length - 1];
+            if (!last || last.who !== 'ai' || last.text.trim()) return prev;
+            if (stopReason === 'max_tokens' || stopReason === 'max_steps') {
+              const next = prev.slice();
+              next[next.length - 1] = {
+                ...last,
+                text: 'That got too big to finish in one go — try something a bit simpler, or break it into steps.',
+              };
+              return next;
+            }
+            return prev.slice(0, -1);
+          });
         },
         onError: (message) => {
           setThinking(false);
           setStatus(null);
-          setAi(message);
+          setCard(null); // a mid-turn disconnect must not leave a dead card locking the composer
+          setWorkingLabel(null);
+          // Surface the error — never swallow it. Fill the empty placeholder if present,
+          // else append a fresh line (don't clobber partial narration the user already saw).
+          setTurns((prev) => {
+            const i = aiIdxRef.current;
+            if (i >= 0 && prev[i] && prev[i]!.who === 'ai' && !prev[i]!.text.trim()) {
+              const next = prev.slice();
+              next[i] = { ...next[i]!, text: message };
+              return next;
+            }
+            return [...prev, { who: 'ai', text: message }];
+          });
           aiIdxRef.current = -1;
         },
       }, memwalAccountId);
     },
-    [appendAi, setAi, onToolUse, memwalAccountId],
+    [appendAi, onToolUse, memwalAccountId],
   );
 
   const send = useCallback(
@@ -523,12 +760,22 @@ function BrainAssistant({
     [agentOn, busy, startTurn],
   );
 
-  // A confirmed/declined card doesn't vanish — it collapses into a compact, permanent
-  // RECEIPT row that stays in the thread (the card's title + a short status line).
-  const pushReceipt = useCallback((c: ActiveCard, line: string, bad = false) => {
-    const cost = c.rows.find((r) => r.k === 'Cost')?.v;
+  // A confirmed/declined card doesn't vanish — it COLLAPSES into a permanent receipt that
+  // stays in the thread, placed BEFORE the model's follow-up narration so the order reads
+  // "you asked → ✓ here's the record → here's my note" (not an ambiguous receipt AFTER the
+  // reply). Drops the empty pre-card placeholder, appends the receipt, then a fresh
+  // placeholder the post-action narration streams into (aiIdxRef → that fresh placeholder).
+  const collapseToReceipt = useCallback((c: ActiveCard, line: string, bad = false) => {
+    const cost = c.rows.find((r) => r.k === 'Cost' || r.k === 'Amount')?.v;
     const meta = bad ? line : [cost, line].filter(Boolean).join(' · ');
-    setTurns((prev) => [...prev, { who: 'ai', kind: 'receipt', text: c.title, meta, bad }]);
+    setTurns((prev) => {
+      const last = prev[prev.length - 1];
+      const base =
+        last && last.who === 'ai' && last.kind !== 'receipt' && !last.text.trim() ? prev.slice(0, -1) : prev;
+      const next: Turn[] = [...base, { who: 'ai', kind: 'receipt', text: c.title, meta, bad }, { who: 'ai', text: '' }];
+      aiIdxRef.current = next.length - 1;
+      return next;
+    });
   }, []);
 
   function onYes() {
@@ -539,7 +786,7 @@ function BrainAssistant({
     void c
       .commit((label) => setWorkingLabel(label)) // live progress on the working card
       .then((ok) => {
-        pushReceipt(c, 'done'); // card → permanent receipt
+        collapseToReceipt(c, 'done'); // card → permanent receipt, narration streams below it
         setCard(null);
         setWorkingLabel(null);
         wsBrainToolResult(c.toolUseId, ok, false);
@@ -547,7 +794,7 @@ function BrainAssistant({
       })
       .catch((e) => {
         const m = (e as Error).message || 'failed';
-        pushReceipt(c, `Couldn't complete — ${m}`, true);
+        collapseToReceipt(c, `couldn't complete — ${m}`, true);
         setCard(null);
         setWorkingLabel(null);
         wsBrainToolResult(c.toolUseId, `That failed: ${m}`, true);
@@ -557,13 +804,21 @@ function BrainAssistant({
 
   function onNo() {
     if (!card || card.phase !== 'pending') return; // mirror onYes — never double-resolve a tool
-    pushReceipt(card, 'Not now', true);
+    collapseToReceipt(card, 'declined', true);
     wsBrainToolResult(card.toolUseId, 'The user declined this action.', true);
     setCard(null);
     setThinking(true); // let the model acknowledge the decline
   }
 
   const empty = turns.length === 0;
+  // "Are we waiting on the model with nothing yet to show?" — true unless the last thing
+  // in the thread is an AI text bubble that already has content. Drives the loader so it
+  // shows during EVERY wait (send → first token, between steps, after a confirm → the
+  // narration) and hides only while text is actively visible or a card is up.
+  const lastTurn = turns[turns.length - 1];
+  const awaitingOutput =
+    !lastTurn || lastTurn.who !== 'ai' || lastTurn.kind === 'receipt' || !lastTurn.text.trim();
+  const showLoader = thinking && !card && awaitingOutput;
 
   return (
     <div className="rd-asst rd-glass">
@@ -572,6 +827,29 @@ function BrainAssistant({
           <Spark />
           {ASSISTANT.title}
         </span>
+        {traceSaving ? (
+          <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.5, whiteSpace: 'nowrap' }}>saving…</span>
+        ) : traceBadge ? (
+          <a
+            href={EXPLORER_TX(traceBadge.digest)}
+            target="_blank"
+            rel="noreferrer"
+            title="Encrypted on chain — only you can read it. Tap for the on-chain receipt."
+            style={{
+              marginLeft: 'auto',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: 11,
+              opacity: 0.65,
+              textDecoration: 'none',
+              color: 'inherit',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <Check size={11} strokeWidth={2.6} aria-hidden /> {traceBadge.count} · anchored ↗
+          </a>
+        ) : null}
       </div>
 
       <div className="rd-asst__thread" ref={threadRef}>
@@ -594,19 +872,44 @@ function BrainAssistant({
           </div>
         ) : null}
 
-        {turns.map((m, i) =>
-          m.kind === 'receipt' ? (
-            <div key={i} className={`rd-receipt is-in${m.bad ? ' is-bad' : ''}`}>
-              {m.bad ? <span className="rd-receipt__x" aria-hidden>·</span> : <Check size={12} strokeWidth={2.4} aria-hidden />}
-              <span className="rd-receipt__title">{m.text}</span>
-              {m.meta ? <span className="rd-receipt__meta">{m.meta}</span> : null}
-            </div>
-          ) : m.who === 'ai' && !m.text ? null : (
+        {turns.map((m, i) => {
+          if (m.kind === 'receipt') {
+            return (
+              <div key={i} className={`rd-receipt is-in${m.bad ? ' is-bad' : ''}`}>
+                {m.bad ? <span className="rd-receipt__x" aria-hidden>·</span> : <Check size={12} strokeWidth={2.4} aria-hidden />}
+                <span className="rd-receipt__title">{m.text}</span>
+                {m.meta ? <span className="rd-receipt__meta">{m.meta}</span> : null}
+              </div>
+            );
+          }
+          if (m.who === 'ai' && !m.text) return null;
+          // A just-published site URL → render a LIVE PREVIEW card (like the Deploy app),
+          // not a raw overflowing link. The prose around it still renders above.
+          const site = m.who === 'ai' ? m.text.match(SITE_URL_RE) : null;
+          if (site) {
+            const url = site[0];
+            // Strip the URL AND the markdown emphasis / punctuation the model wrapped it
+            // in (`**`, backticks, `<>`, `()`, dashes, colons) so the prose doesn't show
+            // orphaned `**` once the link is lifted into the preview card.
+            const before = m.text.slice(0, site.index).replace(/[\s:—–*`<([-]+$/, '').trim();
+            const after = m.text
+              .slice((site.index ?? 0) + url.length)
+              .replace(/^[\s*`>)\].,:—–-]+/, '')
+              .trim();
+            const prose = [before, after].filter(Boolean).join('\n\n');
+            return (
+              <div key={i} style={{ display: 'contents' }}>
+                {prose ? <Row who="ai">{rich(prose)}</Row> : null}
+                <SitePreview url={url} />
+              </div>
+            );
+          }
+          return (
             <Row key={i} who={m.who}>
               {rich(m.text)}
             </Row>
-          ),
-        )}
+          );
+        })}
 
         {card ? (
           <div className="rd-row rd-row--ai is-in">
@@ -617,11 +920,14 @@ function BrainAssistant({
               </div>
               <div className="rd-confirm__body">
                 {card.subtitle ? <span className="rd-confirm__detail">{card.subtitle}</span> : null}
-                {card.rows.map((r) => (
-                  <span key={r.k} className="rd-confirm__source">
-                    {r.k}: {r.v}
-                  </span>
-                ))}
+                <div className="rd-confirm__rows">
+                  {card.rows.map((r) => (
+                    <div key={r.k} className="rd-confirm__row">
+                      <span className="rd-confirm__rowk">{r.k}</span>
+                      <span className="rd-confirm__rowv">{r.v}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
               {card.phase === 'pending' ? (
                 <div className="rd-confirm__acts">
@@ -651,14 +957,8 @@ function BrainAssistant({
           </div>
         ) : null}
 
-        {thinking ? <LoaderRow label={status} /> : null}
+        {showLoader ? <LoaderRow label={status} /> : null}
       </div>
-
-      {thinking || card?.phase === 'working' ? (
-        <div className="rd-asst__notice" role="status">
-          Keep the wallet open — closing it stops what your agent is doing.
-        </div>
-      ) : null}
 
       <form
         className="rd-asst__composer"
@@ -683,6 +983,10 @@ function BrainAssistant({
           <ArrowUp size={15} strokeWidth={2} aria-hidden />
         </button>
       </form>
+
+      {/* persistent one-line footer under the composer — the agent's work lives in this
+          tab (no durable store), so closing it stops the in-flight turn. */}
+      <p className="rd-asst__notice">Keep the wallet open — closing it stops what your agent is doing.</p>
     </div>
   );
 }

@@ -3,7 +3,7 @@
 // ids lives in @suize/shared (LOCKED DECISION #5); we re-export the deploy ids
 // here rather than duplicate the literals. The deploy package is NOT YET
 // PUBLISHED, so PACKAGE_IDS.DEPLOY.* are still '0x0' PLACEHOLDERS (see
-// docs/deploy/SPEC.md §13) — the dashboard never signs with them (the backend's
+// apps/deploy/SPEC.md) — the dashboard never signs with them (the backend's
 // own service wallet does), so they are informational only here.
 // ============================================================================
 

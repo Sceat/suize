@@ -42,6 +42,8 @@ import {
   type Packet,
   type ServerPacket,
   type WsHandleClaimResponse,
+  type CreateChargeRequest,
+  type CreateChargeResponse,
   type WsSponsorResponse,
   type WsExecuteResponse,
   type BalanceUpdate,
@@ -351,7 +353,10 @@ async function handleMessage(packet: ServerPacket, ws: WebSocket): Promise<void>
     // ── RPC responses (correlated by id) ─────────────────────────────────────
     case 'sponsorResponse':
     case 'executeResponse':
+    case 'handleAvailableResponse':
+    case 'handleMeResponse':
     case 'handleClaimResponse':
+    case 'createChargeResponse':
     case 'memwalDelegateResponse': {
       settle(packet.id, packet.data);
       return;
@@ -576,6 +581,19 @@ export function wsHandleClaim(name: string): Promise<WsHandleClaimResponse> {
     type: 'handleClaimRequest',
     id,
     data: { name },
+  }));
+}
+
+/**
+ * WS RPC: create a no-code charge link. The merchant is the authenticated session
+ * address (forced server-side, never sent) — the returned `url` is the hosted
+ * `api.suize.io/charge/<token>` link an agent pays. Nothing is stored on-chain.
+ */
+export function wsCreateCharge(input: CreateChargeRequest): Promise<CreateChargeResponse> {
+  return request<CreateChargeResponse>((id) => ({
+    type: 'createChargeRequest',
+    id,
+    data: input,
   }));
 }
 

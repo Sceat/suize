@@ -204,8 +204,8 @@ const OwnedByLine = ({ owner }: { owner: string }) => {
   const id = useOwnerIdentity(owner)
   return (
     <p className="dx-hint" title={owner}>
-      Owned by <OwnerLabel owner={owner} id={id} />. Only the owner can add or
-      remove custom domains.
+      Owned by <OwnerLabel owner={owner} id={id} />. Its owner links custom domains
+      through the Deploy API.
     </p>
   )
 }

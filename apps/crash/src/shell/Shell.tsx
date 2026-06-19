@@ -7,6 +7,10 @@ import { DUSDC_TYPE } from '../config'
 import { fmt_usd } from '../format'
 import './shell.css'
 
+// The PAY wallet — where the navbar "Open wallet" button sends you to manage
+// funds. (Recovery of any game-account balance is automatic on load.)
+const WALLET_URL = 'https://wallet.suize.io'
+
 // PolySui multi-tab shell — "The Masthead Rule" (marketing/POLYSUI-UI-LAW.md +
 // the navbar redesign). A broadsheet nameplate: the PolySui wordmark is built
 // from TYPE (Newsreader 'Poly' + Space Grotesk 'Sui' + a 2px blue tide-rule),
@@ -172,6 +176,12 @@ export function Shell() {
                 </span>
               )}
               <span className="ps-handle tnum">{handle ?? short}</span>
+              <button
+                className="ps-link"
+                onClick={() => window.open(WALLET_URL, '_blank', 'noopener')}
+              >
+                Open wallet
+              </button>
               <button className="ps-link" onClick={sign_out}>
                 Sign out
               </button>

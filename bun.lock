@@ -16,6 +16,7 @@
         "@suize/shared": "workspace:*",
         "@suize/x402": "workspace:*",
         "@tanstack/react-query": "^5.90.5",
+        "@vercel/analytics": "^2.0.1",
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
       },
@@ -53,24 +54,6 @@
         "vite-plugin-pwa": "^1.3.0",
       },
     },
-    "apps/deck": {
-      "name": "@suize/deck",
-      "version": "0.1.0",
-      "dependencies": {
-        "@mysten/sui": "^2.17.0",
-        "@suize/shared": "workspace:*",
-        "react": "^19.1.0",
-        "react-dom": "^19.1.0",
-      },
-      "devDependencies": {
-        "@types/node": "^22.10.0",
-        "@types/react": "^19.1.0",
-        "@types/react-dom": "^19.1.0",
-        "@vitejs/plugin-react": "^4.7.0",
-        "typescript": "^5.8.0",
-        "vite": "^6.3.0",
-      },
-    },
     "apps/deploy": {
       "name": "@suize/deploy",
       "version": "0.1.0",
@@ -82,6 +65,7 @@
         "@suize/pay": "workspace:*",
         "@suize/shared": "workspace:*",
         "@tanstack/react-query": "^5.90.5",
+        "@vercel/analytics": "^2.0.1",
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
       },
@@ -98,6 +82,7 @@
       "name": "@suize/landing",
       "version": "0.2.0",
       "dependencies": {
+        "@vercel/analytics": "^2.0.1",
         "gsap": "^3.15.0",
         "lenis": "^1.3.23",
         "ogl": "^1.0.11",
@@ -116,6 +101,7 @@
         "@mysten-incubation/memwal": "^0.0.7",
         "@mysten/dapp-kit": "1.0.6",
         "@mysten/enoki": "1.0.8",
+        "@mysten/seal": "^1.2.0",
         "@mysten/sui": "2.17.0",
         "@suize/pay": "workspace:*",
         "@suize/shared": "workspace:*",
@@ -123,6 +109,7 @@
         "@tanstack/react-query": "5.100.14",
         "@vercel/analytics": "^2.0.1",
         "lucide-react": "^1.17.0",
+        "qrcode.react": "^4.2.0",
         "react": "19.2.6",
         "react-dom": "19.2.6",
       },
@@ -170,13 +157,17 @@
       "name": "@suize/move-subs",
       "version": "0.1.0",
     },
+    "packages/move-trace": {
+      "name": "@suize/move-trace",
+      "version": "0.0.1",
+    },
     "packages/move-wallet": {
       "name": "@suize/move-wallet",
       "version": "0.1.0",
     },
     "packages/pay": {
       "name": "@suize/pay",
-      "version": "0.3.1",
+      "version": "0.4.1",
       "devDependencies": {
         "@types/bun": "latest",
         "tsup": "^8.3.5",
@@ -203,7 +194,7 @@
     },
     "services/backend": {
       "name": "@suize/backend",
-      "version": "0.2.30",
+      "version": "0.2.52",
       "dependencies": {
         "@anthropic-ai/sdk": "^0.104.1",
         "@mysten-incubation/memwal": "^0.0.7",
@@ -778,8 +769,6 @@
 
     "@suize/crash": ["@suize/crash@workspace:apps/crash"],
 
-    "@suize/deck": ["@suize/deck@workspace:apps/deck"],
-
     "@suize/deploy": ["@suize/deploy@workspace:apps/deploy"],
 
     "@suize/deploy-worker": ["@suize/deploy-worker@workspace:services/deploy-worker"],
@@ -795,6 +784,8 @@
     "@suize/move-profile": ["@suize/move-profile@workspace:packages/move-profile"],
 
     "@suize/move-subs": ["@suize/move-subs@workspace:packages/move-subs"],
+
+    "@suize/move-trace": ["@suize/move-trace@workspace:packages/move-trace"],
 
     "@suize/move-wallet": ["@suize/move-wallet@workspace:packages/move-wallet"],
 
@@ -1334,6 +1325,8 @@
 
     "punycode": ["punycode@2.3.1", "", {}, "sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg=="],
 
+    "qrcode.react": ["qrcode.react@4.2.0", "", { "peerDependencies": { "react": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-QpgqWi8rD9DsS9EP3z7BT+5lY5SFhsqGjpgW5DY/i3mK4M9DTBNz3ErMi8BWYEfI3L0d8GIbGmcdFAS1uIRGjA=="],
+
     "react": ["react@19.2.6", "", {}, "sha512-sfWGGfavi0xr8Pg0sVsyHMAOziVYKgPLNrS7ig+ivMNb3wbCBw3KxtflsGBAwD3gYQlE/AEZsTLgToRrSCjb0Q=="],
 
     "react-dom": ["react-dom@19.2.6", "", { "dependencies": { "scheduler": "^0.27.0" }, "peerDependencies": { "react": "^19.2.6" } }, "sha512-0prMI+hvBbPjsWnxDLxlCGyM8PN6UuWjEUCYmZhO67xIV9Xasa/r/vDnq+Xyq4Lo27g8QSbO5YzARu0D1Sps3g=="],
@@ -1604,6 +1597,8 @@
 
     "@suize/landing/vite": ["vite@7.3.5", "", { "dependencies": { "esbuild": "^0.27.0", "fdir": "^6.5.0", "picomatch": "^4.0.3", "postcss": "^8.5.6", "rollup": "^4.43.0", "tinyglobby": "^0.2.15" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^20.19.0 || >=22.12.0", "jiti": ">=1.21.0", "less": "^4.0.0", "lightningcss": "^1.21.0", "sass": "^1.70.0", "sass-embedded": "^1.70.0", "stylus": ">=0.54.8", "sugarss": "^5.0.0", "terser": "^5.16.0", "tsx": "^4.8.1", "yaml": "^2.4.2" }, "optionalPeers": ["@types/node", "jiti", "less", "lightningcss", "sass", "sass-embedded", "stylus", "sugarss", "terser", "tsx", "yaml"], "bin": { "vite": "bin/vite.js" } }, "sha512-KuOaNhcnGFN2zIPGA7wRmzF+lJA1sea7rHq17aiJ++9lzY1WWG6Jpwqwe1KNbRVPIqHmr8GLYx7jbrQcN/7/ww=="],
 
+    "@suize/wallet/@mysten/seal": ["@mysten/seal@1.2.0", "", { "dependencies": { "@mysten/bcs": "^2.1.0", "@noble/curves": "^2.2.0", "@noble/hashes": "^2.2.0" }, "peerDependencies": { "@mysten/sui": "^2.18.0" } }, "sha512-AOykL52LZ8IfI9Uut2nJFlPB9EAyZgLN76ZlN8OpVKCCIM1LE4OPNcVvq1Fpb0dNCUNAkUevv4ZMlkis73TpZQ=="],
+
     "@suize/wallet/@vitejs/plugin-react": ["@vitejs/plugin-react@6.0.2", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.0" }, "peerDependencies": { "@rolldown/plugin-babel": "^0.1.7 || ^0.2.0", "babel-plugin-react-compiler": "^1.0.0", "vite": "^8.0.0" }, "optionalPeers": ["@rolldown/plugin-babel", "babel-plugin-react-compiler"] }, "sha512-DlSMqo4WhThw4vB8Mpn0Woe9J+Jfq1geJ61AKW0QEgLzGMNwtIMdxbDUzLxcun8W7NbJO0e2Jg/Nxm3cCSVzzg=="],
 
     "@suize/wallet/vite": ["vite@8.0.16", "", { "dependencies": { "lightningcss": "^1.32.0", "picomatch": "^4.0.4", "postcss": "^8.5.15", "rolldown": "1.0.3", "tinyglobby": "^0.2.17" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^20.19.0 || >=22.12.0", "@vitejs/devtools": "^0.1.18", "esbuild": "^0.27.0 || ^0.28.0", "jiti": ">=1.21.0", "less": "^4.0.0", "sass": "^1.70.0", "sass-embedded": "^1.70.0", "stylus": ">=0.54.8", "sugarss": "^5.0.0", "terser": "^5.16.0", "tsx": "^4.8.1", "yaml": "^2.4.2" }, "optionalPeers": ["@types/node", "@vitejs/devtools", "esbuild", "jiti", "less", "sass", "sass-embedded", "stylus", "sugarss", "terser", "tsx", "yaml"], "bin": { "vite": "bin/vite.js" } }, "sha512-h9bXPmJichP5fLmVQo3PyaGSDE2n3aPuomeAlVRm0JLmt4rY6zmPKd59HYI4LNW8oTK7tlTsuC7l/m7awx9Jcw=="],
@@ -1651,6 +1646,8 @@
     "@suize/landing/@vitejs/plugin-react/react-refresh": ["react-refresh@0.18.0", "", {}, "sha512-QgT5//D3jfjJb6Gsjxv0Slpj23ip+HtOpnNgnb2S5zU3CB26G/IDPGoy4RJB42wzFE46DRsstbW6tKHoKbhAxw=="],
 
     "@suize/landing/vite/esbuild": ["esbuild@0.27.7", "", { "optionalDependencies": { "@esbuild/aix-ppc64": "0.27.7", "@esbuild/android-arm": "0.27.7", "@esbuild/android-arm64": "0.27.7", "@esbuild/android-x64": "0.27.7", "@esbuild/darwin-arm64": "0.27.7", "@esbuild/darwin-x64": "0.27.7", "@esbuild/freebsd-arm64": "0.27.7", "@esbuild/freebsd-x64": "0.27.7", "@esbuild/linux-arm": "0.27.7", "@esbuild/linux-arm64": "0.27.7", "@esbuild/linux-ia32": "0.27.7", "@esbuild/linux-loong64": "0.27.7", "@esbuild/linux-mips64el": "0.27.7", "@esbuild/linux-ppc64": "0.27.7", "@esbuild/linux-riscv64": "0.27.7", "@esbuild/linux-s390x": "0.27.7", "@esbuild/linux-x64": "0.27.7", "@esbuild/netbsd-arm64": "0.27.7", "@esbuild/netbsd-x64": "0.27.7", "@esbuild/openbsd-arm64": "0.27.7", "@esbuild/openbsd-x64": "0.27.7", "@esbuild/openharmony-arm64": "0.27.7", "@esbuild/sunos-x64": "0.27.7", "@esbuild/win32-arm64": "0.27.7", "@esbuild/win32-ia32": "0.27.7", "@esbuild/win32-x64": "0.27.7" }, "bin": { "esbuild": "bin/esbuild" } }, "sha512-IxpibTjyVnmrIQo5aqNpCgoACA/dTKLTlhMHihVHhdkxKyPO1uBBthumT0rdHmcsk9uMonIWS0m4FljWzILh3w=="],
+
+    "@suize/wallet/@mysten/seal/@mysten/bcs": ["@mysten/bcs@2.1.0", "", { "dependencies": { "@mysten/utils": "^0.4.0", "@scure/base": "^2.2.0" } }, "sha512-rIR/cDAqDfBDxmYEZXppN/on8gmh1OW0dYi/Bk2kMBZcYMTaBaEtEX1VR6g7HicVxuMbFAIP0/SQkdH7J9Y5dQ=="],
 
     "@suize/wallet/@vitejs/plugin-react/@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.1", "", {}, "sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw=="],
 
@@ -1807,6 +1804,8 @@
     "@suize/landing/vite/esbuild/@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.27.7", "", { "os": "win32", "cpu": "ia32" }, "sha512-SmwKXe6VHIyZYbBLJrhOoCJRB/Z1tckzmgTLfFYOfpMAx63BJEaL9ExI8x7v0oAO3Zh6D/Oi1gVxEYr5oUCFhw=="],
 
     "@suize/landing/vite/esbuild/@esbuild/win32-x64": ["@esbuild/win32-x64@0.27.7", "", { "os": "win32", "cpu": "x64" }, "sha512-56hiAJPhwQ1R4i+21FVF7V8kSD5zZTdHcVuRFMW0hn753vVfQN8xlx4uOPT4xoGH0Z/oVATuR82AiqSTDIpaHg=="],
+
+    "@suize/wallet/@mysten/seal/@mysten/bcs/@mysten/utils": ["@mysten/utils@0.4.0", "", { "dependencies": { "@scure/base": "^2.2.0" } }, "sha512-nHlXECBl9kE+AHF/aw5a7JVNizae8Kb71A4H18BV/sXd5/l2BaWNGWVatq05fzJo3hF78AWorDxa++1TgcBKWw=="],
 
     "@suize/wallet/vite/esbuild/@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.27.7", "", { "os": "aix", "cpu": "ppc64" }, "sha512-EKX3Qwmhz1eMdEJokhALr0YiD0lhQNwDqkPYyPhiSwKrh7/4KRjQc04sZ8db+5DVVnZ1LmbNDI1uAMPEUBnQPg=="],
 

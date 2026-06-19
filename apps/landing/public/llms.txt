@@ -104,8 +104,15 @@ the chain.
 
 That is the entire integration. `price` is your price per request, a decimal
 USDC string. Keyless: `to` — your Sui address — IS your account. No API keys,
-no signup, no sessions, no webhooks, no dashboard — deleted by design. The chain
-is the database.
+no signup, no sessions. In code you wire NOTHING — no callback to register; your
+own `/verify` call is the receipt, the chain is the database.
+
+No server? There is a hosted no-code door. In the Suize wallet (wallet.suize.io
+→ Business → Accept a payment) you set a price + a webhook URL and get a link
+`api.suize.io/charge/<token>` an agent pays. Suize settles on-chain and POSTs the
+signed order to your webhook — verify it with `@suize/pay/webhook` (the on-chain
+tx digest is the proof of payment; dedupe on it, fulfil once). Nothing is stored:
+the price + payTo ride inside the signed link.
 
 The model: an unpaid request gets a 402 carrying the x402 challenge → the agent
 pays gaslessly through Suize → it retries with the `X-PAYMENT` header → the

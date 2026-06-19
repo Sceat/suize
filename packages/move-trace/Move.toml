@@ -1,0 +1,14 @@
+[package]
+name = "suize_trace"
+edition = "2024"
+version = "0.0.1"
+
+# Framework-only, EVENT-ONLY module: `suize_trace` calls nothing beyond
+# sui::event + TxContext. No objects, no caps, no mutable state — so no Version
+# upgrade gate (there is nothing upgradeable to protect; the whole module is one
+# emit). Same `framework/testnet` pin as move-subs / move-deploy.
+[dependencies]
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/testnet" }
+
+[addresses]
+trace = "0x0"

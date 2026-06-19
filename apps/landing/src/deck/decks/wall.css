@@ -1,0 +1,235 @@
+/* ==========================================================================
+   THE WALL → THE DOOR. The two-sided problem (merchants can't accept · agents
+   can't find them) rendered as two COLOUR-CODED doors that part on scroll to
+   reveal the open rail + directory. Tinted gradients, grain, font contrast.
+   ========================================================================== */
+
+.wl-pin-outer {
+  position: relative;
+  height: 280vh;
+}
+.wl-pin {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  --part: 0;
+  --merchant: #3b82d6; /* deep blue */
+  --agent: #74b0f2; /* bright blue */
+}
+
+/* ---- behind the doors: the open rail + directory revealed ---- */
+.wl-rail {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 0 24px;
+  /* only resolve once the doors are mostly open — never straddle them */
+  opacity: clamp(0, calc(var(--part) * 2.6 - 1.55), 1);
+  transform: scale(calc(0.92 + var(--part) * 0.08));
+}
+.wl-rail__eye {
+  font: 700 11px/1 var(--mono);
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--blue);
+  margin: 0 0 18px;
+}
+.wl-rail__h {
+  font: 600 clamp(44px, 7vw, 92px) / 0.97 var(--serif);
+  letter-spacing: -0.035em;
+  color: var(--fg);
+  margin: 0;
+  max-width: 16ch;
+}
+.wl-rail__h .door {
+  font-style: italic;
+  color: var(--merchant);
+}
+.wl-rail__h .dir {
+  font-style: italic;
+  color: var(--agent);
+}
+.wl-rail__p {
+  font: 400 clamp(16px, 1.7vw, 20px) / 1.5 var(--sans);
+  color: var(--fg-2);
+  margin: 22px 0 0;
+  max-width: 50ch;
+}
+.wl-flow {
+  margin-top: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 13px;
+  padding: 12px 20px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.32);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  font: 600 13.5px/1 var(--mono);
+  color: var(--fg);
+  box-shadow: 0 20px 50px -34px rgba(12, 38, 78, 0.5);
+}
+
+/* ---- light through the widening gap ---- */
+.wl-bloom {
+  position: absolute;
+  top: -10%;
+  bottom: -10%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: clamp(60px, calc(var(--part) * 70%), 70%);
+  background: radial-gradient(ellipse at center, rgba(140, 190, 255, 0.6), rgba(90, 150, 230, 0.2) 45%, transparent 70%);
+  filter: blur(36px);
+  z-index: 2;
+  pointer-events: none;
+  opacity: calc(0.45 + var(--part) * 0.5);
+}
+.wl-seam {
+  position: absolute;
+  top: 6%;
+  bottom: 6%;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  z-index: 3;
+  background: linear-gradient(to bottom, transparent, var(--merchant), var(--blue-bright), var(--agent), transparent);
+  box-shadow: 0 0 26px 5px rgba(77, 162, 255, 0.6);
+  opacity: calc(1 - var(--part) * 1.3);
+}
+
+/* ---- the two colour-coded doors ---- */
+.wl-door {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 51%;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 clamp(30px, 5.5vw, 84px);
+  will-change: transform;
+}
+/* heavy, dark, GREY/SLATE texture — the closed, locked-out status quo */
+.wl-door::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--grain);
+  background-size: 150px 150px;
+  opacity: 0.6;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+.wl-door--l {
+  left: 0;
+  align-items: flex-end;
+  text-align: right;
+  --side: var(--merchant);
+  background:
+    radial-gradient(120% 80% at 100% 50%, color-mix(in srgb, var(--merchant) 18%, transparent), transparent 60%),
+    linear-gradient(155deg, #1d2c44, #0c1626);
+  transform: translateX(calc(var(--part) * -101%));
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--merchant) 45%, transparent);
+}
+.wl-door--r {
+  right: 0;
+  align-items: flex-start;
+  text-align: left;
+  --side: var(--agent);
+  background:
+    radial-gradient(120% 80% at 0% 50%, color-mix(in srgb, var(--agent) 16%, transparent), transparent 60%),
+    linear-gradient(205deg, #1d2c44, #0c1626);
+  transform: translateX(calc(var(--part) * 101%));
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--agent) 45%, transparent);
+}
+.wl-eye {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 700 10.5px/1 var(--mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--side);
+  margin-bottom: 20px;
+  opacity: calc(1 - var(--part) * 2);
+}
+.wl-eye::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--side);
+  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--side) 70%, transparent);
+}
+.wl-door--r .wl-eye {
+  flex-direction: row-reverse;
+}
+.wl-side-h {
+  font: 600 clamp(26px, 3.4vw, 44px) / 1.05 var(--serif);
+  letter-spacing: -0.02em;
+  color: #eef4fb;
+  margin: 0 0 26px;
+  max-width: 11ch;
+  opacity: calc(1 - var(--part) * 1.5);
+}
+.wl-frics {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  opacity: calc(1 - var(--part) * 2);
+}
+.wl-fric {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font: 500 13.5px/1.3 var(--sans);
+  color: #93a6bd;
+}
+.wl-door--r .wl-fric {
+  flex-direction: row-reverse;
+}
+.wl-fric::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--side);
+  transform: translateY(-2px);
+  flex: 0 0 auto;
+}
+.wl-cue {
+  position: absolute;
+  bottom: 5.5vh;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  text-align: center;
+  font: 600 10.5px/1.7 var(--mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  opacity: calc(1 - var(--part) * 3);
+  pointer-events: none;
+}
+
+@media (max-width: 720px) {
+  .wl-side-h {
+    font-size: 21px;
+  }
+  .wl-fric {
+    font-size: 12px;
+  }
+  .wl-door {
+    padding: 0 20px;
+  }
+}

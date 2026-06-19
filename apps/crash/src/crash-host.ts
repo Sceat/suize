@@ -27,14 +27,6 @@ export type CrashSide = {
   enabled: boolean
 }
 
-// One row of the live "Placing now" tape (ambient social proof; ZERO gameplay).
-export type CrashTapeRow = {
-  id: number
-  name: string
-  amountUsd: number
-  side: 'UP' | 'DOWN'
-}
-
 // One row of the GAINS/LOSS results log (top-right, below the account cluster).
 // A settled outcome we captured this session (or seeded from the redeemed feed):
 // the side, whether it won, and the realized P&L in plain USD (signed). Rendered
@@ -215,9 +207,6 @@ export type CrashData = {
   // spot crossing, e.g. bet DOWN, price up but the bid still > cost). null when
   // no bet is held (the line falls back to a neutral 50/50 tint).
   chartWinning: boolean | null
-
-  // ---- tape ----
-  tape: CrashTapeRow[]
 
   // ---- settle flash ----
   flash: 'win' | 'lose' | null

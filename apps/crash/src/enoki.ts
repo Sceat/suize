@@ -6,8 +6,7 @@ import { CRASH_NETWORK, RPC_URL } from './config'
 // Enoki (zkLogin + sponsored gas) registration.
 // ----------------------------------------------------------------------------
 // API confirmed against the installed types (@mysten/enoki 1.0.8 /
-// @mysten/sui 2.17.0) and mirrors the proven pattern in
-// ~/dev/sui/movable (same React/bun/Enoki stack):
+// @mysten/sui 2.17.0), the proven React/bun/Enoki pattern:
 //
 //   import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 //   registerEnokiWallets({ apiKey, client, network, providers:{ google:{...} } })

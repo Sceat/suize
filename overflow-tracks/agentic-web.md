@@ -30,3 +30,7 @@ AI agents are stuck at the "approve" wall — every action needs a human signatu
 Users shouldn't need to know what a liquidity pool is. Build an intent engine that parses a plain-English financial goal, compiles it into a Sui PTB, and before signing, runs a guardian check that surfaces risks (high slippage, concentration, stale pools) in plain language. The user must explicitly confirm before execution. A swap chatbot with no guardian layer is not an intent engine.
 
 - **Must have:**  text → PTB → execution flow, human-readable PTB preview, guardian catching at least 2 risk classes, explicit confirmation step.
+
+
+
+

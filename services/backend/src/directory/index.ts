@@ -137,7 +137,9 @@ const loadFeed = readThrough(FEED_TTL_MS, async (): Promise<FeedEntry[]> => {
   const payments = await readPayments(treasury, MAX_FEED, MAX_FEED * 3);
   const treasuryKey = treasury.toLowerCase();
   const thirdParty = payments.filter((p) => p.merchant.toLowerCase() !== treasuryKey);
-  return enrich(thirdParty);
+  // Newest-first is the scan's natural order (descending paging); re-assert it explicitly
+  // so the feed survives an RPC quirk or any future phase-2 parallelization reorder.
+  return (await enrich(thirdParty)).sort((a, b) => b.timestampMs - a.timestampMs);
 });
 
 // ── /rankings payload — merchants aggregated by volume ────────────────────────────

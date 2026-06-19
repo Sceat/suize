@@ -85,6 +85,24 @@ export const WALRUS_DEFAULTS: Record<SuiNetwork, { aggregator: string; publisher
   },
 };
 
+/**
+ * Per-network Walrus EPOCH clock — the genesis instant of epoch 0 and the epoch
+ * duration. Lets any reader turn a blob's on-chain `storage.end_epoch` into a
+ * wall-clock expiry without an extra RPC: `walrusEpochToMs(endEpoch, net)`.
+ * SINGLE SOURCE OF TRUTH (both the backend storage reader and the deploy
+ * dashboard's chain-derived expiry consume these — no duplicated literals).
+ * Testnet epochs are ~1 day; mainnet ~14 days (genesis values from Walrus ops).
+ */
+export const WALRUS_EPOCHS: Record<SuiNetwork, { genesisMs: number; durationMs: number }> = {
+  testnet: { genesisMs: Date.parse('2024-10-17T00:00:00Z'), durationMs: 24 * 60 * 60 * 1000 },
+  mainnet: { genesisMs: Date.parse('2025-03-25T15:00:24Z'), durationMs: 14 * 24 * 60 * 60 * 1000 },
+};
+
+/** The wall-clock ms a Walrus epoch BOUNDARY falls at (epoch N starts here). A blob
+ * ending at epoch N expires at epoch N's start. */
+export const walrusEpochToMs = (epoch: number, net: SuiNetwork): number =>
+  WALRUS_EPOCHS[net].genesisMs + epoch * WALRUS_EPOCHS[net].durationMs;
+
 // ---------------------------------------------------------------------------
 // On-chain package ids + the exact Move targets the sponsor may sponsor.
 // These are public on-chain ids — safe to commit.
@@ -183,6 +201,11 @@ const DEPLOY_DEPLOYER_CAP_OBJECT =
 // SubsConfig. CONFIG_OBJECT is the shared SubsConfig init created; VERSION_OBJECT is the
 // shared Version. Mainnet stays '0x0' — its publish is a republish.
 const SUBS_PACKAGE: string = '0x759105b5f7382cb22533e8a5282e90c92c558edb1bc2eaa0904247914082d821';
+
+/** Trace package (`trace::trace` — `anchor` + `seal_approve`) — PUBLISHED testnet
+ *  2026-06-17 (digest `BcoxS3vp…`). The encrypted-history on-chain commitment + the
+ *  Seal owner-only access policy. Mainnet is a republish ('0x0' until then). */
+const TRACE_PACKAGE: string = '0xc7c95e514776cee94d65b5997247d88ff2493bd5b83971b176cd1a072cbd8c07';
 const SUBS_CONFIG_OBJECT: string = '0x976c10fb2eb9d29b8ae7c17fa6bf8b06cbb1e6a591e6ce7a82c04ff344332029';
 const SUBS_VERSION_OBJECT: string = '0x6542cdaa1f7bc55a00a319b98b8dd6d45b546868558a1e1a0b58d409b6d87d86';
 
@@ -299,11 +322,14 @@ export async function resolveTreasury(client: TreasuryResolver): Promise<string 
   return addr && SUI_ADDRESS_RE.test(addr) ? addr.toLowerCase() : null;
 }
 
-// NOTE (x402 V2 pivot 2026-06-12): SUIZE_DEPLOY_MERCHANT / DEPLOY_MERCHANT_SET are
-// GONE. Deploy is a FIRST-PARTY x402 merchant — the merchant IS the Suize treasury
-// (resolved from `treasury@suize`), so a separate merchant address const is dead. The
-// deploy charge is a single full-amount output to that treasury (no fee split).
-// See services/backend/src/deploy/payment.ts.
+// NOTE (deploy merchant): the Deploy merchant is resolved at RUNTIME by the backend
+// (`deployMerchant()` in services/backend/src/deploy/payment.ts), NOT pinned here —
+// so no merchant-address const lives in this package. The `SUIZE_DEPLOY_MERCHANT` env
+// selects it: UNSET → the merchant IS the Suize treasury (first-party — a single
+// full-amount output, deploy income == treasury income); SET to a real address → a
+// third-party merchant (net → merchant, the 2%/$0.01 fee leg → treasury, so the deploy
+// shows in that merchant's ledger AND in the agents.suize.io feed). Either way the
+// treasury still resolves LIVE from `treasury@suize`.
 //
 // ON-CHAIN CAVEAT (subs): `subs::subscription`'s `SubsConfig.treasury` is set ON-CHAIN
 // at publish and Move can't resolve SuiNS — so the subscription rake goes to whatever
@@ -325,11 +351,6 @@ export const DEPLOY_PREMIUM_CHARGE_AMOUNT = 100_000;
  * ~1 month; the actual per-site end epoch is on-chain (the blobs' `storage.end_epoch`,
  * surfaced as `expiresAtMs` on GET /sites/:id). Extend or subscribe to push it out. */
 export const DEPLOY_STORAGE_EPOCHS = 30;
-
-/** The price of a one-off Walrus-storage EXTEND, as a DECIMAL USDC string ("0.50")
- * — the x402/facilitator wire convention (decimal strings, not base units), so it
- * drops straight into a PaymentRequirements amount. Same $0.50 as the deploy charge. */
-export const DEPLOY_EXTEND_PRICE_USDC = '0.50';
 
 /**
  * The Deploy subscription — $19.99/mo (price placeholder, owner-flagged), unlocking
@@ -506,6 +527,19 @@ const subsIds = (ids: { pkg: string; config: string; version: string }) => ({
 });
 
 /**
+ * Trace package block (`trace::trace`). Minimal — just the package + the ONE
+ * sponsored write target `anchor` (the on-chain history commitment). `seal_approve`
+ * is NOT a target: Seal's key servers DRY-RUN it, it is never broadcast or sponsored.
+ * `anchor` moves no coins, so no `CoinWithBalance` framework helpers are needed.
+ */
+const traceIds = (ids: { pkg: string }) => ({
+  PACKAGE: ids.pkg,
+  TARGETS: {
+    ANCHOR: `${ids.pkg}::trace::anchor`,
+  } as Record<string, string>,
+});
+
+/**
  * Ad-slot auction package block (`auction::auction`) — PUBLISHED on testnet (real ids
  * above; mainnet is a republish — '0x0' until then). `SLOTS` maps each slot key to its
  * shared `AdSlot` object id (read live for the current price/holder/creative). The ONE
@@ -574,6 +608,7 @@ const NETWORK_ADDRESSES: Record<
     subs: { pkg: string; config: string; version: string };
     auction: { pkg: string; pkgLatest: string; config: string; version: string; slots: Record<string, string> };
     profile: { pkg: string; config: string; version: string };
+    trace: { pkg: string };
   }
 > = {
   testnet: {
@@ -594,6 +629,7 @@ const NETWORK_ADDRESSES: Record<
       slots: AUCTION_SLOTS,
     },
     profile: { pkg: PROFILE_PACKAGE, config: PROFILE_CONFIG_OBJECT, version: PROFILE_VERSION_OBJECT },
+    trace: { pkg: TRACE_PACKAGE },
   },
   mainnet: {
     wallet: '0x0',
@@ -607,6 +643,7 @@ const NETWORK_ADDRESSES: Record<
     subs: { pkg: '0x0', config: '0x0', version: '0x0' },
     auction: { pkg: '0x0', pkgLatest: '0x0', config: '0x0', version: '0x0', slots: {} },
     profile: { pkg: '0x0', config: '0x0', version: '0x0' },
+    trace: { pkg: '0x0' },
   },
 };
 
@@ -622,6 +659,7 @@ export const packageIds = (network: SuiNetwork) => ({
   SUBS: subsIds(NETWORK_ADDRESSES[network].subs),
   AUCTION: auctionIds(NETWORK_ADDRESSES[network].auction),
   PROFILE: profileIds(NETWORK_ADDRESSES[network].profile),
+  TRACE: traceIds(NETWORK_ADDRESSES[network].trace),
 });
 
 /**
@@ -645,6 +683,18 @@ export const SUBS_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.SUBS.TARGET
 
 /** True once the `subs` package has been published (its id is no longer the 0x0 placeholder). */
 export const SUBS_PUBLISHED: boolean = PACKAGE_IDS.SUBS.PACKAGE !== '0x0';
+
+/**
+ * The `trace` write target (`anchor`) the sponsor allow-lists so the wallet's
+ * gas-sponsored history anchor can be called. Just the one target — `anchor` moves
+ * no coins (no `CoinWithBalance` helpers), and `seal_approve` is dry-run (never
+ * sponsored). Union in ONLY when TRACE_PUBLISHED, else `0x0::trace::anchor` poisons
+ * the allow-list.
+ */
+export const TRACE_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.TRACE.TARGETS);
+
+/** True once the `trace` package has been published (its id is no longer 0x0). */
+export const TRACE_PUBLISHED: boolean = PACKAGE_IDS.TRACE.PACKAGE !== '0x0';
 
 /**
  * Flat list of the `auction` write target (`bid`) PLUS the Sui framework helpers the

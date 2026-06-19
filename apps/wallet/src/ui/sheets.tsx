@@ -11,7 +11,8 @@
  *                   routed to a CLAIM LINK instead (no jargon, no memo field).
  *   MoveSheet     — top-up / withdraw / transfer with quick chips + Max.
  *
- * The QR is decorative (NOT scannable) — the copy row is the real share surface.
+ * The QR is a REAL scannable code (dark-on-white, quiet zone, ECC-H) encoding the 0x
+ * ADDRESS — so any Sui wallet can pay by scanning; the copy row shares the @handle.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, Check, Copy, X, ICON_STROKE } from '../system';
@@ -161,10 +162,14 @@ function CopyRow({ text }: { text: string }) {
 
 export function AddFundsSheet({
   handle,
+  address,
   onClose,
   requestEnabled = false,
 }: {
   handle: string;
+  /** the wallet's 0x address — what the QR encodes, so ANY Sui wallet can pay by
+   *  scanning (the copy row keeps the friendly @handle for Suize-native sends). */
+  address: string;
   onClose: () => void;
   /** the request-link route doesn't exist yet — demo-only until it ships
    *  (production shows the Soon chip; never mint a link that leads nowhere) */
@@ -179,7 +184,7 @@ export function AddFundsSheet({
     <Sheet title={ACTIONS.addFunds.title} sub={ACTIONS.addFunds.sub} onClose={onClose}>
       <div className="rd-sheet__qrzone">
         <div className="rd-sheet__qr">
-          <SuizeQr value={handle} size={148} />
+          <SuizeQr value={address} size={148} />
         </div>
         <div className="rd-sheet__qrside">
           <CopyRow text={handle} />
@@ -191,7 +196,7 @@ export function AddFundsSheet({
           ) : null}
         </div>
       </div>
-      <p className="rd-sheet__note">{ACTIONS.addFunds.network}</p>
+      <p className="rd-sheet__note rd-sheet__note--warn">{ACTIONS.addFunds.network}</p>
 
       {requestEnabled ? (
         link ? (
@@ -226,6 +231,107 @@ export function AddFundsSheet({
           ))}
         </div>
       </div>
+    </Sheet>
+  );
+}
+
+// ── ACCEPT A PAYMENT (the no-code charge door) ─────────────────────────────────
+
+export function NewChargeSheet({
+  onCreate,
+  onClose,
+}: {
+  /** creates the charge for the authenticated merchant; returns the hosted link.
+   *  THROW to surface a calm error in the sheet. */
+  onCreate: (input: { price: string; webhook: string; ref?: string }) => Promise<string>;
+  onClose: () => void;
+}) {
+  const [price, setPrice] = useState('');
+  const [webhook, setWebhook] = useState('');
+  const [ref, setRef] = useState('');
+  const [url, setUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const priceOk = /^\d+(\.\d{1,6})?$/.test(price.trim()) && Number(price) > 0;
+  const webhookOk = webhook.trim().startsWith('https://') && webhook.trim().length <= 512;
+  const ready = priceOk && webhookOk && !busy;
+
+  async function create() {
+    setBusy(true);
+    setError(null);
+    try {
+      const link = await onCreate({ price: price.trim(), webhook: webhook.trim(), ref: ref.trim() || undefined });
+      setUrl(link);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Could not create the charge — try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Sheet
+      title="Accept a payment"
+      sub="Set a price + the URL we should POST the paid order to. Share the link — an AI agent pays it, you fulfil. No payment code."
+      onClose={onClose}
+    >
+      {url ? (
+        <div className="rd-sheet__done">
+          <span className="rd-label">Your charge link — share it with agents</span>
+          <CopyRow text={url} />
+          <p className="rd-sheet__note">
+            An agent that pays this link sends you USDC; we POST the order to your webhook (signed —
+            verify with <span className="rd-money" style={{ fontSize: 11 }}>@suize/pay/webhook</span>). Dedupe on the
+            on-chain digest and fulfil once.
+          </p>
+          <button type="button" className="rd-btn" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      ) : (
+        <>
+          <span className="rd-label">Price (USDC)</span>
+          <div className="rd-sheet__field">
+            <input
+              autoFocus
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder="0.10"
+              inputMode="decimal"
+              aria-label="Price in USDC"
+            />
+          </div>
+          <span className="rd-label">Your webhook URL</span>
+          <div className="rd-sheet__field">
+            <input
+              value={webhook}
+              onChange={(e) => setWebhook(e.target.value)}
+              placeholder="https://your-shop.com/fulfill"
+              aria-label="Webhook URL"
+              spellCheck={false}
+            />
+          </div>
+          <span className="rd-label">Label (optional)</span>
+          <div className="rd-sheet__field">
+            <input
+              value={ref}
+              onChange={(e) => setRef(e.target.value)}
+              placeholder="premium-api"
+              aria-label="Label"
+              spellCheck={false}
+            />
+          </div>
+          {error ? (
+            <p className="rd-sheet__note" style={{ color: 'var(--rd-bear, #b5342b)' }}>
+              {error}
+            </p>
+          ) : null}
+          <button type="button" className="rd-cta" disabled={!ready} onClick={create}>
+            {busy ? 'Creating…' : 'Create charge link'}
+          </button>
+        </>
+      )}
     </Sheet>
   );
 }

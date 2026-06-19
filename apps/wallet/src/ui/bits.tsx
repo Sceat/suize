@@ -4,6 +4,7 @@
  * and the @name highlighter. All visual; the views own choreography + state.
  */
 import type { ReactNode } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import type { Who } from './copy';
 
 /** the landing's four-point spark glyph — the family badge mark */
@@ -114,7 +115,7 @@ export function GoogleMark() {
 // one inline pass: **bold**, *italic*, `code`, [text](url), and @names. Bold is
 // tried before italic so `**x**` never reads as two single-asterisk spans.
 const MD_INLINE =
-  /(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^)\s]+\)|\*(?=\S)[^*\n]+?\*|[a-z0-9][a-z0-9-]*@[a-z0-9][a-z0-9-]*)/g;
+  /(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^)\s]+\)|https?:\/\/[^\s)]+|\*(?=\S)[^*\n]+?\*|[a-z0-9][a-z0-9-]*@[a-z0-9][a-z0-9-]*)/g;
 
 function inlineMd(text: string, kb: string): ReactNode[] {
   const out: ReactNode[] = [];
@@ -132,6 +133,12 @@ function inlineMd(text: string, kb: string): ReactNode[] {
       out.push(
         <a className="rd-md-a" key={`${kb}a${k}`} href={link[2]} target="_blank" rel="noopener noreferrer">
           {link[1]}
+        </a>,
+      );
+    } else if (t.startsWith('http')) {
+      out.push(
+        <a className="rd-md-a rd-md-url" key={`${kb}u${k}`} href={t} target="_blank" rel="noopener noreferrer">
+          {t}
         </a>,
       );
     } else if (t.startsWith('*')) out.push(<em key={`${kb}i${k}`}>{t.slice(1, -1)}</em>);
@@ -155,7 +162,7 @@ function inlineMd(text: string, kb: string): ReactNode[] {
  * simple markdown; this keeps it readable in-bubble without pulling a parser dep.
  */
 export function rich(text: string): ReactNode {
-  if (!/[*`[\n]|[a-z0-9-]+@[a-z0-9-]/.test(text)) return text; // fast path: plain prose
+  if (!/[*`[\n]|https?:\/\/|[a-z0-9-]+@[a-z0-9-]/.test(text)) return text; // fast path: plain prose
   const nodes: ReactNode[] = [];
   text.split('\n').forEach((raw, i) => {
     if (i > 0) nodes.push(<br key={`br${i}`} />);
@@ -183,69 +190,25 @@ export function rich(text: string): ReactNode {
 }
 
 /**
- * SuizeQr — the lab's DECORATIVE QR (not scannable; the copy row is the truth).
- * Restyled per owner: rounded dot modules in ink, the three finder eyes in the
- * brand gradient, and the SUIZE logo on a white rounded tile in the center.
- * Deterministic from `value` (same address → same pattern).
+ * SuizeQr — a REAL, scannable QR. Encodes `value` (the wallet handle / address shown
+ * on the copy row). Always DARK ink on a WHITE field with a quiet-zone margin, so it
+ * scans on any phone regardless of the (dark) theme around it. Error-correction is set
+ * to H (30% recovery) so the small centered Suize mark — excavated from the modules —
+ * never breaks the scan. Re-renders when `value` changes.
  */
 export function SuizeQr({ value, size = 148 }: { value: string; size?: number }) {
-  const GRID = 25;
-  const QUIET = 2;
-  // xmur3 → mulberry32, tiny + deterministic
-  let h = 1779033703 ^ value.length;
-  for (let i = 0; i < value.length; i++) {
-    h = Math.imul(h ^ value.charCodeAt(i), 3432918353);
-    h = (h << 13) | (h >>> 19);
-  }
-  let a = (h ^= h >>> 16) >>> 0;
-  const next = () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  const inFinder = (r: number, c: number) =>
-    (r >= QUIET && r < QUIET + 7 && c >= QUIET && c < QUIET + 7) ||
-    (r >= QUIET && r < QUIET + 7 && c >= GRID - QUIET - 7 && c < GRID - QUIET) ||
-    (r >= GRID - QUIET - 7 && r < GRID - QUIET && c >= QUIET && c < QUIET + 7);
-  // the center tile (the logo well) — a 7x7 hole
-  const mid = (GRID - 7) / 2;
-  const inLogo = (r: number, c: number) => r >= mid && r < mid + 7 && c >= mid && c < mid + 7;
-
-  const dots: { x: number; y: number }[] = [];
-  for (let r = 0; r < GRID; r++) {
-    for (let c = 0; c < GRID; c++) {
-      const quiet = r < QUIET || r >= GRID - QUIET || c < QUIET || c >= GRID - QUIET;
-      if (quiet || inFinder(r, c) || inLogo(r, c)) continue;
-      if (next() > 0.5) dots.push({ x: c, y: r });
-    }
-  }
-  const eye = (x: number, y: number) => (
-    <g key={`${x}-${y}`}>
-      <rect x={x} y={y} width={7} height={7} rx={2.1} fill="none" stroke="url(#rdqr-grad)" strokeWidth={1} />
-      <rect x={x + 2} y={y + 2} width={3} height={3} rx={1} fill="url(#rdqr-grad)" />
-    </g>
-  );
-
+  const logo = Math.round(size * 0.2);
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${GRID} ${GRID}`} aria-hidden="true">
-      <defs>
-        <linearGradient id="rdqr-grad" x1="0" y1="0" x2="25" y2="25" gradientUnits="userSpaceOnUse">
-          <stop stopColor="var(--rd-blue-deep)" />
-          <stop offset="1" stopColor="var(--rd-blue-bright)" />
-        </linearGradient>
-      </defs>
-      {dots.map((d) => (
-        <circle key={`${d.x}.${d.y}`} cx={d.x + 0.5} cy={d.y + 0.5} r={0.38} fill="currentColor" />
-      ))}
-      {eye(QUIET, QUIET)}
-      {eye(GRID - QUIET - 7, QUIET)}
-      {eye(QUIET, GRID - QUIET - 7)}
-      {/* the SUIZE mark on a white rounded tile, centered */}
-      <rect x={mid + 0.4} y={mid + 0.4} width={6.2} height={6.2} rx={1.6} fill="#fff" stroke="var(--rd-hair)" strokeWidth={0.15} />
-      <image href="/logo.png" x={mid + 1.1} y={mid + 1.1} width={4.8} height={4.8} />
-    </svg>
+    <QRCodeSVG
+      value={value}
+      size={size}
+      level="H"
+      marginSize={4}
+      bgColor="#ffffff"
+      fgColor="#0a1b2e"
+      title="Your Suize wallet QR"
+      imageSettings={{ src: '/logo.png', height: logo, width: logo, excavate: true }}
+    />
   );
 }
 

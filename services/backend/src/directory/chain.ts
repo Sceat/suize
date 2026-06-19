@@ -35,6 +35,21 @@ let _client: SuiJsonRpcClient | null = null;
 export const suiClient = (): SuiJsonRpcClient =>
   (_client ??= new SuiJsonRpcClient({ url: config.suiRpcUrl, network: config.suiNetwork }));
 
+// Per-RPC client cache for the FEED FALLBACK. The `ToAddress` transaction filter that
+// /feed + /rankings depend on is supported by Sui full nodes but DROPPED by some
+// commercial RPC providers (→ the scan throws → the directory 502s). So readPayments
+// tries each RPC in config.suiRpcUrls in order and uses the first that answers. Display
+// sugar (handles/profiles) keeps using the primary suiClient() — a miss there is benign.
+const _fallbackClients = new Map<string, SuiJsonRpcClient>();
+const clientFor = (url: string): SuiJsonRpcClient => {
+  let c = _fallbackClients.get(url);
+  if (!c) {
+    c = new SuiJsonRpcClient({ url, network: config.suiNetwork });
+    _fallbackClients.set(url, c);
+  }
+  return c;
+};
+
 /** The native USDC type for the configured network — the only coin a payment leg
  * counts as. Matched case-insensitively on the `::usdc::usdc` suffix so a `0x0…2`
  * vs `0x2`-normalised address never causes a miss. */
@@ -177,24 +192,92 @@ export const readPayments = async (
   want: number,
   maxScan = 400,
 ): Promise<DirectoryPayment[]> => {
-  const out: DirectoryPayment[] = [];
-  let cursor: string | null | undefined = undefined;
-  let scanned = 0;
+  // Try each configured RPC in order; the first that answers the ToAddress scan wins.
+  // (A provider that dropped the filter throws → we fall through to the next URL rather
+  // than 502 the whole directory. ALL failing still throws → the caller 502s, the
+  // honest signal to add a filter-supporting full node to SUI_RPC_URLS.)
+  const urls = config.suiRpcUrls?.length ? config.suiRpcUrls : [config.suiRpcUrl];
+  let lastErr: unknown;
+  for (const url of urls) {
+    try {
+      return await scanPaymentsVia(clientFor(url), treasury, want, maxScan);
+    } catch (e) {
+      lastErr = e;
+      console.error(
+        `[directory/readPayments] RPC ${url} unusable for the ToAddress scan:`,
+        (e as Error).message,
+      );
+    }
+  }
+  throw lastErr ?? new Error("no RPC configured for the directory scan");
+};
 
-  while (out.length < want && scanned < maxScan) {
-    const page = await suiClient().queryTransactionBlocks({
+// Phase-2 bounds. The public testnet fullnode prunes effects aggressively — most
+// treasury txs (even recent ones) can't yield balance changes — so a batch
+// `multiGetTransactionBlocks({showBalanceChanges})` fails for the WHOLE batch with
+// `InvalidParams: "...effect is empty"`. There is therefore no batch fast-path to be had;
+// we read PER-TX and skip the pruned ones. We bound that three ways so a growing /
+// pruned-heavy history can never blow past the ingress timeout (→ a 504): a per-call
+// timeout (a hung node never stalls the scan), bounded concurrency (no burst of N
+// parallel RPCs), and a global wall-clock deadline (return what we have so far).
+const PHASE2_CONCURRENCY = 12;
+const PER_CALL_TIMEOUT_MS = 4_000;
+const SCAN_DEADLINE_MS = 8_000;
+
+type TxChanges = { digest: string; timestampMs?: string | null; balanceChanges?: BalanceChange[] | null };
+
+/** ONE tx's balance changes, never throwing, bounded by a timeout — effect-pruned /
+ *  slow / unreadable all resolve to null and the caller skips them. */
+const oneTxChanges = (client: SuiJsonRpcClient, digest: string): Promise<TxChanges | null> => {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), PER_CALL_TIMEOUT_MS);
+  });
+  return Promise.race([
+    client.getTransactionBlock({ digest, options: { showBalanceChanges: true } }).catch(() => null),
+    timeout,
+  ]).finally(() => clearTimeout(timer));
+};
+
+/**
+ * The actual descending ToAddress scan against ONE client (see readPayments).
+ *
+ * TWO-PHASE (the fix for the directory 502): (1) page DIGESTS ONLY — NO `showBalanceChanges`,
+ * so the fullnode never derives effects and never hits the "effect is empty" page error that
+ * took the directory down; (2) resolve balance changes PER-TX (bounded concurrency + per-call
+ * timeout + a global deadline), skipping effect-pruned txs. Only a genuine page-listing failure
+ * throws (caught by readPayments' per-URL fallback). Newest-first order is preserved.
+ */
+const scanPaymentsVia = async (
+  client: SuiJsonRpcClient,
+  treasury: string,
+  want: number,
+  maxScan: number,
+): Promise<DirectoryPayment[]> => {
+  // Phase 1 — collect candidate digests, newest-first, WITHOUT effects (pruning-safe).
+  const digests: string[] = [];
+  let cursor: string | null | undefined = undefined;
+  while (digests.length < maxScan) {
+    const page = await client.queryTransactionBlocks({
       filter: { ToAddress: treasury },
-      options: { showBalanceChanges: true },
+      options: {},
       order: "descending",
       cursor: cursor ?? undefined,
       limit: 50,
     });
-    if (page.data.length === 0) break;
-    for (const tx of page.data) {
-      scanned++;
-      // Guard the per-tx parse: a malformed balance-change amount (a bad BigInt) must
-      // degrade gracefully — skip+log the offending tx, never 502 the whole page
-      // (mirrors resolveHandle / slots.ts readSlotFields).
+    for (const tx of page.data) digests.push(tx.digest);
+    if (!page.hasNextPage || !page.nextCursor) break;
+    cursor = page.nextCursor;
+  }
+
+  // Phase 2 — resolve per-tx (bounded), parse + qualify until `want` OR the scan deadline.
+  const out: DirectoryPayment[] = [];
+  const deadline = Date.now() + SCAN_DEADLINE_MS;
+  for (let i = 0; i < digests.length && out.length < want && Date.now() < deadline; i += PHASE2_CONCURRENCY) {
+    const txs = await Promise.all(digests.slice(i, i + PHASE2_CONCURRENCY).map((d) => oneTxChanges(client, d)));
+    for (const tx of txs) {
+      if (!tx) continue; // effect-pruned / timed-out → skip, never fatal
+      // A malformed balance-change amount (a bad BigInt) also degrades gracefully.
       try {
         const p = parsePayment(tx.digest, tx.timestampMs, tx.balanceChanges, treasury);
         if (p) out.push(p);
@@ -203,8 +286,6 @@ export const readPayments = async (
       }
       if (out.length >= want) break;
     }
-    if (!page.hasNextPage || !page.nextCursor) break;
-    cursor = page.nextCursor;
   }
   return out;
 };

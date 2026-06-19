@@ -114,6 +114,23 @@ export type HistoryRow = {
   digest: string | null // settling tx digest → SuiVision link (when in window)
 }
 
+// One SETTLED + WON position whose payout has NOT been redeemed into the wallet
+// yet — the gross qty×$1 is sitting in the on-chain position, claimable now. The
+// non-bigint-stripped fields are EXACTLY what build_claim_tx (sui.ts RedeemOpts)
+// needs, so the Portfolio's Claim button can fire the redeem without re-deriving
+// anything. Mirrors App's gather_claimable_positions (same settled+won predicate
+// + the manager-scoped redeemed-feed exclusion) so the two never disagree.
+export type ClaimablePosition = {
+  key: string // position key (stable) — React key + dedup
+  managerId: string
+  oracleId: string
+  expiryMs: bigint
+  strike1e9: bigint
+  isUp: boolean
+  quantity: bigint // summed contracts (1e6-scaled) across the bucket's mints
+  grossUsd: number // qty × $1 — what lands in the wallet on claim
+}
+
 // A point on the cumulative-P&L "skill curve": running realized net after each
 // settled round, oldest→newest, for the Portfolio chart.
 export type PnlPoint = { ts: number; cum: number }
@@ -122,6 +139,11 @@ export type PortfolioData = {
   managerId: string | null
   open: OpenPosition[]
   history: HistoryRow[]
+  // SETTLED + WON + un-redeemed positions — funds the user has earned but not yet
+  // pulled into the wallet (why "realized net" can exceed the wallet balance). The
+  // Portfolio surfaces these with a Claim button.
+  claimable: ClaimablePosition[]
+  claimableUsd: number // Σ claimable.grossUsd — the "non-redeemed funds" headline
   // aggregate hero figures (realized only — open P&L is unrealized, excluded)
   netUsd: number // Σ realized net across all history
   wins: number
@@ -143,6 +165,8 @@ export const EMPTY_PORTFOLIO: PortfolioData = {
   managerId: null,
   open: [],
   history: [],
+  claimable: [],
+  claimableUsd: 0,
   netUsd: 0,
   wins: 0,
   losses: 0,
@@ -235,6 +259,73 @@ const reconstruct_open = (
   }
   // soonest-expiring first (the live one the user is watching leads)
   return rows.sort((a, b) => a.expiryMs - b.expiryMs)
+}
+
+// ---- CLAIMABLE (settled + won + un-redeemed) ---------------------------------
+// The funds the user has earned but not yet pulled into the wallet: a position is
+// claimable when its oracle is SETTLED with a settlement_price, the position WON
+// (settlement vs strike — the SAME predicate as history + App.claim), and it has
+// no matching redeemed record (manager-scoped redeemed feed, keyed identically to
+// reconstruct_open). One row per (oracle×side) bucket; gross payout = qty×$1
+// (build_claim_tx's withdraw_all sweeps it to the wallet). Byte-for-byte the same
+// gather App's on-load sweep uses — so the Portfolio Claim button and the Play
+// auto-claim agree on exactly what is owed.
+const reconstruct_claimable = (
+  managerId: string,
+  minted: MintedPosition[],
+  redeemed: RedeemedPosition[],
+  oracles: Oracle[],
+): ClaimablePosition[] => {
+  const byId = new Map(oracles.map(o => [o.oracle_id, o]))
+  const redeemedKeys = new Set(redeemed.map(position_key))
+  type Agg = {
+    oracleId: string
+    isUp: boolean
+    strike1e9: bigint
+    expiryMs: number
+    quantity: bigint
+  }
+  const agg = new Map<string, Agg>()
+  for (const m of minted) {
+    if (m.oracle_id == null || m.strike == null || m.expiry == null) continue
+    const o = byId.get(m.oracle_id)
+    if (!o || o.status !== 'settled' || o.settlement_price == null) continue
+    const key = position_key(m)
+    if (redeemedKeys.has(key)) continue
+    const strike = to_bigint(m.strike, 0n)
+    const settlement = BigInt(Math.round(o.settlement_price))
+    const is_up = Boolean(m.is_up)
+    const won = is_up ? settlement >= strike : settlement < strike
+    if (!won) continue
+    const qty = to_bigint(m.quantity, ONE_CONTRACT_QTY)
+    const prev = agg.get(key)
+    if (prev) {
+      prev.quantity += qty
+    } else {
+      agg.set(key, {
+        oracleId: m.oracle_id,
+        isUp: is_up,
+        strike1e9: strike,
+        expiryMs: Math.trunc(m.expiry),
+        quantity: qty,
+      })
+    }
+  }
+  const rows: ClaimablePosition[] = []
+  for (const [key, a] of agg) {
+    if (a.quantity <= 0n) continue
+    rows.push({
+      key,
+      managerId,
+      oracleId: a.oracleId,
+      expiryMs: BigInt(a.expiryMs),
+      strike1e9: a.strike1e9,
+      isUp: a.isUp,
+      quantity: a.quantity,
+      grossUsd: dusdc_to_usd(a.quantity),
+    })
+  }
+  return rows
 }
 
 // ---- HISTORY (settled) -------------------------------------------------------
@@ -355,6 +446,8 @@ export const loadPortfolio = async (
 
   const open = reconstruct_open(minted, redeemed, oracles, now)
   const history = reconstruct_history(redeemedEvents, minted, oracles)
+  const claimable = reconstruct_claimable(managerId, minted, redeemed, oracles)
+  const claimableUsd = claimable.reduce((s, c) => s + c.grossUsd, 0)
 
   let net = 0
   let wins = 0
@@ -400,6 +493,8 @@ export const loadPortfolio = async (
     managerId,
     open,
     history,
+    claimable,
+    claimableUsd,
     netUsd: net,
     wins,
     losses,

@@ -178,11 +178,9 @@
 /* smooth flip on the surfaces that swap (not animating any 60fps anything) */
 body,
 .dx-top,
-.dx-card,
 .dx-chip,
 .dx-btn,
 .dx-panel,
-.dx-field,
 .dx-toast {
   transition:
     background-color 0.24s ease,
@@ -192,11 +190,9 @@ body,
 @media (prefers-reduced-motion: reduce) {
   body,
   .dx-top,
-  .dx-card,
   .dx-chip,
   .dx-btn,
   .dx-panel,
-  .dx-field,
   .dx-toast {
     transition: none;
   }
@@ -532,7 +528,6 @@ a {
   gap: 10px;
 }
 
-
 /* ==========================================================================
    CUSTOM CURSOR (fine pointers only) — a soft blue dot + lagging ring, ported
    from Crash. The OS cursor is hidden over the app; <CustomCursor> draws this.
@@ -652,15 +647,7 @@ a {
 /*  "Recently deployed" log rail (side). Mirrors Crash's main+side-log   */
 /*  shape (the e05 bottom-left tape) in the deploy palette.              */
 /* ===================================================================== */
-.dx-home {
-  display: flex;
-  align-items: flex-start;
-  gap: clamp(20px, 3vw, 40px);
-}
-.dx-home__main {
-  flex: 1 1 auto;
-  min-width: 0;
-}
+
 /* the side log — a condensed feed, lighter + narrower than the main column. */
 .dx-log {
   flex: 0 0 auto;
@@ -765,9 +752,7 @@ a {
 }
 /* NARROW — the log drops BELOW the main column as a horizontal strip. */
 @media (max-width: 900px) {
-  .dx-home {
-    flex-direction: column;
-  }
+  
   .dx-log {
     width: 100%;
     position: static;
@@ -928,17 +913,6 @@ a {
 /* the PROMINENT sign-in CTA on the anonymous (public feed) home — keeps the
    accent fill of .dx-btn.is-accent (a real call to action, not the quiet
    masthead .dx-signin), with the Google mark holding its own brand colours. */
-.dx-signin-cta {
-  gap: 8px;
-}
-.dx-signin-cta svg {
-  flex: 0 0 auto;
-}
-.dx-signin-cta .spin {
-  width: 13px;
-  height: 13px;
-  border-width: 2px;
-}
 
 .dx-chip {
   display: inline-flex;
@@ -963,11 +937,6 @@ a {
   border-color: var(--bull-edge);
   background: var(--bull-fill);
 }
-.dx-chip.is-pending {
-  color: var(--blue-deep);
-  border-color: var(--hair-blue);
-  background: var(--blue-wash);
-}
 
 /* ==========================================================================
    SITE CARDS (grid) — each card is a premium "EDITION" entry: an edition line
@@ -979,137 +948,25 @@ a {
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 18px;
 }
-.dx-card {
-  position: relative;
-  display: block;
-  text-align: left;
-  width: 100%;
-  background: var(--card);
-  border: 1px solid var(--hair);
-  border-radius: 3px;
-  padding: 18px 20px 16px;
-  cursor: pointer;
-  overflow: hidden;
-  box-shadow: 0 1px 2px rgba(10, 27, 46, 0.03);
-  transition:
-    transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-    border-color 0.24s ease,
-    box-shadow 0.28s ease;
-}
+
 /* the blue press-rail that inks in on hover (a current down the left margin) */
-.dx-card::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: linear-gradient(180deg, var(--blue), var(--blue-bright));
-  transform: scaleY(0);
-  transform-origin: top center;
-  transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.dx-card:hover {
-  transform: translateY(-3px);
-  border-color: var(--hair-blue);
-  box-shadow: 0 24px 60px -34px rgba(10, 27, 46, 0.4);
-}
-.dx-card:hover::before {
-  transform: scaleY(1);
-}
+
 /* Keyboard focus lands on the covering open-control (.dx-card__open); render the
    card's focus ring + press-rail when it's focus-visible (mouse clicks don't
    trigger :focus-visible, so the ring stays keyboard-only as before). */
-.dx-card:has(.dx-card__open:focus-visible) {
-  border-color: var(--blue);
-  box-shadow: 0 0 0 3px var(--blue-wash);
-}
-.dx-card:has(.dx-card__open:focus-visible)::before {
-  transform: scaleY(1);
-}
+
 /* The stretched-link overlay: a transparent button covering the whole card that
    opens the detail. Inherits the card's pointer cursor; carries no visuals of its
    own (the card draws hover/focus). Sits below the genuinely-interactive children
    (the live-URL row) so those stay independently clickable. */
-.dx-card__open {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  outline: none;
-  appearance: none;
-}
-.dx-card__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 11px;
-}
+
 /* the EDITION line — № + human label, the quiet provenance above the URL */
-.dx-card__edition {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 7px;
-  min-width: 0;
-}
-.dx-card__no {
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--blue-deep);
-  flex: 0 0 auto;
-}
-.dx-card__label {
-  font-family: var(--sans);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+
 /* the live URL — the serif HEADLINE of the edition. Lifted ABOVE the stretched
    open-overlay so the link + CopyButton stay independently clickable. */
-.dx-card__url {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 15px;
-}
-.dx-card__urltext {
-  font-family: var(--serif);
-  font-size: 19px;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -0.005em;
-  color: var(--ink);
-  text-decoration: none;
-  word-break: break-word;
-  transition: color 0.18s ease;
-}
-.dx-card__urltext:hover {
-  color: var(--blue-deep);
-}
-.dx-card:hover .dx-card__urltext {
-  color: var(--blue-deep);
-}
+
 /* the metadata LEDGER — key ···· value rows with dotted leaders */
-.dx-card__meta {
-  display: grid;
-  gap: 7px;
-  padding-top: 13px;
-  border-top: 1px solid var(--hair-2);
-}
+
 .dx-led {
   display: flex;
   align-items: baseline;
@@ -1131,19 +988,6 @@ a {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
   flex: 0 0 auto;
-}
-.dx-card__domains {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 13px;
-}
-.dx-card__foot {
-  display: flex;
-  align-items: center;
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--hair-2);
 }
 
 /* copy button — a quiet inline glyph affordance with a tactile press */
@@ -1490,35 +1334,7 @@ a {
 }
 
 /* fields */
-.dx-field {
-  width: 100%;
-  padding: 11px 13px;
-  font-family: var(--mono);
-  font-size: 13px;
-  color: var(--ink);
-  background: var(--paper-2);
-  border: 1px solid var(--hair-strong);
-  border-radius: 3px;
-  outline: none;
-}
-.dx-field::placeholder {
-  color: var(--ink-4);
-}
-.dx-field:focus {
-  border-color: var(--blue);
-  background: var(--card);
-  box-shadow: 0 0 0 3px var(--blue-wash);
-}
-.dx-label {
-  display: block;
-  font-family: var(--sans);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  margin-bottom: 7px;
-}
+
 .dx-form-actions {
   display: flex;
   gap: 10px;
@@ -1531,110 +1347,12 @@ a {
   color: var(--ink-2);
   margin: 8px 0 0;
 }
-.dx-error {
-  font-family: var(--sans);
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--bear-ink);
-  margin: 10px 0 0;
-}
 
 /* the DNS challenge "record" blocks (TXT + CNAME) */
-.dx-record {
-  background: var(--paper-3);
-  border: 1px solid var(--hair);
-  border-radius: 4px;
-  padding: 14px 16px;
-  margin-top: 12px;
-}
-.dx-record__type {
-  font-family: var(--sans);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  margin-bottom: 10px;
-}
-.dx-record__field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
-.dx-record__field:first-of-type {
-  margin-top: 0;
-}
-.dx-record__klabel {
-  font-family: var(--sans);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-4);
-  width: 56px;
-  flex: 0 0 56px;
-}
-.dx-record__val {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--ink);
-  word-break: break-all;
-  flex: 1 1 auto;
-}
 
 /* record head — the ①/② step label on the left, its ✓/✗ check pill on the right */
-.dx-record__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-.dx-record__head .dx-record__type {
-  margin-bottom: 0;
-}
 
 /* the per-record verification pill — ✓ found (bull) / ✗ not found (bear) / idle */
-.dx-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  font-family: var(--sans);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--hair);
-}
-.dx-check.is-ok {
-  color: var(--bull-ink);
-  background: var(--bull-fill);
-  border-color: var(--bull-edge);
-}
-.dx-check.is-bad {
-  color: var(--bear-ink);
-  background: var(--bear-fill);
-  border-color: var(--bear-edge);
-}
-.dx-check.is-idle {
-  color: var(--ink-3);
-  background: transparent;
-}
-.dx-check__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ink-4);
-}
-.dx-check__x {
-  font-size: 11px;
-  line-height: 1;
-}
 
 /* the linked-state SSL line + the "<domain> is linked" success mark */
 .dx-linked-mark {
@@ -1643,29 +1361,6 @@ a {
   gap: 5px;
   color: var(--bull-ink);
 }
-.dx-ssl {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.dx-ssl.is-ok {
-  color: var(--bull-ink);
-  font-weight: 600;
-}
-.dx-ssl.is-bad {
-  color: var(--bear-ink);
-}
-.dx-ssl.is-pending {
-  color: var(--blue);
-}
-.dx-ssl.is-idle {
-  color: var(--ink-2);
-}
-.dx-ssl .spin {
-  width: 12px;
-  height: 12px;
-  border-width: 2px;
-}
 
 /* ==========================================================================
    DEPLOY DROPZONE — "the press feed". A tactile feed tray: a dashed register
@@ -1673,65 +1368,9 @@ a {
    an ink-bleed ring that blooms from centre when a folder is dragged over (the
    signature "pressing" micro-moment).
    ========================================================================== */
-.dx-drop {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  gap: 12px;
-  padding: 52px 24px 48px;
-  border: 1.5px dashed var(--hair-strong);
-  border-radius: 6px;
-  background:
-    radial-gradient(
-      110% 80% at 50% 0%,
-      var(--blue-wash),
-      transparent 60%
-    ),
-    var(--paper-2);
-  cursor: pointer;
-  overflow: hidden;
-  transition:
-    border-color 0.22s ease,
-    background 0.22s ease,
-    box-shadow 0.22s ease,
-    transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-}
+
 /* the ink-bleed ring — scales + fades out from centre while a folder is over */
-.dx-drop::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 44%;
-  width: 120px;
-  height: 120px;
-  margin: -60px 0 0 -60px;
-  border-radius: 50%;
-  border: 1.5px solid var(--blue);
-  opacity: 0;
-  transform: scale(0.4);
-  pointer-events: none;
-}
-.dx-drop:hover {
-  border-color: var(--hair-blue);
-  background:
-    radial-gradient(110% 80% at 50% 0%, var(--blue-wash), transparent 55%),
-    var(--paper-2);
-}
-.dx-drop.is-over {
-  border-color: var(--blue);
-  border-style: solid;
-  background: var(--blue-wash);
-  box-shadow:
-    inset 0 0 0 1px var(--hair-blue),
-    0 24px 60px -38px rgba(30, 127, 214, 0.8);
-  transform: scale(0.995);
-}
-.dx-drop.is-over::after {
-  animation: dx-ink-bleed 1.1s ease-out infinite;
-}
+
 @keyframes dx-ink-bleed {
   0% {
     opacity: 0.55;
@@ -1742,96 +1381,10 @@ a {
     transform: scale(1.6);
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .dx-drop.is-over::after {
-    animation: none;
-  }
-  .dx-drop.is-over {
-    transform: none;
-  }
-}
+
 /* the embossed press-plate glyph at the head of the feed */
-.dx-drop__plate {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  color: var(--blue);
-  border: 1px solid var(--hair-blue);
-  background: var(--card);
-  box-shadow:
-    inset 0 1px 0 rgba(var(--frost-rgb), 0.8),
-    0 8px 20px -14px rgba(30, 127, 214, 0.6);
-  margin-bottom: 2px;
-  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.dx-drop:hover .dx-drop__plate,
-.dx-drop.is-over .dx-drop__plate {
-  transform: translateY(-2px);
-}
-.dx-drop__title {
-  font-family: var(--serif);
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  color: var(--ink);
-  margin: 0;
-}
-.dx-drop__body {
-  font-family: var(--sans);
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: var(--ink-2);
-  max-width: 420px;
-  margin: 0;
-}
-.dx-drop__body code {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--ink);
-  background: var(--card);
-  border: 1px solid var(--hair-2);
-  padding: 0 5px;
-  border-radius: 2px;
-}
+
 /* the packed-file manifest — a mono ledger of what will be pressed */
-.dx-filelist {
-  margin-top: 16px;
-  border: 1px solid var(--hair);
-  border-radius: 3px;
-  background: var(--card);
-  max-height: 248px;
-  overflow: auto;
-  box-shadow: inset 0 1px 0 rgba(var(--frost-rgb), 0.5);
-}
-.dx-filerow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--hair-2);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  transition: background 0.14s ease;
-}
-.dx-filerow:hover {
-  background: var(--paper-2);
-}
-.dx-filerow:last-child {
-  border-bottom: 0;
-}
-.dx-filerow__path {
-  color: var(--ink-2);
-  word-break: break-all;
-}
-.dx-filerow__size {
-  color: var(--ink-4);
-  flex: 0 0 auto;
-  font-variant-numeric: tabular-nums;
-}
 
 /* ==========================================================================
    TOASTS
@@ -2077,91 +1630,12 @@ a {
    copy button) over a line-numbered manuscript slab; honest "gasless / keyless
    / open" tags as refined hairline pills on the contract.
    ========================================================================== */
-.dx-codehead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
+
 /* the galley frame — a window-chrome strip atop the line-numbered slab */
-.dx-galley {
-  border: 1px solid var(--hair);
-  border-radius: 4px;
-  overflow: hidden;
-  background: var(--paper-3);
-  box-shadow:
-    inset 0 1px 0 rgba(var(--frost-rgb), 0.5),
-    0 16px 40px -34px rgba(10, 27, 46, 0.4);
-}
-.dx-galley__bar {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 14px;
-  background: var(--paper-2);
-  border-bottom: 1px solid var(--hair);
-}
-.dx-galley__lamp {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--hair-strong);
-}
-.dx-galley__lamp:first-child {
-  background: var(--blue);
-  opacity: 0.55;
-}
-.dx-galley__tag {
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  color: var(--ink-4);
-  text-transform: uppercase;
-}
+
 /* the line-numbered manuscript body */
-.dx-code {
-  margin: 0;
-  padding: 14px 0;
-  overflow-x: auto;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.7;
-  color: var(--ink);
-  tab-size: 2;
-  counter-reset: ln;
-}
-.dx-code__ln {
-  display: grid;
-  grid-template-columns: 44px 1fr;
-  align-items: baseline;
-  white-space: pre;
-}
-.dx-code__ln::before {
-  counter-increment: ln;
-  content: counter(ln);
-  position: sticky;
-  left: 0;
-  text-align: right;
-  padding-right: 14px;
-  color: var(--ink-4);
-  opacity: 0.6;
-  font-size: 11px;
-  user-select: none;
-  background: var(--paper-3);
-  border-right: 1px solid var(--hair-2);
-}
-.dx-code__src {
-  padding: 0 18px 0 14px;
-  color: var(--ink);
-  min-height: 1.7em;
-}
+
 /* comment lines (# … or // …) sit back in muted ink — manuscript marginalia */
-.dx-code__ln.is-comment .dx-code__src {
-  color: var(--ink-3);
-  font-style: italic;
-}
 
 .dx-tags {
   display: flex;

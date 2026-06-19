@@ -85,8 +85,7 @@ flip; not required for the bid to work.
   1. **DNS** — `agents.suize.io` needs `A → 76.76.21.21` (or CNAME `cname.vercel-dns.com`)
      at Cloudflare (the `suize.io` DNS provider); the domain is already added to the project.
   2. **Backend** — the directory route group (`/feed` `/rankings` `/stats` `/ads/*`
-     `/directory.json|okf`) is built but not yet deployed to `api.suize.io` (the k8s
-     pipeline, `push.sh` → helmfile); until then those endpoints 404 and the page shows
-     empty states.
+     `/directory.json|okf`) is built but not yet deployed to `api.suize.io`; until then
+     those endpoints 404 and the page shows empty states.
   3. **Sign-in/bid** — `agents.suize.io` must be authorized on the shared Google OAuth
      client + the Enoki portal origin (the read-only surfaces need no auth).

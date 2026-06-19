@@ -231,14 +231,22 @@ function settle(id: string | undefined, data: unknown): void {
   rpc.resolve(data)
 }
 
-/** Reject a correlated RPC with the server's real error message. */
-function settle_error(id: string | undefined, message: string): void {
+/** Reject a correlated RPC with the server's real error message + machine-readable
+ *  `reason` (e.g. 'tx-would-revert' | 'sponsor-unavailable') attached to the Error,
+ *  so callers can resolve a doomed tx terminally vs retry a transient outage. */
+function settle_error(
+  id: string | undefined,
+  message: string,
+  reason?: string,
+): void {
   if (!id) return
   const rpc = pending.get(id)
   if (!rpc) return
   pending.delete(id)
   clearTimeout(rpc.timeout)
-  rpc.reject(new Error(message))
+  const error = new Error(message) as Error & { reason?: string }
+  if (reason) error.reason = reason
+  rpc.reject(error)
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -306,7 +314,11 @@ async function handle_message(packet: ServerPacket, ws: WebSocket): Promise<void
     // ── RPC failure channel — reject the pending promise with the REAL message ─
     case 'errorResponse': {
       const err = packet.data as ErrorResponse
-      settle_error(packet.id, err.message || 'Sponsorship request failed.')
+      settle_error(
+        packet.id,
+        err.message || 'Sponsorship request failed.',
+        err.reason,
+      )
       return
     }
 

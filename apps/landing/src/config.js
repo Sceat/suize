@@ -408,9 +408,11 @@ export const PRICING = {
 //    subscriptions), or it is ABSENT from the page — never "coming
 //    soon" / "rolling out" / "not yet". (The hosted pay page / human pay-link
 //    is DELETED — agents self-sign; there is no human-relay door.)
-//  · NO webhooks, NO dashboard, NO sessions, NO API keys — they don't exist
-//    (deleted by design; the chain is the database). Settlement notice = your
-//    own /verify call, or reading the on-chain balance changes yourself.
+//  · The SDK door (@suize/pay) needs NO callback to register — your own /verify
+//    call is the receipt, the chain is the database. The HOSTED no-code door
+//    (wallet.suize.io → Business → Accept a payment → a charge link) DOES use a
+//    webhook: Suize POSTs the settled order to the merchant's endpoint, signed
+//    (verified via @suize/pay/webhook). Both are live; document both truthfully.
 // ============================================================================
 export const DOCS = {
   hero: {
@@ -419,20 +421,21 @@ export const DOCS = {
     sub: 'One payment rail. Agents pay businesses; humans give their AI money it can’t overspend. Here’s the whole machine.',
   },
 
-  // SECTION 1 — the onboarding ladder (THE centerpiece): two precise tiers,
-  // plain HTTP (any language) → one npm line, each stating WHO it's for, WHAT
+  // SECTION 1 — the onboarding ladder (THE centerpiece): three precise tiers,
+  // a hosted no-code link → plain HTTP (any language) → one npm line, each
+  // stating WHO it's for, WHAT
   // YOU DO, WHAT SUIZE DOES, and HOW YOU KNOW YOU'RE PAID. Tier 2 keeps the
   // one-liner snippet + the animated five-step 402 loop as its demo (approved
   // — never touch the animation). Naming Stripe is allowed ONLY for coexistence
   // (`coexist`), never as an integration claim. ZERO status-talk: a tier is
-  // documented as it works today, or it is absent (there is NO no-code/hosted
-  // tier — the agent pays your OWN endpoint; no platform plugins ship → no
-  // Tier 3).
+  // documented as it works today, or it is absent. The HOSTED no-code charge
+  // door IS live (a charge link minted in the wallet) — document it as Tier 0;
+  // no platform plugins ship → no Tier 3.
   merchant: {
     marker: 'The onboarding ladder',
     eyebrow: 'For business',
     head: 'Get paid, whatever your stack.',
-    sub: 'Two ways in — a plain HTTP call from any language, or one line you ship on Node. Both land on the same rail and print the same receipt.',
+    sub: 'Three ways in — a hosted link with no payment code, a plain HTTP call from any language, or one line on Node. All land on the same rail and print the same receipt.',
     // the premise beat — answers "how do I onboard?" BEFORE the ladder: there is
     // nothing to sign up for. Renders editorial (mono kicker + big serif
     // statement + body + a quiet mono ledger of what you DON'T need), breathing
@@ -440,8 +443,8 @@ export const DOCS = {
     premise: {
       kicker: 'Before you write a line',
       statement: 'Your address is your account.',
-      body: 'There is no Suize signup, no API key, no dashboard to manage. The Sui address where you want your USDC to land is the whole account. Choose it, return a 402 from your own server, and you are a merchant.',
-      ledger: ['no signup', 'no API key', 'no dashboard', 'no KYB'],
+      body: 'There is no Suize signup and no KYB — the Sui address where you want your USDC to land is the whole account. Pick it, and accept agent payments from a hosted link (no code), a 402 on your own server, or one line on Node. You receive USDC; there are no chargebacks.',
+      ledger: ['no signup', 'no KYB', 'no chargebacks', 'you receive USDC'],
     },
     // the three fact-column labels every tier renders
     labels: {
@@ -451,6 +454,22 @@ export const DOCS = {
     },
     tiers: [
       {
+        tier: 'Tier 0',
+        title: 'No payment code — we host the charge.',
+        who: 'For sellers who don’t want to touch x402: a no-code stack, a simple order receiver, a creator with somewhere to send the order. You point us at a URL; we do the rest.',
+        you: 'In the Suize wallet → Business → Accept a payment, set a price and the URL we should POST the paid order to. Copy the link we hand you and share it where agents find your service.',
+        suize: 'Hosts the payment: an agent pays your link, Suize settles it on-chain and POSTs the signed order to your URL.',
+        paid: 'A signed order arrives at your URL — the on-chain tx digest is the proof (verify with @suize/pay/webhook). You fulfil, once per digest.',
+        example: {
+          file: 'no code · the link we mint',
+          code:
+            '# created in the wallet — nothing to run.\n' +
+            'https://api.suize.io/charge/<token>\n\n' +
+            '# an agent pays it; you receive a signed order at your URL:\n' +
+            '# { txDigest, payer, amount, order, ... }   ← the digest is the receipt',
+        },
+      },
+      {
         tier: 'Tier 1',
         title: 'Any language — answer 402, call verify.',
         who: 'Any backend, in any language: Python, Ruby, Go, PHP, Rust, even a shell script. If it speaks HTTP, you are in — Node is not required.',
@@ -458,16 +477,20 @@ export const DOCS = {
         suize: 'Verifies the gasless payment against your own price and address, then settles it on-chain.',
         paid: 'verify answers valid — you serve. No webhook, no session, no key.',
         // a real, language-agnostic example: the whole Suize-specific step is
-        // one HTTP POST. The 402 challenge shape itself is shown in the loop below.
+        // one HTTP POST. The two bodies are named concretely (no bare ellipses)
+        // and the full field/payload shapes are one link away (llms.txt) so a
+        // dev can integrate from this page, not just admire it.
         example: {
           file: 'any language · just HTTP',
           code:
-            '# an agent paid and retried with an X-PAYMENT header.\n' +
-            '# ask the facilitator, then serve. any language, just HTTP:\n\n' +
+            '# the agent paid and retried with an X-PAYMENT header (base64).\n' +
+            '# decode it → paymentPayload; paymentRequirements is YOUR 402 terms\n' +
+            '# (scheme/network/asset/payTo/amount — the challenge you replied with).\n\n' +
             'curl -X POST https://api.suize.io/verify \\\n' +
             "  -H 'content-type: application/json' \\\n" +
-            '  -d \'{ "paymentPayload": …, "paymentRequirements": … }\'\n\n' +
-            '# → { "isValid": true }   then POST /settle the same body, and serve.',
+            '  -d \'{ "paymentPayload": <decoded X-PAYMENT>, "paymentRequirements": <your 402 terms> }\'\n\n' +
+            '# → { "isValid": true }  — then POST /settle the SAME body, and serve.\n' +
+            '# full field + payload reference: suize.io/llms.txt',
         },
       },
       {
@@ -493,7 +516,7 @@ export const DOCS = {
       tag: 'x402',
       // the copy-button payload — the FULL real path (npm-published @suize/pay);
       // the price is the MERCHANT's own example number, never a Suize fee.
-      code: "npm i @suize/pay\n\nimport { suize } from '@suize/pay'\napp.use(suize({ to: '0xYOU', price: '0.10' })) // your price, decimal USDC",
+      code: "npm i @suize/pay\n\nimport { suize } from '@suize/pay'\napp.use(suize({ to: '0xYOU', price: '0.10' }).express) // your price, decimal USDC",
     },
     steps: [
       {
@@ -560,6 +583,13 @@ export const DOCS = {
     foot: 'Every payment lands on the same rail and prints the same receipt — the fee visible, the proof on-chain.',
     fee: 'The fee is printed on every receipt.',
     pricing: { label: 'See pricing →', href: '/pricing' },
+    // the full machine-readable contract — every field, both payer doors, the
+    // verify/settle payload shapes. This page is the showroom; llms.txt is the
+    // reference a dev (or an agent) actually integrates against.
+    contract: {
+      label: 'Read the full agent + integration contract →',
+      href: '/llms.txt',
+    },
   },
 
   // SECTION 3 — the consumer half: the sub-account + the controls.

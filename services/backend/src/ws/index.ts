@@ -41,6 +41,7 @@ import {
 } from "@suize/shared/protocol";
 import { config } from "../config";
 import { suiClient, createSponsor, executeSponsor, SponsorError } from "../sponsor";
+import { createChargeLink, ChargeError } from "../charge";
 import {
   availableCore,
   meCore,
@@ -314,6 +315,7 @@ const RATE_LIMITED: ReadonlySet<ClientPacket["type"]> = new Set([
   "executeRequest",
   "handleAvailableRequest",
   "handleClaimRequest",
+  "createChargeRequest",
   "brainChatRequest",
 ]);
 
@@ -349,9 +351,13 @@ const route = async (ws: WsSocket, frame: ClientPacket): Promise<void> => {
         sendPacket(ws, { type: "sponsorResponse", id, data });
       } catch (err) {
         const message = err instanceof SponsorError ? err.message : "sponsorship failed";
+        // `reason` carries the machine-readable category (tx-would-revert vs
+        // sponsor-unavailable) so the client can resolve a doomed tx terminally
+        // instead of retrying it as a transient outage.
+        const reason = err instanceof SponsorError ? err.reason : undefined;
         // Failures travel on the dedicated errorResponse frame (echoing `id`) so
         // the client's per-id promise REJECTS cleanly — never on the success body.
-        sendPacket(ws, { type: "errorResponse", id, data: { requestType: "sponsorRequest", message } });
+        sendPacket(ws, { type: "errorResponse", id, data: { requestType: "sponsorRequest", message, reason } });
       }
       return;
     }
@@ -367,7 +373,8 @@ const route = async (ws: WsSocket, frame: ClientPacket): Promise<void> => {
         sendPacket(ws, { type: "executeResponse", id, data });
       } catch (err) {
         const message = err instanceof SponsorError ? err.message : "execution failed";
-        sendPacket(ws, { type: "errorResponse", id, data: { requestType: "executeRequest", message } });
+        const reason = err instanceof SponsorError ? err.reason : undefined;
+        sendPacket(ws, { type: "errorResponse", id, data: { requestType: "executeRequest", message, reason } });
       }
       return;
     }
@@ -435,6 +442,27 @@ const route = async (ws: WsSocket, frame: ClientPacket): Promise<void> => {
         const message = err instanceof HandleError ? err.message : "claim failed";
         const reason = err instanceof HandleError ? err.reason : undefined;
         sendPacket(ws, { type: "errorResponse", id, data: { requestType: "handleClaimRequest", message, reason } });
+      }
+      return;
+    }
+
+    case "createChargeRequest": {
+      // The no-code merchant door. The merchant (this verified session) names a
+      // price + a webhook; we return a hosted link `api.suize.io/charge/<token>` an
+      // agent pays. `merchant` is FORCED to the session address — never the frame —
+      // so a socket for A can only ever mint a charge that pays A. Nothing stored.
+      try {
+        const url = await createChargeLink({
+          merchant: address,
+          price: frame.data?.price ?? "",
+          webhook: frame.data?.webhook ?? "",
+          ref: frame.data?.ref,
+          exp: frame.data?.exp,
+        });
+        sendPacket(ws, { type: "createChargeResponse", id, data: { url } });
+      } catch (err) {
+        const message = err instanceof ChargeError ? err.message : "could not create charge";
+        sendPacket(ws, { type: "errorResponse", id, data: { requestType: "createChargeRequest", message } });
       }
       return;
     }

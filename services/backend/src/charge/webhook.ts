@@ -24,7 +24,13 @@ export interface WebhookOrder {
 }
 
 const TIMEOUT_MS = 8_000;
-const MAX_ATTEMPTS = 3;
+// Backoff schedule (~15 min total) — a merchant endpoint can be down for a deploy
+// or a brief outage and still receive the order. The schedule is a pure function of
+// the attempt index (no per-replica timer state worth persisting): if a replica
+// restarts mid-retry the in-flight delivery is lost, but the payment is on-chain and
+// the merchant reconciles by `chargeRef` from the chain (the webhook is at-least-once,
+// eventually-delivered — never the system of record). 6 retries after the first try.
+const RETRY_DELAYS_MS = [2_000, 8_000, 30_000, 120_000, 300_000, 900_000];
 
 /** Block private / loopback / link-local / metadata ranges (SSRF). */
 const isBlockedIp = (ip: string): boolean => {
@@ -85,17 +91,20 @@ export const fireChargeWebhook = (webhookUrl: string, order: WebhookOrder): void
       console.error("[charge/webhook] sign failed (order paid, delivery skipped):", (e as Error).message, order.txDigest);
       return;
     }
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    // attempt 0 = the first try; 1..N = the backoff retries. A 5xx OR a thrown
+    // network/timeout/SSRF-block both retry; only a <500 status is "delivered".
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
       try {
         const status = await safePost(webhookUrl, bodyStr, header);
-        if (status < 500) return; // 2xx/3xx/4xx = delivered (merchant's problem if 4xx)
-      } catch (e) {
-        if (attempt === MAX_ATTEMPTS) {
-          console.error("[charge/webhook] delivery dropped after retries:", (e as Error).message, order.txDigest);
-          return; // money already moved on-chain — the merchant reconciles from chain
-        }
+        if (status < 500) return; // 2xx/3xx/4xx = delivered (a 4xx is the merchant's bug, not ours)
+      } catch {
+        // network / timeout / SSRF-block — fall through to the backoff
       }
-      await new Promise((r) => setTimeout(r, 400 * attempt));
+      if (attempt < RETRY_DELAYS_MS.length) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+      }
     }
+    // exhausted ~15 min — money already moved on-chain; the merchant reconciles by chargeRef
+    console.error("[charge/webhook] delivery dropped after ~15min of retries:", order.txDigest);
   })();
 };

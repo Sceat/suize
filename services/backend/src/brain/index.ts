@@ -29,7 +29,10 @@ import { createDailyTokenBudget } from "../quota";
 import { recall, remember } from "../memory";
 
 const anthropic = config.anthropicApiKey
-  ? new Anthropic({ apiKey: config.anthropicApiKey })
+  // maxRetries 4 (up from the SDK default 2): transient 429 / 5xx / 529 'overloaded'
+  // auto-retry with exponential backoff, so a brief Anthropic overload doesn't surface
+  // to the user as "unavailable" mid-turn.
+  ? new Anthropic({ apiKey: config.anthropicApiKey, maxRetries: 4 })
   : null;
 
 /** True when the brain is configured (the Anthropic key is present). */
@@ -68,7 +71,12 @@ const MAX_TOOL_RESULT_LEN = 8_000; // F1: clamp attacker-controllable tool-resul
 // any tool-call JSON (deploy_site emits a whole HTML document), so we floor it well
 // above the budget regardless of the env default.
 const THINKING_BUDGET_TOKENS = 2_048;
-const MAX_OUTPUT_TOKENS = Math.max(config.brainMaxOutputTokens, THINKING_BUDGET_TOKENS + 6_144);
+// Output ceiling. The old +6_144 floor (→ 8192) was too low: a "complete" deploy_site
+// page inlines all its HTML/CSS/JS into ONE tool-call JSON, and thinking eats 2_048 of
+// the budget — so a rich page truncates mid-tool-JSON at stop_reason='max_tokens' and the
+// turn dies with nothing usable. Haiku 4.5 allows up to 64K output and this loop streams,
+// so a big ceiling is safe; +32_768 leaves ~32K for the answer + the whole page.
+const MAX_OUTPUT_TOKENS = Math.max(config.brainMaxOutputTokens, THINKING_BUDGET_TOKENS + 32_768);
 
 // App-level COMPACTION — Haiku 4.5 does NOT support the server-side compact beta
 // (Opus/Sonnet 4.6+ only), and moving the wallet off Haiku is an owner law. So when a
@@ -79,6 +87,13 @@ const MAX_OUTPUT_TOKENS = Math.max(config.brainMaxOutputTokens, THINKING_BUDGET_
 // long LIVE session, so it almost never fires for a wallet (turns are short).
 const COMPACT_TRIGGER_CHARS = 80_000; // ~20k tokens — far under Haiku's 200k window
 const COMPACT_KEEP_RECENT = 6; // most-recent turns kept verbatim (exact context)
+
+// Writes whose RECEIPT (shown by the wallet) fully communicates the outcome. After the
+// wallet runs one, the turn CLOSES with NO follow-up narration call — there's nothing to
+// add to "Sent $1 to hello ✓", and skipping the call is snappier AND can't fail on a
+// transient overload after the action already happened. deploy_site is deliberately NOT
+// here: its follow-up carries the live URL, which the receipt doesn't.
+const TERMINAL_TOOLS = new Set(["send_usdc", "sweep_agent", "cancel_subscription"]);
 
 // F5: one brain turn per user at a time — a second concurrent turn for the same
 // address is rejected (a user has one chat). The socket is sticky to this replica
@@ -172,7 +187,7 @@ If the user asks for anything outside this list (paying an outside merchant, cre
 # HOW ACTIONS ACTUALLY HAPPEN (read this carefully)
 You do not move money. You have no wallet, no key, and you cannot sign anything. When you call a tool, the Suize wallet app — separate software the user controls — runs it. For reads, it answers instantly from the user's own data. For anything that spends or changes money (send_usdc, cancel_subscription, sweep_agent, deploy_site), the wallet shows the user a confirmation card with the REAL on-chain details it computed itself, and only acts if the user approves. You cannot bypass that card. So when you decide to act, CALL THE TOOL in this same turn — never announce an action and then stop. Saying "I'll publish that page", "let me send that", or "I'll create the site" WITHOUT emitting the matching tool call in the same response is a failure: nothing happens and the user is left waiting forever. Narrate in one short sentence AND emit the tool call together, in the same turn. Never claim it's done until the tool result says so.
 
-When publishing a page (deploy_site): author ONE complete, self-contained HTML document — inline CSS in a <style> tag and inline JS in a <script> tag only. No external scripts, no <link> to remote stylesheets, no network/fetch calls, no frameworks. Keep it simple and visual (the user wants to see something cool, not a complex app). After it publishes, share the live URL from the tool result.
+When publishing a page (deploy_site): author ONE complete, self-contained HTML document — inline CSS in a <style> and inline JS in a <script> ONLY; no external scripts, no <link> to remote stylesheets/fonts, no network/fetch calls, no frameworks. MAKE IT ACTUALLY WORK and match the ambition the user asked for — do not ship a toy. If they ask for a game, build a genuinely PLAYABLE one: real mechanics, SEVERAL distinct upgrades that can each be bought REPEATEDLY (escalating cost, stacking effect), visible progression, and a reachable WIN state — playtest it in your head and make sure it can actually be completed and is fun. Favor depth and correctness over decoration. HONOR any aesthetic the user names — if they want a "raw", minimal, text-first or css-less look (like the original Paperclip Factory), keep the markup plain and the styling sparse rather than flashy; only go visual if that's what they asked for. After it publishes, share the live URL from the tool result.
 
 # THE NUMBER RULE (absolute)
 You never decide, invent, round, or adjust any amount, fee, recipient address, or spending limit. When you propose a send, the amount you pass is only a SUGGESTION the wallet re-checks and the user confirms on the card — it is never the final number. If you are not sure of an amount the user wants, ask them — do not guess a number into a payment.
@@ -268,9 +283,19 @@ const BRAIN_TOOLS = [
   {
     name: "sweep_agent",
     description:
-      "Pull the ENTIRE agent sub-account balance back into the user's main wallet — the safety \"bring my money back\" action. The wallet confirms before sweeping. A no-op if the sub-account is empty.",
+      "Bring funds from the agent sub-account back into the user's OWN main wallet. Omit amount_usdc to bring back EVERYTHING (a full sweep — the safety \"bring my money back\" action); pass amount_usdc to bring back just part of it. This is the right tool whenever the user wants to move money FROM their agent sub-account back to their wallet — including a partial amount. The wallet confirms before moving anything. A no-op if the sub-account is empty.",
     strict: true,
-    input_schema: EMPTY_SCHEMA,
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        amount_usdc: {
+          type: "string",
+          description: "OPTIONAL — bring back just this decimal USDC amount (e.g. \"0.3\"). Omit to bring back the entire sub-account balance.",
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
   },
   {
     name: "deploy_site",
@@ -432,6 +457,7 @@ export async function handleBrainChat(
   // returns [] on any failure; remember is fire-and-forget. Recalled facts are DATA
   // (fenced like any external content; the system prompt's untrusted-content rule applies).
   const lastUser = [...req.messages].reverse().find((m) => m.role === "user")?.text ?? "";
+  console.log(`[brain] ${address.slice(0, 10)}… turn: ${lastUser.length} chars`);
   const memories = await recall(address, req.memwalAccountId, lastUser);
   void remember(address, req.memwalAccountId, lastUser);
   const memoryBlock = memories.length
@@ -446,6 +472,14 @@ export async function handleBrainChat(
   ];
 
   let totalTokens = 0;
+  // Did ANY visible narration stream this turn? Drives the no-silent-stop guard: a turn
+  // that ends without a tool call AND without streamed text would otherwise render a
+  // blank bubble the client drops → "thinking, then nothing". Track across all steps.
+  let streamedAny = false;
+  // Did a tool actually RUN this turn? If so, the wallet has already shown its receipt,
+  // so a later model error must NOT render as a failure ("unavailable") — that makes a
+  // completed action look broken.
+  let didTool = false;
   try {
     // Compact a long transcript before the loop — summarize the old head, keep the
     // recent tail verbatim (no-op until the transcript crosses the trigger).
@@ -471,7 +505,10 @@ export async function handleBrainChat(
       });
 
       stream.on("text", (delta) => {
-        if (delta) send({ type: "brainChatChunk", id, data: { delta } });
+        if (delta) {
+          streamedAny = true;
+          send({ type: "brainChatChunk", id, data: { delta } });
+        }
       });
 
       const msg = await stream.finalMessage();
@@ -481,28 +518,76 @@ export async function handleBrainChat(
       messages.push({ role: "assistant", content: msg.content });
 
       if (msg.stop_reason !== "tool_use") {
+        // NO SILENT STOP: if the turn ends without a tool call AND streamed no text
+        // (e.g. the page truncated at max_tokens, or an empty end_turn / refusal), emit
+        // a plain-language line so the user never sees the loader vanish into nothing.
+        if (!streamedAny) {
+          const delta =
+            msg.stop_reason === "max_tokens"
+              ? "That turned out bigger than I can build in one go — try a simpler version (fewer features), or ask me to break it into steps."
+              : "I couldn't put a response together for that — try rephrasing it?";
+          send({ type: "brainChatChunk", id, data: { delta } });
+        }
         send({ type: "brainChatDone", id, data: { stopReason: msg.stop_reason } });
         return;
       }
 
       // Execute each tool_use via the WALLET (disable_parallel_tool_use ⇒ ≤1).
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      let lastToolError = false; // did the (single) executed tool report a failure?
       for (const block of msg.content) {
         if (block.type !== "tool_use") continue;
         send({ type: "brainToolUse", id, data: { toolUseId: block.id, tool: block.name, input: (block.input ?? {}) as Record<string, unknown> } });
         const outcome = await awaitToolResult(address, block.id);
+        lastToolError = outcome.isError;
+        console.log(`[brain] ${address.slice(0, 10)}… tool=${block.name} -> ${outcome.isError ? "ERROR" : "ok"}`);
         toolResults.push({ type: "tool_result", tool_use_id: block.id, content: outcome.content, is_error: outcome.isError });
       }
       messages.push({ role: "user", content: toolResults });
+      if (!lastToolError) didTool = true; // a tool COMPLETED (showed a receipt / answered)
+
+      // TERMINAL write (send / sweep / cancel) → the receipt is the whole story; close the
+      // turn without another model call. (deploy_site falls through so its follow-up can
+      // surface the live URL; reads fall through so the model answers from the result.)
+      // ONLY on SUCCESS: a FAILED terminal tool (unknown recipient, insufficient funds,
+      // self-send) showed NO receipt, so closing here is a SILENT STOP ("agent stopped"
+      // with no message). Let the loop continue so the model explains the failure.
+      const executed = msg.content.find((b) => b.type === "tool_use");
+      if (executed && executed.type === "tool_use" && TERMINAL_TOOLS.has(executed.name) && !lastToolError) {
+        send({ type: "brainChatDone", id, data: { stopReason: "end_turn" } });
+        return;
+      }
 
       if (step === MAX_STEPS - 1) {
-        // Hit the step ceiling mid-loop — close the turn cleanly.
+        // Hit the step ceiling mid-loop — close cleanly, with a closing line if the
+        // model never narrated, so the turn isn't a silent stop after doing work.
+        if (!streamedAny) {
+          send({ type: "brainChatChunk", id, data: { delta: "I've taken this as far as I can in one go — tell me what you'd like next." } });
+        }
         send({ type: "brainChatDone", id, data: { stopReason: "max_steps" } });
       }
     }
   } catch (err) {
-    console.error("[brain]", (err as Error).message);
-    send({ type: "errorResponse", id, data: { requestType: "brainChatRequest", message: "the assistant is unavailable right now" } });
+    const m = (err as Error)?.message ?? "";
+    console.error("[brain]", m);
+    if (didTool) {
+      // The action already executed and the wallet shows its receipt. Close the turn
+      // QUIETLY — never render "unavailable" over a completed action. (Usual cause: a
+      // transient Anthropic overload on the follow-up narration call, after retries.)
+      send({ type: "brainChatDone", id, data: { stopReason: "end_turn" } });
+    } else {
+      const overloaded = /overload/i.test(m) || (err as { status?: number })?.status === 529 || (err as { status?: number })?.status === 429;
+      send({
+        type: "errorResponse",
+        id,
+        data: {
+          requestType: "brainChatRequest",
+          message: overloaded
+            ? "I'm getting a lot of requests right now — give it a moment and try again."
+            : "the assistant is unavailable right now",
+        },
+      });
+    }
   } finally {
     inFlight.delete(address);
     aborted.delete(address);

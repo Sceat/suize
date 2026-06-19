@@ -39,7 +39,7 @@ Page title (locked, shipped): **"Suize — the AI wallet that makes life easier.
 - **Per-route OG (2026-06-13):** TWO html entries, ONE SPA (vite
   `build.rollupOptions.input`): `index.html` (default PAY/wallet card) +
   `business.html` (the CHARGE/x402 card — "Suize for business — get paid by AI
-  agents"; merchant copy law: 2% no-floor / no-KYB / no-chargebacks / instant /
+  agents"; merchant copy law: 2% with a 1¢ minimum / no-KYB / no-chargebacks / instant /
   USDC, agents-first, standards-only "x402-compatible by design"). Both load the
   same `/src/main.jsx`; they differ only in static `<meta>`. A dev middleware
   maps `/business`→`business.html` for parity.
@@ -78,16 +78,20 @@ a route-aware CTA (home: **Access your wallet** → `wallet.suize.io`; business:
 | `/deploy` | featured real merchant | `pages/Deploy` | full product room (ship flow + the double-hash integrity beat) |
 | `/crash` | product stub | `pages/ProductStub` | light room; never featured on the home |
 | `/pricing` | pricing | `pages/Pricing` | **EVERY number lives here** (§5) |
-| `/docs` | docs + quickstart (merged) | `pages/Docs` | the four-tier merchant onboarding ladder + the 402 loop (truth-locked below) |
+| `/docs` | docs + quickstart (merged) | `pages/Docs` | the three-tier merchant onboarding ladder + the 402 loop (truth-locked below) |
 
-**`#/docs` truth lock (2026-06-12, x402 V2):** the Tier-3 snippet is the REAL
-`@suize/pay` middleware (`npm i @suize/pay` → `import { suize }` →
-`app.use(suize({ to, price }))`; Bun/Hono/Next fetch-style + Express; any other
-language via plain x402 HTTP). The merchant answers **402** with an x402 V2
-`PaymentRequired` challenge and verifies via the facilitator's `POST /verify` +
-`POST /settle` (`api.suize.io`) — **no webhooks/dashboard/sessions/API keys exist**
-(the chain is the database). **ZERO status-talk** (no "coming soon"/"rolling out"):
-a surface is documented as it works today, or it is ABSENT from the page. A
+**`#/docs` truth lock (2026-06-15, x402 V2 + hosted charge door):** three tiers.
+**Tier 2** is the REAL `@suize/pay` middleware (`npm i @suize/pay` → `import { suize }`
+→ `app.use(suize({ to, price }))`; Bun/Hono/Next fetch-style + Express). **Tier 1** is
+the same loop in any language via plain x402 HTTP. On both, the merchant answers
+**402** with an x402 V2 `PaymentRequired` challenge and verifies via the facilitator's
+`POST /verify` + `POST /settle` (`api.suize.io`) — **no webhooks, dashboards, sessions,
+or API keys** (the chain is the database). **Tier 0** is the hosted no-code door and the
+one exception: a charge link minted in the wallet (`api.suize.io/charge/<token>`) — an
+agent pays it, Suize settles on-chain and POSTs the merchant a SIGNED order webhook
+(verified via `@suize/pay/webhook`; the on-chain tx digest is the proof, dedupe on it).
+**ZERO status-talk** (no "coming soon"/"rolling out"): a surface is documented as it
+works today, or it is ABSENT from the page. A
 merchant's own example price (`'0.10'`) is allowed in snippets; Suize fees stay on
 `/pricing` (the fee is **2% with a 1¢ minimum, merchant-absorbed** — the payer always
 pays exactly the listed price).

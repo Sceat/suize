@@ -9,7 +9,7 @@
  * session, and Enoki-SPONSORED over the WS (runSponsored) — the $0.10 is a `tx.balance`
  * push to the treasury, the key never leaves the machine, Suize never signs the owner leg.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BadgeCheck, Link as LinkIcon } from '../system';
 import { CONSOLE } from './copy';
 import { unfurlSite } from '../data/unfurl';
@@ -61,11 +61,32 @@ export function ProfileTab({ profile, ownerAddress, client, signTransaction, onS
   const set = (k: keyof ProfileFields) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  // The description (+ banner) come from the linked WEBSITE, never a custom field: when
-  // the site changes the backend unfurls its <head> and we adopt its og:description /
-  // og:image. Debounced; best-effort (a failure just leaves what's there).
+  // View vs edit: once a profile exists we show its CARD (read-only) with an "Edit
+  // profile" button; the form opens only to create, or when Edit is tapped. A successful
+  // save closes back to the card.
+  const [editing, setEditing] = useState(!profile);
+  // The buffer (`form`) is the source of truth the card renders. We mirror the on-chain
+  // profile into it only ONCE per id — the FIRST time that profile appears — never on
+  // later reloads: the parent re-reads chain right after a save, and RPC indexing lag
+  // returns the STALE pre-edit object; re-syncing then would revert the card to the old
+  // values until a refresh (the reported bug). Same id already synced → skip.
+  const lastSyncedId = useRef<string | null>(null);
+  const editSnapshot = useRef<ProfileFields>(EMPTY);
+  useEffect(() => {
+    if (profile && lastSyncedId.current !== profile.id) {
+      lastSyncedId.current = profile.id;
+      setForm(toFields(profile));
+      setEditing(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.id]);
+
+  // The description comes from the linked WEBSITE, never a custom field: while EDITING,
+  // when the site changes the backend unfurls its <head> and we adopt its og:description.
+  // Debounced; best-effort (a failure just leaves what's there).
   const [meta, setMeta] = useState<'idle' | 'loading' | 'done' | 'none'>('idle');
   useEffect(() => {
+    if (!editing) return;
     const site = form.website.trim();
     if (!site || /\s/.test(site)) {
       setMeta('idle');
@@ -88,7 +109,7 @@ export function ProfileTab({ profile, ownerAddress, client, signTransaction, onS
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [form.website]);
+  }, [form.website, editing]);
 
   const name = form.name.trim();
   const dirty = useMemo(() => {
@@ -115,6 +136,10 @@ export function ProfileTab({ profile, ownerAddress, client, signTransaction, onS
       const tx = profile ? buildEditProfile(profile.id, fields) : buildCreateProfile(fields);
       const digest = await runSponsored({ tx, owner: ownerAddress, client, signTransaction });
       onSaved(digest);
+      // close the form → the card (the buffer holds exactly what we just saved; the
+      // parent's reload then confirms it on-chain).
+      setForm(fields);
+      setEditing(false);
     } catch (e) {
       setError((e as Error).message || 'Something went wrong — try again.');
     } finally {
@@ -136,6 +161,69 @@ export function ProfileTab({ profile, ownerAddress, client, signTransaction, onS
         </div>
         <p className="rd-prof__blurb">{C.blurb}</p>
 
+        {!editing ? (
+          /* ── SAVED: the read-only card + Edit button (the page closes after a save) ── */
+          <div className="rd-prof__saved">
+            <span className="rd-label">{C.livePreview}</span>
+            <div className="rd-prof__dirrow">
+              <span className="rd-prof__logo">
+                {form.imageUrl ? (
+                  <img src={form.imageUrl} alt="" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                ) : (
+                  <span aria-hidden="true">{initial}</span>
+                )}
+              </span>
+              <span className="rd-prof__dirname">{name || '—'}</span>
+            </div>
+            <div className="rd-prof__adcard">
+              <div className="rd-prof__banner">
+                {form.bannerUrl ? (
+                  <img src={form.bannerUrl} alt="" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                ) : null}
+              </div>
+              <div className="rd-prof__adbody">
+                <span className="rd-prof__logo rd-prof__logo--sm">
+                  {form.imageUrl ? (
+                    <img src={form.imageUrl} alt="" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                  ) : (
+                    <span aria-hidden="true">{initial}</span>
+                  )}
+                </span>
+                <span className="rd-prof__adname">{name || '—'}</span>
+                {form.description.trim() ? (
+                  <span className="rd-prof__addesc">{form.description.trim()}</span>
+                ) : null}
+              </div>
+            </div>
+            {form.website.trim() ? (
+              <a
+                className="rd-prof__sitelink"
+                href={/^https?:\/\//i.test(form.website.trim()) ? form.website.trim() : `https://${form.website.trim()}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <LinkIcon size={13} strokeWidth={2} aria-hidden />
+                {form.website.trim().replace(/^https?:\/\//, '')}
+              </a>
+            ) : null}
+            <div className="rd-prof__foot">
+              <span className="rd-prof__feenote">{C.mintedNote}</span>
+              <button
+                type="button"
+                className="rd-btn rd-btn--accent"
+                onClick={() => {
+                  editSnapshot.current = form; // revert target if they Cancel
+                  setError(null);
+                  setEditing(true);
+                }}
+              >
+                <BadgeCheck size={13} strokeWidth={2} aria-hidden />
+                {C.editProfile}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
         <div className="rd-prof__grid">
           {/* ── the form ── */}
           <div className="rd-prof__form">
@@ -217,12 +305,30 @@ export function ProfileTab({ profile, ownerAddress, client, signTransaction, onS
         {error ? <p className="rd-prof__err">{error}</p> : null}
 
         <div className="rd-prof__foot">
-          <span className="rd-prof__feenote">{profile ? C.mintedNote : C.feeNote}</span>
-          <button type="button" className="rd-btn rd-btn--accent" disabled={!canSubmit} onClick={submit}>
-            <BadgeCheck size={13} strokeWidth={2} aria-hidden />
-            {busy ? C.minting : profile ? C.edit : C.mint}
-          </button>
+          <span className="rd-prof__feenote">{C.feeNote}</span>
+          <div className="rd-prof__footbtns">
+            {profile ? (
+              <button
+                type="button"
+                className="rd-btn"
+                disabled={busy}
+                onClick={() => {
+                  setForm(editSnapshot.current);
+                  setError(null);
+                  setEditing(false);
+                }}
+              >
+                {C.cancel}
+              </button>
+            ) : null}
+            <button type="button" className="rd-btn rd-btn--accent" disabled={!canSubmit} onClick={submit}>
+              <BadgeCheck size={13} strokeWidth={2} aria-hidden />
+              {busy ? C.minting : profile ? C.edit : C.mint}
+            </button>
+          </div>
         </div>
+          </>
+        )}
       </section>
     </div>
   );

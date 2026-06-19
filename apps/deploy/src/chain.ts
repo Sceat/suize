@@ -2,8 +2,8 @@ import type { EventId, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { parseSerializedSignature } from '@mysten/sui/cryptography'
 import { MultiSigPublicKey } from '@mysten/sui/multisig'
 import type { SiteInfo } from '@suize/shared'
-import { PACKAGE_IDS } from '@suize/shared'
-import { DEPLOY_BASE_DOMAIN } from './config'
+import { PACKAGE_IDS, walrusEpochToMs } from '@suize/shared'
+import { DEPLOY_BASE_DOMAIN, SUI_NETWORK } from './config'
 
 // ============================================================================
 // ON-CHAIN READER — the dashboard's list + detail read DIRECTLY from the Sui
@@ -219,7 +219,120 @@ export const fetch_my_sites = async (
     const info = to_site_info(e.json, e.timestampMs)
     sites.push(isAgent ? { ...info, viaAgent: true } : info)
   }
-  return sites.slice(0, limit)
+  const out = sites.slice(0, limit)
+  // Populate each card's live storage window in ONE batched pass (vs a per-card
+  // backend fetch). Best-effort + per-chunk isolated: a read blip leaves only the
+  // affected sites' expiresAtMs unset, never the whole list's.
+  await enrich_storage_expiry(client, out)
+  return out
+}
+
+// ---- Storage-window enrichment (chain-derived, batched) --------------------
+//
+// A site's binding storage end is the EARLIER of its two Walrus blobs' end epochs
+// (the site is unservable once EITHER blob lapses) — mirrors the backend's
+// storageEndForSite, but BATCHED so a whole list costs two multiGet rounds instead
+// of one GET /sites/:id per card: (1) the Site objects → each site's two blob OBJECT
+// ids, (2) the blob objects → their `storage.end_epoch`. Best-effort + per-chunk
+// isolated (multi_get swallows a per-chunk blip): a missing / pre-v2 / unreadable
+// site or blob simply leaves THAT site's expiresAtMs unset (the card hides the line),
+// never the whole list's. Mutates `sites` in place; never throws.
+
+const MULTIGET_CHUNK = 50 // the multiGetObjects per-call id cap
+
+interface ObjResp {
+  data?: {
+    objectId: string
+    content?: {
+      dataType: string
+      type?: string
+      fields?: Record<string, unknown>
+    } | null
+  } | null
+}
+
+// multiGetObjects in ≤50-id chunks (with content), flattened. PER-CHUNK best-effort:
+// a transient blip on ONE chunk drops only its objects (phase-3 then skips just those
+// sites), never the whole list's expiry — matching the old per-card failure blast radius.
+const multi_get = async (
+  client: SuiJsonRpcClient,
+  ids: string[],
+): Promise<ObjResp[]> => {
+  const out: ObjResp[] = []
+  for (let i = 0; i < ids.length; i += MULTIGET_CHUNK) {
+    try {
+      const page = (await client.multiGetObjects({
+        ids: ids.slice(i, i + MULTIGET_CHUNK),
+        options: { showContent: true },
+      })) as ObjResp[]
+      out.push(...page)
+    } catch {
+      // skip this chunk's objects; the rest of the list still gets its expiry
+    }
+  }
+  return out
+}
+
+// Read a Walrus Blob object's `storage.end_epoch` (nested under `.fields` over
+// JSON-RPC, flat over some shapes) → number, or null when absent/unreadable.
+const blob_end_epoch = (o: ObjResp): number | null => {
+  const c = o?.data?.content
+  if (!c || c.dataType !== 'moveObject') return null
+  const storage = (c.fields ?? {}).storage as
+    | { fields?: Record<string, unknown> }
+    | Record<string, unknown>
+    | undefined
+  const sf = (storage as { fields?: Record<string, unknown> })?.fields ?? storage
+  const end = (sf as Record<string, unknown> | undefined)?.end_epoch
+  const n = typeof end === 'string' ? Number(end) : typeof end === 'number' ? end : NaN
+  return Number.isFinite(n) ? n : null
+}
+
+const enrich_storage_expiry = async (
+  client: SuiJsonRpcClient,
+  sites: SiteInfo[],
+): Promise<void> => {
+  if (sites.length === 0) return
+  const SITE_TYPE = `${PKG}::site::Site`
+  try {
+    // 1. Site objects → each site's two blob OBJECT ids.
+    const siteObjs = await multi_get(client, sites.map(s => s.siteId))
+    const blobsOf = new Map<string, { quilt: string; manifest: string }>()
+    const blobIds = new Set<string>()
+    for (const o of siteObjs) {
+      const c = o?.data?.content
+      if (!c || c.dataType !== 'moveObject' || c.type !== SITE_TYPE) continue
+      const quilt = c.fields?.quilt_blob_object
+      const manifest = c.fields?.manifest_blob_object
+      if (typeof quilt !== 'string' || typeof manifest !== 'string') continue
+      blobsOf.set(o.data!.objectId, { quilt, manifest })
+      blobIds.add(quilt)
+      blobIds.add(manifest)
+    }
+    if (blobIds.size === 0) return
+
+    // 2. Blob objects → storage end epoch.
+    const blobObjs = await multi_get(client, [...blobIds])
+    const endOf = new Map<string, number>()
+    for (const o of blobObjs) {
+      const end = blob_end_epoch(o)
+      if (end !== null && o.data) endOf.set(o.data.objectId, end)
+    }
+
+    // 3. expiry = epochToMs(EARLIER of the two blob ends), null-tolerant.
+    for (const s of sites) {
+      const b = blobsOf.get(s.siteId)
+      if (!b) continue
+      const qe = endOf.get(b.quilt)
+      const me = endOf.get(b.manifest)
+      const end = qe === undefined ? me : me === undefined ? qe : Math.min(qe, me)
+      if (end === undefined) continue
+      s.storageEndEpoch = end
+      s.expiresAtMs = walrusEpochToMs(end, SUI_NETWORK)
+    }
+  } catch {
+    // best-effort — the list stands without expiry
+  }
 }
 
 // ---- Public gallery feed + chain-derived stats -----------------------------

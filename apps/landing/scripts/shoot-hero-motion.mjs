@@ -4,7 +4,7 @@
  * The shader is gated on prefers-reduced-motion, so we must NOT set it here,
  * and we wait a couple seconds for the fluid to evolve away from its dark t=0.
  */
-import { chromium } from '~/dev/sui/suize/node_modules/.bun/playwright@1.60.0/node_modules/playwright/index.mjs'
+import { chromium } from 'playwright'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 

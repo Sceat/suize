@@ -1,6 +1,6 @@
 {
   "name": "@suize/backend",
-  "version": "0.2.37",
+  "version": "0.2.52",
   "private": true,
   "type": "module",
   "scripts": {

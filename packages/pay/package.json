@@ -1,6 +1,6 @@
 {
   "name": "@suize/pay",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Accept agent payments over HTTP 402 on Sui — one middleware, vanilla x402 V2, no keys, no signup. Your Sui address is your account.",
   "private": false,
   "type": "module",

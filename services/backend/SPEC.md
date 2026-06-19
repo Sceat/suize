@@ -774,32 +774,24 @@ and the move-call allow-list lists live ONLY in `@suize/shared`.
 
 ## 11. Ops — build, secrets, run (the production runbook facts)
 
-*(Folded from the old `services/backend/DEPLOY.md`, corrected to the current modules —
-that file is now a pointer here, pending owner approval for deletion.)*
-
 - **Image:** built from the **repo root** context (workspace dep on `@suize/shared`) via
   `services/backend/Dockerfile`; `bun run push` (or `push:patch|minor|major`) builds
-  linux/amd64 + pushes to `registry.example.com/your-org/suize-backend`. `bun run typecheck`
-  must be clean first.
-- **Secrets (SOPS — `~/deploy`, `secrets.example.yaml`, `env:` map →
-  ONE `suize-secrets` Opaque Secret via `envFrom`):** `ENOKI_PRIVATE_API_KEY` (sponsor),
-  `DEPLOY_WALLET_PRIVATE_KEY` (deploy service wallet — its OWN key, pays its own gas),
-  `HANDLE_ISSUER_PRIVATE_KEY` + `SUINS_PARENT_NFT_ID` (handle, optional), `CF_API_TOKEN`
-  (CF-for-SaaS custom hostnames, optional). **Separate keys per module — never reuse.**
-  The old `TURNSTILE_SECRET` + Redis are GONE (the waitlist/api module was removed;
-  handle issuance is fully on-chain — nothing here touches Redis).
-- **Cluster:** `helmfile -f deploy.yaml sync`; secret-only rotations need a
-  `kubectl rollout restart deployment/suize-backend -n suize`.
-- **One hostname for everything:** the Cloudflare Tunnel routes `api.suize.io`
-  (`facilitator.suize.io` is an alias) → `backend.internal:8080`.
-  `GET /ws` (sponsor/execute + handle ops), `POST /mcp`, the `/deploy*` + `/domains*` +
-  `/execute` HTTP surfaces, the facilitator (`POST /verify` + `POST /settle` +
-  `GET /supported` + `POST /build` + `GET /terms` + `GET /tx` — §7),
-  and the health/readiness routes all live behind it — no separate sponsor host.
+  linux/amd64 + pushes to the container registry configured via env (`DOCKER_REGISTRY` /
+  `DOCKER_IMAGE`). `bun run typecheck` must be clean first.
+- **Secrets — env-only, never committed (one Opaque Secret via `envFrom` in the deploy
+  environment):** `ENOKI_PRIVATE_API_KEY` (sponsor), `DEPLOY_WALLET_PRIVATE_KEY` (deploy
+  service wallet — its OWN key, pays its own gas), `HANDLE_ISSUER_PRIVATE_KEY` +
+  `SUINS_PARENT_NFT_ID` (handle, optional), `CF_API_TOKEN` (CF-for-SaaS custom hostnames,
+  optional), `ANTHROPIC_API_KEY` + `MEMWAL_MASTER_KEY` (brain + memory, optional).
+  **Separate keys per module — never reuse.** Full name list: `services/backend/.env.example`.
+- **Run:** one container, one port (`PORT`, default 8080), reached through the public host
+  `api.suize.io` (`facilitator.suize.io` is an alias). `GET /ws` (sponsor/execute + handle),
+  `POST /mcp`, the `/deploy*` + `/domains*` + `/execute` HTTP surfaces, the facilitator
+  (`/verify` `/settle` `/supported` `/build` `/terms` `/tx` — §7), and the health/readiness
+  routes all live behind it — no separate sponsor host.
 - **Verify after deploy:** `curl /health` → `ok`; `/ready` reports per-component;
-  `/ready/serve` is the k8s readinessProbe target (§8).
-- **Client wire contracts** live in `@suize/shared` (sponsor frames over the WS; deploy
-  HTTP types) — never restated in a runbook.
+  `/ready/serve` is the readinessProbe target (§8).
+- **Client wire contracts** live in `@suize/shared` — never restated in a runbook.
 
 ---
 

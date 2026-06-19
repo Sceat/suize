@@ -4,7 +4,7 @@
  * Captures desktop (1280) + mobile (420): navbar with Apps dropdown OPEN,
  * the hero, the wallet section, and the crash section.
  */
-import { chromium } from '~/dev/sui/suize/node_modules/.bun/playwright@1.60.0/node_modules/playwright/index.mjs'
+import { chromium } from 'playwright'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 

@@ -7,6 +7,7 @@ import {
   createNetworkConfig,
 } from '@mysten/dapp-kit'
 import '@mysten/dapp-kit/dist/index.css'
+import { Analytics } from '@vercel/analytics/react'
 import { App } from './App'
 import './styles.css'
 import { fullnodeUrl } from '@suize/shared'
@@ -51,5 +52,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         </WalletProvider>
       </SuiClientProvider>
     </QueryClientProvider>
+    <Analytics />
   </React.StrictMode>,
 )

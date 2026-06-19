@@ -4,7 +4,7 @@ import { Reveal } from '../ui'
 import { PRODUCTS } from '../config'
 
 // A stubbed product room — inherits the full chassis + its own accent so the
-// per-product theming is provable, with a "detail page coming" badge. Used now
+// per-product theming is provable, with a "live now" badge. Used now
 // by PolySui (id `crash`) + Agents; Deploy has its own full page (pages/Deploy.jsx).
 export default function ProductStub({ id }) {
   const p = PRODUCTS.find(x => x.id === id) || PRODUCTS[0]
@@ -26,10 +26,10 @@ export default function ProductStub({ id }) {
           </div>
           <Reveal className="sx-stub">
             <span className="sx-stub__badge">
-              Detail page in progress
+              Live now
             </span>
             <h2 className="sx-sectionhead__title" style={{ marginTop: 22 }}>
-              The full {p.name} experience lands here.
+              The full {p.name} experience is live now.
             </h2>
             <p className="sx-room__sub" style={{ marginTop: 18 }}>
               This room reuses the shared chassis and the hero motif engine with

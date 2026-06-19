@@ -27,7 +27,7 @@ import {
   build_cash_out_tx,
   build_claim_tx,
   build_create_manager_tx,
-  build_withdraw_tx,
+  build_withdraw_all_tx,
   fetch_dusdc_coins,
   fetch_minted_events,
   fetch_redeemed_events,
@@ -69,7 +69,6 @@ import type {
   CrashActions,
   CrashData,
   CrashResult,
-  CrashTapeRow,
   SideVM,
 } from './crash-host'
 import * as sfx from './sfx'
@@ -1564,6 +1563,67 @@ export function App() {
     }
   }, [addr, manager_id, signAndExecute, client, refresh_balances])
 
+  // ----- AUTO-RECOVER stranded game-account funds (ONCE per manager) ----------
+  // Money can sit in the manager's INTERNAL balance — settled winnings redeemed
+  // via an external path, an old redeem from before the auto-sweep, or leftover
+  // bet-funding buffer — and the WALLET is the only balance the UI reliably shows.
+  // So on load we sweep any manager balance back to the wallet via
+  // router::withdraw_all (gasless, no rake, user-signed): funds never strand and
+  // the displayed balance is always whole, with no button to hunt for.
+  //
+  // Bulletproof by construction: the manager is resolved DIRECTLY (fetch_manager,
+  // proven to work in-browser) so a no-bet session where the manager_id STATE never
+  // landed still recovers; the balance is read via read_manager_balance's
+  // devInspect-free fallback. Skips silently when empty (no needless tx) and takes
+  // the global write lock so it can never race a bet/claim and strand it. The ref
+  // is claimed synchronously right after the resolve await, so the manager_id
+  // null→resolved double-render can't fire two sweeps.
+  const swept_for_ref = useRef<string | null>(null)
+  useEffect(() => {
+    if (!addr) return
+    let alive = true
+    ;(async () => {
+      try {
+        const mgr = manager_id ?? (await fetch_manager(addr))
+        if (!alive || !mgr) return
+        if (swept_for_ref.current === mgr) return
+        swept_for_ref.current = mgr // claim the slot (atomic: no await before this)
+        const bal = await read_manager_balance(client, mgr, addr)
+        // Skip a NEGLIGIBLE balance: never fire a tx (or a misleading "Moved
+        // $0.00" notice) for sub-cent dust — e.g. leftover bet-funding buffer.
+        // The manual Withdraw + the redeem-path sweep still take the FULL balance,
+        // and the dust still shows in the displayed total (manager + wallet), so
+        // nothing is hidden or stranded. 0.01 dUSDC = 10_000 base units (6-dp).
+        if (!alive || bal < 10_000n) return
+        // Another sponsored write holds the lock (a bet/claim in flight) — defer and
+        // let a later resolution retry, never race it.
+        if (tx_pending_ref.current) {
+          swept_for_ref.current = null
+          return
+        }
+        set_tx_pending(true)
+        try {
+          const res = await signAndExecute({
+            transaction: build_withdraw_all_tx(mgr),
+          })
+          await client.waitForTransaction({ digest: res.digest })
+          if (!alive) return
+          set_notice(`Moved ${fmt_usd(bal)} to your wallet.`)
+          set_notice_kind(null)
+          refresh_balances()
+        } finally {
+          set_tx_pending(false)
+        }
+      } catch {
+        // best-effort — allow a retry on the next manager resolution
+        if (alive) swept_for_ref.current = null
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [addr, manager_id, client, signAndExecute, refresh_balances])
+
   // ----- SEED the GAINS/LOSS log on load — from ON-CHAIN EVENTS (D2) ----------
   // So past results (WINS INCLUDED) show after a refresh. Fires ONCE per manager
   // (ref-keyed), read-only — it never signs anything. Two honest sources, deduped
@@ -2380,13 +2440,21 @@ export function App() {
       // claimed_ref guard + the cleared position both stop the effect from
       // re-firing. We do NOT reset claimed_ref, so no infinite retry loop.
       const msg = (e as Error).message ?? ''
-      if (is_already_redeemed_error(msg)) {
-        // ALREADY REDEEMED — clear QUIETLY, no log_both(). The on-load sweep already
-        // claimed + announced this bucket (toast + history row + bump); calling
-        // log_both() here would DOUBLE-announce (second toast, second persistent
-        // history row, transient double bump). The reload seed also backfills the
-        // win from the PositionRedeemed events, so the row is never lost. We mirror
-        // the sweep's silent continue. (HIGH 2a)
+      // The facilitator tags a DETERMINISTIC on-chain revert as `tx-would-revert`
+      // (the sponsor refuses to sponsor a tx whose dry-run aborts) — for a claim
+      // that means the position is already redeemed/resolved, exactly the
+      // already-redeemed case. Treat it identically: terminal, clear quietly. This
+      // is what stops a settled-and-collected round from looping "sponsorship
+      // failed" and reading as "stuck" (the payout is already in the manager).
+      const terminal_revert =
+        (e as { reason?: string })?.reason === 'tx-would-revert'
+      if (terminal_revert || is_already_redeemed_error(msg)) {
+        // ALREADY REDEEMED / would-revert — clear QUIETLY, no log_both(). The on-load
+        // sweep already claimed + announced this bucket (toast + history row + bump);
+        // calling log_both() here would DOUBLE-announce (second toast, second
+        // persistent history row, transient double bump). The reload seed also
+        // backfills the win from the PositionRedeemed events, so the row is never
+        // lost. We mirror the sweep's silent continue. (HIGH 2a)
         claim_retries.current.delete(pid)
         set_position(null)
         set_cashout_bids({ up: null, down: null })
@@ -2439,34 +2507,43 @@ export function App() {
   const withdraw_all = useCallback(async () => {
     // GLOBAL LOCK guard: ignore a click while another sponsored write is pending.
     if (tx_pending) return
-    if (!addr || !manager_id) return
-    const amount = manager_balance ?? 0n
-    if (amount <= 0n) {
-      set_error('Nothing in your manager balance to move to the wallet.')
-      return
-    }
+    if (!addr) return
     set_error(null)
     set_busy('withdraw')
     set_tx_pending(true)
     try {
-      const tx = build_withdraw_tx({
-        manager_id,
-        amount,
-      })
+      // Re-resolve the manager ON THE SPOT (indexer) if React state lost it — a
+      // no-bet session where auto-resolve didn't land would otherwise make this
+      // button silently no-op. fetch_manager is proven to work in-browser.
+      const mgr = manager_id ?? (await fetch_manager(addr))
+      if (!mgr) throw new Error('No game account found to withdraw from.')
+      // SWEEP the FULL on-chain balance via router::withdraw_all — no amount, so it
+      // recovers funds even when the client mis-reads the manager balance (the whole
+      // reason this path exists). The router reads the real balance + transfers it.
+      const tx = build_withdraw_all_tx(mgr)
       const res = await signAndExecute({ transaction: tx })
       await client.waitForTransaction({ digest: res.digest })
       set_withdraw_open(false)
-      set_notice(`Moved ${fmt_usd(amount)} to your wallet.`)
+      set_notice('Moved your game-account balance to your wallet.')
       set_notice_kind(null)
       refresh_balances()
     } catch (e) {
+      const msg = (e as Error).message ?? ''
+      // An empty manager balance aborts harmlessly — report it calmly, not as a
+      // scary failure.
+      if (/empty|nothing|EZero|no balance|abort/i.test(msg)) {
+        set_withdraw_open(false)
+        set_notice('Nothing to move — your game account is already empty.')
+        set_notice_kind(null)
+      } else {
+        set_error(`Withdraw failed: ${msg}`)
+      }
       refresh_balances()
-      set_error(`Withdraw failed: ${(e as Error).message}`)
     } finally {
       set_busy(null)
       set_tx_pending(false)
     }
-  }, [addr, manager_id, manager_balance, client, signAndExecute, refresh_balances, tx_pending])
+  }, [addr, manager_id, client, signAndExecute, refresh_balances, tx_pending])
 
   // ----- derived display values -----
   // `held` is the single "the user has a live position" sentinel — TRUE when we
@@ -2920,50 +2997,6 @@ export function App() {
   // `useHouse` directly — Play no longer renders or drives the vault. App is the
   // pure bet + chart + cash-out screen now.
 
-  // ----- "Sample bets" TAPE — ILLUSTRATIVE ticker (ZERO gameplay). No global
-  // per-bet feed exists in the indexer yet, so this is SIMULATED client-side and
-  // is labeled "Sample bets · illustrative" (no live pulse) in the e05 render so
-  // it never implies real-time on-chain activity. Swap the emitter for a real
-  // global-feed poller later — nothing else changes.
-  const [tape, set_tape] = useState<CrashTapeRow[]>([])
-  useEffect(() => {
-    const NAMES = [
-      'satoshi_jr', '0xVibe', 'moonfarmer', 'cleo', 'tarp', 'gm_anon',
-      'liquid.sui', 'nakamoto_w', 'pixeldust', 'frostbyte', 'mira',
-      'degenharbor', 'koi', 'sol_survivor', 'eth_maxi', 'whale.bait', 'nova',
-      'tycho', 'redshift', 'qubit', 'mochi', 'glacier', 'orbit_kid', 'vesper',
-      'lumen', 'aria.sui', 'fenwick', 'darkpool', 'minnow', 'helios',
-    ]
-    const pick = <T,>(a: readonly T[]): T =>
-      a[Math.floor(Math.random() * a.length)]
-    const rand_amount = (): number => {
-      const r = Math.random()
-      if (r < 0.55) return pick([10, 25, 50, 75])
-      if (r < 0.85) return pick([100, 120, 150, 200, 250])
-      return pick([400, 500, 750, 1000])
-    }
-    let timer = 0
-    let alive = true
-    const emit = () => {
-      if (!alive) return
-      const row: CrashTapeRow = {
-        id:
-          Math.floor(performance.now() * 1000) +
-          Math.floor(Math.random() * 1000),
-        name: pick(NAMES),
-        amountUsd: rand_amount(),
-        side: Math.random() < 0.52 ? 'UP' : 'DOWN',
-      }
-      set_tape(prev => [row, ...prev].slice(0, 6))
-      timer = window.setTimeout(emit, 1500 + Math.random() * 1500)
-    }
-    emit()
-    return () => {
-      alive = false
-      window.clearTimeout(timer)
-    }
-  }, [])
-
   // ----- map the preserved app state -> the ported e05 design's `data` -------
   // Balance couplet uses the CENTS-visible balance formatter so any realized change
   // (a +$0.45 win on a $148 balance) is VISIBLE, while a fat testnet balance still
@@ -3263,7 +3296,6 @@ export function App() {
     chartSide: chart_side,
     chartWinning: chart_winning,
 
-    tape,
     flash: flash,
     // GAINS/LOSS results log (V) — most recent first, already capped.
     results,
@@ -3331,11 +3363,13 @@ export function App() {
       if (tx_pending) return
       claim()
     },
-    // House supply/redeem moved to the /house tab — not in Play's action surface.
-    // "Withdraw" is a funnel to the Suize wallet, not an on-chain move: Crash is
-    // testnet play-money, so funds management lives in the mainnet PAY wallet.
-    // Opens wallet.suize.io in a new tab (keeps the Crash session/streak alive).
-    withdraw: () => window.open(WALLET_URL, '_blank', 'noopener'),
+    // "Withdraw" opens the in-app sweep modal: it moves the user's manager
+    // (game-account) dUSDC balance out to their connected wallet via
+    // router::withdraw_all. This recovers funds that settled into the manager but
+    // never auto-swept (and is reachable regardless of whether the client can read
+    // the manager balance — the sweep needs no amount). (addFunds still funnels to
+    // the PAY wallet for top-ups.)
+    withdraw: () => set_withdraw_open(true),
     addFunds: () => window.open(WALLET_URL, '_blank', 'noopener'),
     signInGoogle: () => sign_in_google(),
     signOut: () => sign_out(),
@@ -3368,8 +3402,9 @@ export function App() {
       )}
 
       {/* ---------------- WITHDRAW MODAL (the one allowed hairline sheet) ------
-          opened by the balance couplet's CASH OUT affordance. Confirms moving
-          the manager balance out to the wallet via the frozen withdraw path. */}
+          opened by the header Withdraw link. Manual fallback to the automatic
+          on-load sweep — confirms moving the manager balance out to the wallet
+          via router::withdraw_all. */}
       {withdraw_open && (
         <div
           className="modal-backdrop"
@@ -3384,9 +3419,8 @@ export function App() {
           >
             <div className="modal-h">CASH OUT TO WALLET</div>
             <p className="modal-p">
-              Move your entire balance{' '}
-              <b>{fmt_usd(manager_balance ?? 0n)}</b> of dUSDC out to your
-              connected wallet.
+              Move your entire game-account balance out to your connected
+              wallet — including any settled winnings that haven’t landed yet.
             </p>
             <div className="modal-actions">
               <button
@@ -3396,15 +3430,19 @@ export function App() {
               >
                 CANCEL
               </button>
+              {/* NOT gated on the read balance: router::withdraw_all sweeps the real
+                  on-chain amount, so recovery works even if manager_balance mis-reads. */}
               <button
                 className="btn accent"
                 onClick={withdraw_all}
-                disabled={busy !== null || (manager_balance ?? 0n) <= 0n}
+                disabled={busy !== null}
               >
                 {busy === 'withdraw' ? (
                   <span className="spin" />
+                ) : manager_balance != null && manager_balance > 0n ? (
+                  `WITHDRAW ${fmt_usd(manager_balance)}`
                 ) : (
-                  `WITHDRAW ${fmt_usd(manager_balance ?? 0n)}`
+                  'WITHDRAW ALL'
                 )}
               </button>
             </div>

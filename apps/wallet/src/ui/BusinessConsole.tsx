@@ -49,13 +49,14 @@ import type { SuiClient } from '../data/suins';
 import { BUSINESS, CONSOLE, money } from './copy';
 import { exactWhen, fullWhen, type LedgerRow } from './money';
 import { BizChat } from './BizChat';
-import { AddFundsSheet, MoveSheet, SendSheet } from './sheets';
+import { AddFundsSheet, MoveSheet, SendSheet, NewChargeSheet } from './sheets';
 import { ProfileTab } from './ProfileTab';
 import { loadProfile, type BusinessProfileView } from '../data/profile';
 import { type SignTransaction, type BuildClient } from '../data/sponsored';
+import { wsCreateCharge } from '../data/ws';
 
 type Screen = 'dashboard' | 'profile';
-type SheetKind = 'addFunds' | 'send' | 'transfer' | null;
+type SheetKind = 'addFunds' | 'send' | 'transfer' | 'newCharge' | null;
 
 const USDC_SCALE = 1_000_000n;
 const toRaw = (ui: number): bigint => (BigInt(Math.round(ui * 100)) * USDC_SCALE) / 100n;
@@ -151,10 +152,22 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
 
   // The business's public BusinessProfile (logo/name/site) — drives the rail card + Profile.
   const [profile, setProfile] = useState<BusinessProfileView | null>(null);
-  const reloadProfile = useCallback(() => {
-    if (demo || !ownerAddress) return;
-    loadProfile(client as unknown as Parameters<typeof loadProfile>[0], ownerAddress).then(setProfile);
-  }, [demo, ownerAddress, client]);
+  const reloadProfile = useCallback(
+    (retry = false) => {
+      if (demo || !ownerAddress) return;
+      const read = (n: number) => {
+        loadProfile(client as unknown as Parameters<typeof loadProfile>[0], ownerAddress).then((p) => {
+          setProfile(p);
+          // a read right after a save can hit RPC indexing lag (the stale pre-edit
+          // object); re-read a couple times with backoff so the masthead reflects the
+          // edit without a refresh. Reads are monotonic, so a later one never regresses.
+          if (retry && n < 2) setTimeout(() => read(n + 1), 1800 * (n + 1));
+        });
+      };
+      read(0);
+    },
+    [demo, ownerAddress, client],
+  );
   useEffect(() => {
     reloadProfile();
   }, [reloadProfile]);
@@ -225,6 +238,13 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
     const resolved = await resolveRecipient(to, client);
     if (!resolved.address) throw new Error(`Could not find ${to} — check the name and try again.`);
     await api.sendWallet({ amountRaw: toRaw(amt), to: resolved.address });
+  }
+
+  /** Create a no-code charge link for this merchant (the authed session). */
+  async function onCreateCharge(input: { price: string; webhook: string; ref?: string }): Promise<string> {
+    if (demo) return `https://api.suize.io/charge/demo-${input.price.replace('.', '')}`;
+    const { url } = await wsCreateCharge(input);
+    return url;
   }
 
   const profileName = profile?.name || (demo ? BUSINESS.merchant : '');
@@ -356,7 +376,7 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
                 ownerAddress={ownerAddress}
                 client={client as unknown as BuildClient}
                 signTransaction={signTransaction}
-                onSaved={() => reloadProfile()}
+                onSaved={() => reloadProfile(true)}
               />
             </div>
           ) : (
@@ -374,6 +394,9 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
                   </button>
                   <button type="button" className="bz-btn bz-btn--ghost" onClick={() => setSheet('send')} disabled={busy}>
                     <Send size={13} strokeWidth={ICON_STROKE} />Send
+                  </button>
+                  <button type="button" className="bz-btn bz-btn--ghost" onClick={() => setSheet('newCharge')} disabled={busy}>
+                    <Plus size={13} strokeWidth={ICON_STROKE} />Accept a payment
                   </button>
                 </div>
               </section>
@@ -494,8 +517,9 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
       </div>
 
       {/* ── THE MONEY SHEETS (the same verbs as the consumer wallet) ── */}
-      {sheet === 'addFunds' ? <AddFundsSheet handle={merchant} requestEnabled={demo} onClose={() => setSheet(null)} /> : null}
+      {sheet === 'addFunds' ? <AddFundsSheet handle={merchant} address={ownerAddress} requestEnabled={demo} onClose={() => setSheet(null)} /> : null}
       {sheet === 'send' ? <SendSheet available={available} onSend={onSend} claimEnabled={demo} onClose={() => setSheet(null)} /> : null}
+      {sheet === 'newCharge' ? <NewChargeSheet onCreate={onCreateCharge} onClose={() => setSheet(null)} /> : null}
       {sheet === 'transfer' && demo ? <MoveSheet kind="transfer" available={available} onMove={(amt) => setDemoAvailable((v) => Math.max(0, v - amt))} onClose={() => setSheet(null)} /> : null}
     </div>
   );

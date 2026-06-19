@@ -24,6 +24,7 @@ import { DEPLOY_CHARGE_AMOUNT } from '@suize/shared';
 import { useTheme } from '../system/theme';
 import { useAccount } from '../data/useAccount';
 import { useAgent } from '../data/useAgent';
+import { planAgentSend, planAgentSweep } from '../data/agentSpend';
 import { useSubscriptions } from '../data/useSubscriptions';
 import { resolveRecipient } from '../data/suins';
 import type { SuiClient } from '../data/suins';
@@ -319,41 +320,63 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
       }));
     }
     const agentAddr = agent.agentAddress?.toLowerCase();
-    return api.state.activity.map((a): LedgerRow => {
+    const apiRows: { ts: number; row: LedgerRow }[] = api.state.activity.map((a) => {
       const isAgent = agentAddr != null && a.counterparty?.toLowerCase() === agentAddr;
       // main-account point of view: out is negative, in positive; 'none' (sub-cancelled)
       // moved nothing → no signed amount.
       const signed = a.amountUi == null || a.flow === 'none' ? null : a.flow === 'out' ? -a.amountUi : a.amountUi;
       if (isAgent) {
-        // a transfer to/from the user's OWN sub-account belongs to the AGENT book and
-        // reads from the AGENT's point of view: funding it (main 'out') is money the
-        // agent RECEIVED (+); a sweep (main 'in') is the agent RETURNING it (−). No
-        // external counterparty token — the other side is "you".
+        // a transfer to/from the user's OWN sub-account belongs to the AGENT book: funding
+        // it (main 'out') is money the agent RECEIVED (+); a sweep (main 'in') is the agent
+        // RETURNING it (−). No external counterparty token — the other side is "you".
         return {
-          id: a.id,
-          what: a.flow === 'out' ? 'Funded' : 'Returned',
-          when: exactWhen(a.ts),
-          whenTitle: fullWhen(a.ts),
-          amount: signed == null ? null : -signed,
-          verifyHref: a.pending ? undefined : SUIVISION_TX(a.txDigest),
-          pending: a.pending,
-          account: 'agent',
+          ts: a.ts,
+          row: {
+            id: a.id,
+            what: a.flow === 'out' ? 'Funded' : 'Returned',
+            when: exactWhen(a.ts),
+            whenTitle: fullWhen(a.ts),
+            amount: signed == null ? null : -signed,
+            verifyHref: a.pending ? undefined : SUIVISION_TX(a.txDigest),
+            pending: a.pending,
+            account: 'agent' as const,
+          },
         };
       }
       return {
-        id: a.id,
-        // the action ("Sent"/"Paid"/…) + the resolved "to whom" (gradient-coloured by Party).
-        what: a.title,
-        who: a.detail,
-        when: exactWhen(a.ts),
-        whenTitle: fullWhen(a.ts),
-        amount: signed,
-        verifyHref: a.pending ? undefined : SUIVISION_TX(a.txDigest),
-        pending: a.pending,
-        account: 'main',
+        ts: a.ts,
+        row: {
+          id: a.id,
+          // the action ("Sent"/"Paid"/…) + the resolved "to whom" (gradient-coloured by Party).
+          what: a.title,
+          who: a.detail,
+          when: exactWhen(a.ts),
+          whenTitle: fullWhen(a.ts),
+          amount: signed,
+          verifyHref: a.pending ? undefined : SUIVISION_TX(a.txDigest),
+          pending: a.pending,
+          account: 'main' as const,
+        },
       };
     });
-  }, [demo, dm.booked, api.state.activity, agent.agentAddress]);
+    // The agent's OWN outbound sends (sub-account → external payee) — the "spent" half of
+    // the sub-account ledger. They never touch main, so they come straight from chain
+    // (useAgent.sends), interleaved by time with the fund/return rows.
+    const sendRows: { ts: number; row: LedgerRow }[] = agent.sends.map((s) => ({
+      ts: s.ts,
+      row: {
+        id: s.id,
+        what: 'Sent',
+        who: `${s.to.slice(0, 6)}…${s.to.slice(-4)}`,
+        when: exactWhen(s.ts),
+        whenTitle: fullWhen(s.ts),
+        amount: -s.amountUi,
+        verifyHref: SUIVISION_TX(s.txDigest),
+        account: 'agent' as const,
+      },
+    }));
+    return [...apiRows, ...sendRows].sort((a, b) => b.ts - a.ts).map((r) => r.row);
+  }, [demo, dm.booked, api.state.activity, agent.agentAddress, agent.sends]);
 
   // ── the sheet ops — demo mutates locally; production runs the real verbs ───
   async function onSend(amt: number, to: string) {
@@ -420,49 +443,54 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
           const resolved = await resolveRecipient(recipient, client);
           if (!resolved.address)
             return { kind: 'immediate', content: `Couldn't find ${recipient} — check the name or address.`, isError: true };
-          if (amount > api.state.wallet.ui)
-            return { kind: 'immediate', content: `That's more than the wallet holds (${usd(api.state.wallet.ui)}).`, isError: true };
           const to = resolved.address;
-          // F3: the card shows the WALLET-derived destination — the canonical reverse
-          // handle (if any) + ALWAYS the full address — never the model's raw recipient
-          // string, which could be an ASCII look-alike ("a1ice"). A typosquat resolves
-          // to a DIFFERENT 0x… the user can see on the Address row.
-          const canon = await reverseHandle(to, client);
-          const label = canon ?? `${to.slice(0, 6)}…${to.slice(-4)}`;
-          const doSend = async () => {
-            await api.sendWallet({ amountRaw: toRaw(amount), to, label });
-            addKnownPayee(ownerAddress, to); // first successful send → a known payee
-          };
-          // Spending dials (read fresh). Auto-approval (NO card) requires ALL of:
-          //   · the agent is ON — read from the LIVE ref so a mid-turn Pause bites at once
-          //     (the handler is frozen per-turn; the captured agentOn would be stale)
-          //   · a KNOWN payee — a NEW payee ALWAYS confirms, even in full-auto
-          //   · the dial permits it (full, or under the per-send threshold)
-          //   · NOT a repeat — 3 auto-sends to the SAME payee in 10min (any amount) is a
-          //     runaway loop, so it falls through to a confirm to probe intent (a
-          //     loop-breaker, not a cap; the wallet balance + the Walrus log are the backstops).
           const dials = getDials(ownerAddress);
           const known = isKnownPayee(ownerAddress, to);
           const sig = autoActionSig(to); // per-recipient → a vary-by-a-cent loop can't dodge it
           const repeat = autoActionIsRepeat(ownerAddress, sig);
-          const autoOk =
-            agentOnRef.current &&
-            known &&
-            !repeat &&
-            (dials.mode === 'full' || (dials.mode === 'under' && amount < dials.thresholdUsd));
-          if (autoOk) {
+          // THE SAFETY DECISION (pure, unit-tested in test/agentSpend.test.ts): the agent
+          // spends ONLY from its capped SUB-ACCOUNT — NEVER the owner's main wallet. The
+          // planner has no main-balance input, so it cannot authorize a main-wallet drain.
+          // (unarmed, self-send, over-cap, and the auto-vs-card dial logic all live there.)
+          const plan = planAgentSend({
+            armed: agent.armed,
+            subBalanceUi: agent.balance.ui,
+            amountUi: amount,
+            toIsOwner: to.toLowerCase() === ownerAddress.toLowerCase(),
+            agentOn: agentOnRef.current,
+            knownPayee: known,
+            repeat,
+            dials,
+          });
+          if (plan.kind === 'error') return { kind: 'immediate', content: plan.message, isError: true };
+          // F3: the card/receipt shows the WALLET-derived destination handle — never the
+          // model's raw recipient string (a typosquat resolves to a DIFFERENT address whose
+          // reverse handle won't match → we then show the raw 0x).
+          const canon = await reverseHandle(to, client);
+          const label = canon ?? `${to.slice(0, 6)}…${to.slice(-4)}`;
+          const doSend = async () => {
+            await agent.spend(to, toRaw(amount)); // FROM the sub-account (the cap) — NEVER main
+            addKnownPayee(ownerAddress, to); // first successful send → a known payee
+          };
+          if (plan.kind === 'auto') {
             await doSend();
             recordAutoAction(ownerAddress, sig);
-            return { kind: 'immediate', content: `Sent ${usd(amount)} to ${label} — auto-approved.` };
+            return {
+              kind: 'immediate',
+              content: `Sent ${usd(amount)} to ${label} from the agent sub-account — auto-approved.`,
+              receipt: { title: canon ? `Sent to ${canon}` : `Sent to ${label}`, meta: `${usd(amount)} · auto` },
+            };
           }
           return {
             kind: 'card',
             title: canon ? `Send to ${canon}` : 'Send USDC',
-            subtitle: repeat ? `You've sent ${usd(amount)} to ${label} a few times just now — confirm this repeat?` : undefined,
+            subtitle: repeat
+              ? `You've sent ${usd(amount)} to ${label} a few times just now — confirm this repeat?`
+              : 'Spends from your agent sub-account.',
             rows: [
-              ...(canon ? [{ k: 'To', v: canon }] : []),
-              { k: 'Address', v: to },
+              { k: 'To', v: canon ?? to },
               { k: 'Amount', v: usd(amount) },
+              { k: 'From', v: 'agent sub-account' },
             ],
             cta: 'Send',
             commit: async () => {
@@ -510,22 +538,42 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
           };
         }
         case 'sweep_agent': {
-          if (!agent.armed) return { kind: 'immediate', content: 'There is no agent sub-account set up to sweep.' };
-          if (!(agent.balance.ui > 0)) return { kind: 'immediate', content: 'The agent sub-account is already empty.' };
-          const bal = agent.balance.ui;
-          const raw = BigInt(agent.balance.raw);
+          const full = agent.balance.ui;
+          // Optional partial: bring back just `amount_usdc`; omit → the whole balance.
+          const raw0 = String(input.amount_usdc ?? '').trim();
+          const reqAmt = Number(raw0);
+          const partial = raw0 !== '' && reqAmt > 0;
+          const amt = partial ? reqAmt : full;
+          // Bringing money BACK is the safest move — the planner gates it on the dials
+          // (full-auto / under-threshold → no card) + the cap (pure, unit-tested).
+          const plan = planAgentSweep({ armed: agent.armed, subBalanceUi: full, amountUi: amt, dials: getDials(ownerAddress) });
+          if (plan.kind === 'error') return { kind: 'immediate', content: plan.message, isError: true };
+          // Full bring-back uses the EXACT raw balance (no decimal rounding); a partial
+          // uses the asked amount. agent.withdraw moves it from the sub-account → wallet.
+          const raw = partial ? toRaw(amt) : BigInt(agent.balance.raw);
+          const doSweep = () => agent.withdraw(raw);
+          if (plan.kind === 'auto') {
+            await doSweep();
+            return {
+              kind: 'immediate',
+              content: `Brought ${usd(amt)} back to your wallet — auto-approved.`,
+              receipt: { title: 'Brought funds back', meta: `${usd(amt)} · auto` },
+            };
+          }
           return {
             kind: 'card',
-            title: 'Bring agent funds back',
-            subtitle: 'Pulls the whole sub-account balance into your wallet.',
+            title: partial ? 'Bring some funds back' : 'Bring agent funds back',
+            subtitle: partial
+              ? 'Moves part of your agent sub-account into your wallet.'
+              : 'Pulls the whole sub-account balance into your wallet.',
             rows: [
-              { k: 'Amount', v: usd(bal) },
+              { k: 'Amount', v: usd(amt) },
               { k: 'To', v: 'your wallet' },
             ],
             cta: 'Bring it back',
             commit: async () => {
-              await agent.withdraw(raw);
-              return `Swept ${usd(bal)} back to your wallet.`;
+              await doSweep();
+              return `Brought ${usd(amt)} back to your wallet.`;
             },
           };
         }
@@ -551,27 +599,44 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
               content: `Your agent sub-account holds ${usd(agent.balance.ui)} — publishing costs ${usd(price)}. Fund it and ask me again.`,
               isError: true,
             };
+          const publish = async (onStep?: (label: string) => void) => {
+            const res = await deployStaticSite({
+              name: title,
+              html,
+              sender: subAddr,
+              signBytes: (b) => api.signBytesAsSubaccount(subMs, b),
+              onProgress: onStep,
+            });
+            agent.refresh(); // the sub-account just paid — re-read its balance
+            return res.url ? `Published "${title}" — live at ${res.url}` : `Published "${title}".`;
+          };
+          // The spending dials apply to publishing too — it's a sub-account spend. Full
+          // auto (or under the per-action threshold) publishes WITHOUT a card, mirroring
+          // send_usdc, EXCEPT: a runaway repeat (the same page 3× in 10min) falls through
+          // to a confirm to probe intent. No "new payee" gate — the destination is always
+          // the fixed Suize deploy treasury, never an arbitrary address.
+          const dials = getDials(ownerAddress);
+          const sig = autoActionSig(`deploy:${title}`);
+          const repeat = autoActionIsRepeat(ownerAddress, sig);
+          const autoOk =
+            agentOnRef.current && !repeat && (dials.mode === 'full' || (dials.mode === 'under' && price < dials.thresholdUsd));
+          if (autoOk) {
+            recordAutoAction(ownerAddress, sig);
+            return { kind: 'immediate', content: `${await publish()} — auto-published.` };
+          }
           return {
             kind: 'card',
             title: 'Publish a web page',
-            subtitle: `"${title}" — goes live on the web.`,
+            subtitle: repeat
+              ? `You've published "${title}" a few times just now — confirm this repeat?`
+              : `"${title}" — goes live on the web.`,
             rows: [
               { k: 'Page', v: title },
               { k: 'Cost', v: usd(price) },
               { k: 'Paid from', v: 'agent sub-account' },
             ],
             cta: `Publish · ${usd(price)}`,
-            commit: async (onStep) => {
-              const res = await deployStaticSite({
-                name: title,
-                html,
-                sender: subAddr,
-                signBytes: (b) => api.signBytesAsSubaccount(subMs, b),
-                onProgress: onStep,
-              });
-              agent.refresh(); // the sub-account just paid — re-read its balance
-              return res.url ? `Published "${title}" — live at ${res.url}` : `Published "${title}".`;
-            },
+            commit: async (onStep) => publish(onStep),
           };
         }
         default:
@@ -1100,6 +1165,7 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
           <AssistantPanel
             demo={demo}
             agentOn={agentOn}
+            ownerAddress={ownerAddress}
             onBooked={demo ? dm.onBooked : undefined}
             runAgentTool={demo ? undefined : runAgentTool}
             memwalAccountId={demo ? undefined : memAccount ?? undefined}
@@ -1109,7 +1175,7 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
 
       {/* ── THE MONEY SHEETS ── */}
       {sheet === 'addFunds' ? (
-        <AddFundsSheet handle={displayHandle} requestEnabled={demo} onClose={() => setSheet(null)} />
+        <AddFundsSheet handle={displayHandle} address={ownerAddress} requestEnabled={demo} onClose={() => setSheet(null)} />
       ) : null}
       {sheet === 'send' ? (
         <SendSheet available={yourMoney} onSend={onSend} claimEnabled={demo} onClose={() => setSheet(null)} />

@@ -36,8 +36,7 @@ const GALLERY_CAP = 60
 type SortKey = 'newest' | 'largest'
 
 // Shorten a site's live URL to its host's leading label + the base domain, e.g.
-// "5i0i…4a.suize.site" — the same tight, recognisable host the SitesList log
-// uses, so the two surfaces read consistently.
+// "5i0i…4a.suize.site" — a tight, recognisable host for the showcase tiles.
 const short_host = (url: string): string => {
   const host = url.replace(/^https?:\/\//, '').replace(/\/$/, '')
   const sub = host.endsWith(`.${DEPLOY_BASE_DOMAIN}`)

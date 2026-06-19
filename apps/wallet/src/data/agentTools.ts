@@ -22,6 +22,9 @@ export type ToolRun =
       content: string;
       /** true marks a failure/decline the model should acknowledge (not retry). */
       isError?: boolean;
+      /** an AUTO-APPROVED money action (no card) still drops a visible ✓ receipt in the
+       *  chat so the user always SEES what moved (title + a meta line, e.g. "$5.00 · auto"). */
+      receipt?: { title: string; meta?: string };
     }
   | {
       /** a money action — the Assistant shows a confirm card before anything happens. */

@@ -253,6 +253,81 @@
   transform: translateX(3px);
 }
 
+/* ---- NON-REDEEMED FUNDS: settled wins not yet pulled to the wallet --------
+   A quiet blue callout (chrome → blue, NEVER green — green stays the win/loss
+   verdict only). One row: label + sub on the left, the owed amount + Claim. */
+.pf-claim {
+  margin: 4px 0 10px;
+  border: 1px solid var(--hair-blue);
+  border-radius: 12px;
+  background:
+    radial-gradient(120% 170% at 94% -40%, var(--blue-wash), transparent 60%),
+    linear-gradient(180deg, var(--card), var(--paper-2));
+  padding: 16px 18px;
+  animation: ed-stream-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.pf-claim-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.pf-claim-l {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.pf-claim-lbl {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.pf-claim-sub {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.pf-claim-amt {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--blue);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.pf-claim-btn {
+  flex: 0 0 auto;
+  padding: 10px 22px;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #fff;
+  background: var(--blue);
+  border: 1px solid var(--blue-deep);
+  border-radius: 4px;
+  transition: background 0.18s ease;
+}
+.pf-claim-btn:hover:not(:disabled) {
+  background: var(--blue-deep);
+}
+.pf-claim-btn:disabled {
+  color: var(--ink-3);
+  background: var(--paper-3);
+  border-color: var(--hair);
+}
+.pf-claim-err {
+  margin: 10px 0 0;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--bear-ink);
+}
+
 /* ---- HISTORY: a clean broadsheet ledger ---- */
 .pf-hist {
   list-style: none;

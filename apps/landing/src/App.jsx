@@ -19,6 +19,7 @@ import Businesses from './pages/Businesses'
 import Deploy from './pages/Deploy'
 import Docs from './pages/Docs'
 import ProductStub from './pages/ProductStub'
+import { Deck } from './deck/Deck'
 
 // ============================================================================
 // SUIZE — the landing. Dark, experiential, on-brand. A lean hash-router picks
@@ -55,6 +56,7 @@ const TITLES = {
   pricing: 'Pricing — Suize',
   docs: 'Docs — Suize',
   deploy: 'Deploy — ship a site to Walrus, paid by an agent',
+  deck: 'Suize — agentic payments, end to end',
 }
 const DEFAULT_TITLE = 'Suize — the AI wallet that makes life easier'
 
@@ -238,6 +240,8 @@ export default function App() {
   // /deploy — THE featured real merchant; its own full page, not a stub.
   else if (id === 'deploy') page = <Deploy />
   else if (ROOM_IDS.includes(id)) page = <ProductStub id={id} />
+  // /deck — the interactive pitch deck (its own chassis + background shader).
+  else if (id === 'deck') page = <Deck route={route} />
   // / — the PAY/agentic home (the emotional core; absorbs the old /agents).
   else page = <Landing />
 
@@ -245,8 +249,9 @@ export default function App() {
     <div className="sx-app">
       {/* the fixed backdrop behind everything — a CLEAN editorial surface
           (paper + subtle grain + faint vignette, pure CSS). The global matter
-          shader is retired; the one contained shader moment lives in the hero. */}
-      <Backdrop />
+          shader is retired; the one contained shader moment lives in the hero.
+          On /deck the deck brings its own background shader, so suppress this. */}
+      {id !== 'deck' && <Backdrop />}
       {page}
       <canvas ref={wipeRef} className="sx-wipe" aria-hidden="true" />
       <CustomCursor />

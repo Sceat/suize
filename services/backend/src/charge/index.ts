@@ -20,10 +20,47 @@ import { config } from "../config";
 import { json } from "../http";
 import { doVerify, doSettle, FACILITATOR_NETWORK } from "../facilitator/x402";
 import { outputsFor, treasuryReady } from "../facilitator/fees";
-import { verifyChargeToken, chargePublicKey, chargeKeyReady } from "./token";
+import { verifyChargeToken, signChargeToken, chargePublicKey, chargeKeyReady } from "./token";
 import { fireChargeWebhook } from "./webhook";
 
 const MAX_ORDER_BYTES = 16_384;
+const PRICE_RE = /^\d+(\.\d{1,6})?$/;
+
+/** A client-safe charge-creation failure (the WS handler maps it to an errorResponse). */
+export class ChargeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ChargeError";
+  }
+}
+
+/** Mint a hosted charge link for `merchant` (the authenticated session — NEVER a
+ *  client-supplied address, so a charge can only ever pay the creator). Validates the
+ *  terms, signs the token, returns `https://api.suize.io/charge/<token>`. */
+export const createChargeLink = async (input: {
+  merchant: string;
+  price: string;
+  webhook: string;
+  ref?: string;
+  exp?: number;
+}): Promise<string> => {
+  if (!chargeKeyReady()) throw new ChargeError("charge door not configured");
+  const { merchant, price, webhook, ref, exp } = input;
+  if (!PRICE_RE.test(price) || Number(price) <= 0) {
+    throw new ChargeError("price must be a positive USDC amount with ≤6 decimals");
+  }
+  if (typeof webhook !== "string" || !webhook.startsWith("https://") || webhook.length > 512) {
+    throw new ChargeError("webhook must be an https URL of ≤512 chars");
+  }
+  if (ref !== undefined && (typeof ref !== "string" || ref.length > 256)) {
+    throw new ChargeError("ref must be a string of ≤256 chars");
+  }
+  if (exp !== undefined && (typeof exp !== "number" || exp <= Date.now())) {
+    throw new ChargeError("exp must be a future epoch-ms timestamp");
+  }
+  const token = await signChargeToken({ v: 1, merchant, price, webhook, ref, exp });
+  return `${config.chargeBaseUrl.replace(/\/+$/, "")}/charge/${token}`;
+};
 
 const b64 = (o: unknown): string =>
   Buffer.from(JSON.stringify(o), "utf8").toString("base64");
@@ -153,7 +190,13 @@ export const handleChargeRoute = (
   url: URL,
   origin: string | null,
 ): Response | Promise<Response> | null => {
-  if (!url.pathname.startsWith("/charge/") && url.pathname !== "/charge") return null;
+  if (
+    !url.pathname.startsWith("/charge/") &&
+    url.pathname !== "/charge" &&
+    url.pathname !== "/.well-known/suize-charge-key"
+  ) {
+    return null;
+  }
 
   // The published webhook/token public key — for verifyWebhook + docs.
   if (url.pathname === "/charge/pubkey" || url.pathname === "/.well-known/suize-charge-key") {

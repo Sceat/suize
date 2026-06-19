@@ -35,6 +35,20 @@ export type ReadClient = {
     hasNextPage: boolean
     nextCursor?: { txDigest: string; eventSeq: string } | null
   }>
+  // Plain object reads — the devInspect-free fallback for the manager balance
+  // (read_manager_balance). Loosely typed (content.fields is dynamic Move data).
+  getObject: (args: {
+    id: string
+    options?: { showContent?: boolean }
+  }) => Promise<{
+    // `content` is dynamic Move data (a union the SDK types as SuiParsedData) —
+    // keep it `unknown` and cast at the use site so the real client is structurally
+    // assignable to ReadClient.
+    data?: { content?: unknown } | null
+  }>
+  getDynamicFields: (args: { parentId: string }) => Promise<{
+    data: Array<{ name?: { type?: string }; objectId?: string }>
+  }>
 }
 import {
   CLOCK_OBJECT,
@@ -710,27 +724,77 @@ export const fetch_dusdc_coins = async (
   return { total, coin_ids }
 }
 
-// Read the manager's internal dUSDC balance via devInspect:
-//   predict_manager::balance<T>(self): u64
+// Read the manager's internal dUSDC balance.
+//
+// PRIMARY: devInspect predict_manager::balance<T>(self): u64 — one call.
+// FALLBACK: if devInspect errors / yields no return value, read the balance
+// STRAIGHT off the manager's BalanceManager bag (getObject + getDynamicFields —
+// plain reads, same family as getCoins). devInspect has been observed to silently
+// fail in some browser/RPC setups, which would HIDE a stranded internal balance
+// (it both under-reports the displayed total AND blocks the withdraw button). The
+// fallback guarantees a funded manager is never invisible. Only triggers when the
+// devInspect path doesn't produce a value, so a healthy empty manager stays 1 call.
 export const read_manager_balance = async (
   client: ReadClient,
   manager_id: string,
   sender: string,
 ): Promise<bigint> => {
-  const tx = new Transaction()
-  tx.moveCall({
-    target: `${MOD_MANAGER}::balance`,
-    typeArguments: [DUSDC_TYPE],
-    arguments: [tx.object(manager_id)],
-  })
-  const res = await client.devInspectTransactionBlock({
-    transactionBlock: tx,
-    sender: safe_sender(sender),
-  })
-  if (res.error) throw new Error(`manager balance: ${res.error}`)
-  const ret = res.results?.[0]?.returnValues
-  if (!ret || ret.length < 1) return 0n
-  return u64_from_bytes(ret[0][0])
+  try {
+    const tx = new Transaction()
+    tx.moveCall({
+      target: `${MOD_MANAGER}::balance`,
+      typeArguments: [DUSDC_TYPE],
+      arguments: [tx.object(manager_id)],
+    })
+    const res = await client.devInspectTransactionBlock({
+      transactionBlock: tx,
+      sender: safe_sender(sender),
+    })
+    if (!res.error) {
+      const ret = res.results?.[0]?.returnValues
+      if (ret && ret.length >= 1) return u64_from_bytes(ret[0][0])
+    }
+    // devInspect returned an error or no value — fall through to the direct read.
+  } catch {
+    // devInspect threw (the browser/RPC failure case) — fall through.
+  }
+  return read_manager_balance_via_fields(client, manager_id)
+}
+
+// The devInspect-free read: the manager holds its internal balance in a DeepBook
+// BalanceManager bag (BalanceKey<T> -> Balance<T>). We walk
+// manager.balance_manager.balances (a Bag) and read the DUSDC field's `value`.
+// Pure object reads — robust where the shared-object devInspect is not.
+const read_manager_balance_via_fields = async (
+  client: ReadClient,
+  manager_id: string,
+): Promise<bigint> => {
+  try {
+    const mgr = await client.getObject({
+      id: manager_id,
+      options: { showContent: true },
+    })
+    const fields = (mgr?.data?.content as { fields?: Record<string, any> } | null)
+      ?.fields
+    const bag_id = fields?.balance_manager?.fields?.balances?.fields?.id?.id as
+      | string
+      | undefined
+    if (!bag_id) return 0n
+    const dyn = await client.getDynamicFields({ parentId: bag_id })
+    const field = dyn.data.find(
+      d => typeof d?.name?.type === 'string' && d.name.type.includes('dusdc::DUSDC'),
+    )
+    if (!field?.objectId) return 0n
+    const val = await client.getObject({
+      id: field.objectId,
+      options: { showContent: true },
+    })
+    const raw = (val?.data?.content as { fields?: Record<string, any> } | null)
+      ?.fields?.value
+    return raw != null ? BigInt(raw as string | number) : 0n
+  } catch {
+    return 0n
+  }
 }
 
 // ============================================================================
@@ -753,6 +817,22 @@ export const build_withdraw_tx = (opts: {
       tx.object(opts.manager_id),
       tx.pure.u64(opts.amount),
     ],
+  })
+  return tx
+}
+
+// Sweep the ENTIRE manager internal balance to the wallet in ONE tx — no amount,
+// no balance-read needed (router::withdraw_all reads the on-chain balance itself
+// and transfers the full Coin<DUSDC> to ctx.sender()). This is the bulletproof
+// RECOVERY path for funds stranded in the manager (a redeem that credited the
+// manager without the auto-sweep, or a balance read that hid them): it works even
+// when the client can't read the balance. version-gated like every router entry.
+export const build_withdraw_all_tx = (manager_id: string): Transaction => {
+  const tx = new Transaction()
+  tx.moveCall({
+    target: `${MOD_ROUTER}::withdraw_all`,
+    typeArguments: [DUSDC_TYPE],
+    arguments: [tx.object(VERSION_ID), tx.object(manager_id)],
   })
   return tx
 }

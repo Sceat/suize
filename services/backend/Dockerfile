@@ -26,9 +26,9 @@ COPY packages/pay/package.json ./packages/pay/package.json
 COPY packages/mcp/package.json ./packages/mcp/package.json
 COPY packages/move-auction/package.json ./packages/move-auction/package.json
 COPY packages/move-profile/package.json ./packages/move-profile/package.json
+COPY packages/move-trace/package.json ./packages/move-trace/package.json
 COPY apps/deploy/package.json ./apps/deploy/package.json
 COPY apps/agents/package.json ./apps/agents/package.json
-COPY apps/deck/package.json ./apps/deck/package.json
 COPY services/deploy-worker/package.json ./services/deploy-worker/package.json
 COPY services/backend/package.json ./services/backend/package.json
 # --filter installs the backend + its workspace dep (@suize/shared) only — no
@@ -54,9 +54,9 @@ COPY packages/pay/package.json ./packages/pay/package.json
 COPY packages/mcp/package.json ./packages/mcp/package.json
 COPY packages/move-auction/package.json ./packages/move-auction/package.json
 COPY packages/move-profile/package.json ./packages/move-profile/package.json
+COPY packages/move-trace/package.json ./packages/move-trace/package.json
 COPY apps/deploy/package.json ./apps/deploy/package.json
 COPY apps/agents/package.json ./apps/agents/package.json
-COPY apps/deck/package.json ./apps/deck/package.json
 COPY services/deploy-worker/package.json ./services/deploy-worker/package.json
 COPY services/backend/package.json ./services/backend/package.json
 RUN bun install --frozen-lockfile --filter './services/backend'

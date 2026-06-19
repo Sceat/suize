@@ -13,7 +13,7 @@
    ========================================================================== */
 import * as base from './crash-base'
 import * as sfx from './sfx'
-import { fmt_amount, fmt_compact, fmt_signed_cents } from './format'
+import { fmt_compact, fmt_signed_cents } from './format'
 import type { CrashHost, SideVM } from './crash-host'
 
 export function mount(root: HTMLElement, host: CrashHost): () => void {
@@ -25,9 +25,6 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   //  helpers
   // ---------------------------------------------------------------- //
   const STAKES = host.data.stakes
-  // Bare-number money rule (no "$"): < $10 -> 1 decimal, >= $10 -> whole +
-  // thousands separators. Used by the bet tape (the "$" is added inline).
-  const fmt = (n: number): string => fmt_amount(n)
   // Compact $ for any value chip / headline that could overflow its box
   // (big WIN payouts, stake chips). Follows the money rule below the k/M
   // collapse: 53 -> "$53", 5.3 -> "$5.3", 150000 -> "$150k".
@@ -1570,7 +1567,7 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   fg.className = 'e05-fg'
   fg.innerHTML = `
     <a class="e05-logo crash-logo" href="#bet-top" data-logo>
-      <span class="crash-logo__mark">CRASH</span>
+      <span class="crash-logo__mark">PolySui</span>
       <span class="crash-logo__sub">· by suize</span>
     </a>
 
@@ -1718,18 +1715,6 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
       </div>
     </div>
 
-    <!-- ILLUSTRATIVE ticker — NOT real-time on-chain activity. No global per-bet
-         feed exists in the indexer yet, so these rows are simulated sample bets.
-         Labeled "Sample bets" (no live pulse) so it never implies real on-chain
-         data. Swap the emitter for a real global-feed poller to make it live. -->
-    <div class="e05-tape">
-      <div class="e05-tape-head">
-        <span class="e05-dot"></span>
-        <span class="e05-lbl">Sample bets · illustrative</span>
-      </div>
-      <div class="e05-tape-rows" data-tape></div>
-    </div>
-
     <div class="e05-flash" data-flash></div>
 
     <!-- The House (TVL/yield/deposit) + its deposit sheet live on the /house
@@ -1752,7 +1737,6 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   const cdTimeEl = $('.e05-cd-time') as HTMLElement
   const lockbarEl = $('[data-lockbar]') as HTMLElement
   const betStatusEl = $('[data-betstatus]')
-  const tapeEl = $('[data-tape]') as HTMLElement
   const resultsEl = $('[data-results]') as HTMLElement
   const flashEl = $('[data-flash]') as HTMLElement
 
@@ -1984,40 +1968,6 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
   })
 
   // (Section 8 — the deposit/become-the-house sheet — moved to the /house tab.)
-
-  // ---------------------------------------------------------------- //
-  //  9) LIVE TAPE — bottom-left ledger; render the host's tape array
-  // ---------------------------------------------------------------- //
-  let lastTapeId = -1
-  function renderTape(): void {
-    const rows = host.data.tape
-    const newest = rows[0]
-    if (!newest || newest.id === lastTapeId) return
-    lastTapeId = newest.id
-    // ALL rows stay in normal ink — no "is-old" half-grey muting. The subtle
-    // top fade-mask on .e05-tape is the only ageing cue. UP green / DOWN red.
-    tapeEl.innerHTML = rows
-      .map(bet => {
-        const sideCls = bet.side === 'UP' ? 'e05-side--up' : 'e05-side--down'
-        const arrow = bet.side === 'UP' ? ico('up', 0.85) : ico('down', 0.85)
-        return (
-          `<div class="e05-row ed-stream">` +
-          `<span class="e05-name">${escapeHtml(bet.name)}</span>` +
-          `<span class="e05-verb">bet</span>` +
-          `<span class="e05-amt tnum">$${fmt(bet.amountUsd)}</span>` +
-          `<span class="e05-side ${sideCls}"><span class="e05-tape-arrow">${arrow}</span> ${bet.side}</span>` +
-          `</div>`
-        )
-      })
-      .join('')
-  }
-  function escapeHtml(s: string): string {
-    return s.replace(
-      /[&<>"]/g,
-      c =>
-        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] || c,
-    )
-  }
 
   // ---------------------------------------------------------------- //
   //  9b) RESULTS LOG — top-right, recent settled outcomes (UX item V)
@@ -2529,8 +2479,7 @@ export function mount(root: HTMLElement, host: CrashHost): () => void {
       }
     }
 
-    // tape + results log + flash
-    renderTape()
+    // results log + flash
     renderResults()
     syncFlash()
 

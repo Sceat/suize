@@ -14,7 +14,36 @@
    ========================================================================== */
 
 .dxd-page {
+  position: relative;
   padding-top: clamp(96px, 12vw, 150px);
+  /* THE LIT TOP — this page has no hero shader/ocean (the home's dark lift),
+     so on near-black it read as a flat, edge-darkened box. A top accent plume
+     (the page's OWN background, so it always seats behind content + over the
+     backdrop vignette, and scrolls away as you read) gives it the same blue-lit
+     dark character as the home. LIGHT: a faint wash; DARK: the real lift. */
+  background-image: radial-gradient(
+    120% 100% at 50% 0%,
+    var(--blue-wash),
+    transparent 62%
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 680px;
+}
+:root[data-theme='dark'] .dxd-page {
+  background-image:
+    radial-gradient(
+      120% 100% at 50% 0%,
+      color-mix(in srgb, var(--accent) 16%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      90% 100% at 80% 0%,
+      color-mix(in srgb, var(--accent) 7%, transparent),
+      transparent 72%
+    );
+  background-position: 50% 0, 80% 0;
+  background-size: 100% 760px, 100% 520px;
+  background-repeat: no-repeat;
 }
 
 /* the docs stations breathe a little tighter than the marketing stations —
@@ -51,6 +80,15 @@
   border-radius: var(--r-12) var(--r-12) 0 0;
   background: var(--edge-lit);
   pointer-events: none;
+}
+/* DARK lifts the card body a touch more solid — at 86/64% over near-black the
+   glass read nearly into the floor; 94/76% keeps the frost but reads present. */
+:root[data-theme='dark'] .dxd-glass {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ink-raised) 94%, transparent),
+    color-mix(in srgb, var(--ink-raised) 76%, transparent)
+  );
 }
 
 /* ==========================================================================
@@ -152,9 +190,9 @@
 }
 
 /* ==========================================================================
-   SECTION 1 · THE ONBOARDING LADDER — four glass rungs, high-level → low-
+   SECTION 1 · THE ONBOARDING LADDER — three glass rungs, high-level → low-
    level. Each rung: the tier head (mono tier no + serif title + who line)
-   over three labeled fact columns (you / Suize / paid). Tier 3 embeds the
+   over three labeled fact columns (you / Suize / paid). Tier 2 embeds the
    approved loop demo below its facts. No new colour, no new font, no new
    animation — reveals ride the shared Reveal/scrub helpers only.
    ========================================================================== */
@@ -272,7 +310,7 @@
 .dxd-tier__example .dxd-code__pre {
   margin: 0;
 }
-/* Tier 3's embedded demo — the approved loop, breathing inside the rung */
+/* Tier 2's embedded demo — the approved loop, breathing inside the rung */
 .dxd-tier .dxd-loop {
   margin-top: clamp(22px, 3vw, 34px);
   padding-top: clamp(18px, 2.4vw, 26px);
@@ -304,7 +342,7 @@
 }
 
 /* ==========================================================================
-   THE LOOP DEMO (Tier 3) — asymmetric 5/7 split: the one-liner card
+   THE LOOP DEMO (Tier 2) — asymmetric 5/7 split: the one-liner card
    anchors left, the animated sequence runs down the right.
    ========================================================================== */
 .dxd-loop {
