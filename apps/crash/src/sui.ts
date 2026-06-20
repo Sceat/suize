@@ -160,26 +160,46 @@ export const read_trade_amounts = async (
     ],
   })
 
-  const res = await client.devInspectTransactionBlock({
-    transactionBlock: tx,
-    // devInspect needs a parseable sender; the zero address is fine for a pure
-    // view. safe_sender() coerces undefined/null/'' so we never send a bad arg.
-    sender: safe_sender(opts.sender),
-  })
-
-  if (res.error) throw new Error(`get_trade_amounts devInspect: ${res.error}`)
-
-  // The last command is the get_trade_amounts call; it returns two u64s.
-  const results = res.results ?? []
-  const last = results[results.length - 1]
-  const ret = last?.returnValues
-  if (!ret || ret.length < 2)
-    throw new Error('get_trade_amounts returned no values')
-
-  // returnValues entries are [ byteArray, typeString ].
-  const ask_cost = u64_from_bytes(ret[0][0])
-  const bid_payout = u64_from_bytes(ret[1][0])
-  return { ask_cost, bid_payout }
+  // Bound each devInspect: the shared public testnet fullnode rate-limits / CORS-
+  // stalls the high-frequency odds + cash-out polls, and a HUNG fetch would freeze
+  // a poll forever (odds → "Pricing…", cash-out → stuck "+0"). Timeout every attempt
+  // and retry ONCE on a transient (timeout/network) failure — but NEVER on a protocol
+  // result (res.error / MoveAbort, e.g. an off-band strike), which is deterministic
+  // so a retry is futile; surface it immediately so the caller can react.
+  const TIMEOUT_MS = 8_000
+  const inspect = async (): Promise<TradeAmounts> => {
+    const res = await Promise.race([
+      client.devInspectTransactionBlock({
+        transactionBlock: tx,
+        // devInspect needs a parseable sender; the zero address is fine for a pure
+        // view. safe_sender() coerces undefined/null/'' so we never send a bad arg.
+        sender: safe_sender(opts.sender),
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error('get_trade_amounts: devInspect timed out')),
+          TIMEOUT_MS,
+        ),
+      ),
+    ])
+    if (res.error) throw new Error(`get_trade_amounts devInspect: ${res.error}`)
+    // The last command is the get_trade_amounts call; it returns two u64s.
+    const results = res.results ?? []
+    const last = results[results.length - 1]
+    const ret = last?.returnValues
+    if (!ret || ret.length < 2)
+      throw new Error('get_trade_amounts returned no values')
+    // returnValues entries are [ byteArray, typeString ].
+    return { ask_cost: u64_from_bytes(ret[0][0]), bid_payout: u64_from_bytes(ret[1][0]) }
+  }
+  try {
+    return await inspect()
+  } catch (e) {
+    // Deterministic protocol result → surface now, never retry. Transient
+    // (timeout/network) → one retry covers a single fullnode blip.
+    if (/devInspect: /.test((e as Error).message ?? '')) throw e
+    return await inspect()
+  }
 }
 
 // ============================================================================

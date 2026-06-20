@@ -14,8 +14,6 @@
  *     names resolve via SuiNS first.
  *   · The assistant runs the keyless brain (Claude); every write it proposes is a
  *     confirm card the user taps + signs locally (the number wall).
- *
- * DEMO (DEV-only `?demo=1`): the sample books + the SF assistant choreography.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
@@ -51,7 +49,6 @@ import {
   exactWhen,
   fullWhen,
   renewsIn,
-  useDemoMoney,
   type LedgerRow,
   type SubRow,
 } from './money';
@@ -238,20 +235,18 @@ async function reverseHandle(address: string, client: SuiClient): Promise<string
 export interface WalletDeckProps {
   ownerAddress: string;
   handle: string;
-  /** DEV-only populated demo (sample books + the SF assistant choreography) */
-  demo?: boolean;
   /** opens the business face */
   onOpenBusiness?: () => void;
   /** disconnects the zkLogin session (the identity menu's Sign out) */
   onSignOut?: () => void;
 }
 
-export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness, onSignOut }: WalletDeckProps) {
+export function WalletDeck({ ownerAddress, handle, onOpenBusiness, onSignOut }: WalletDeckProps) {
   const client = useSuiClient() as unknown as SuiClient;
   const { mutateAsync: signTransaction } = useSignTransaction();
   const api = useAccount(ownerAddress, handle);
   const agent = useAgent(ownerAddress, api.sendWallet, api.spendFromSubaccount);
-  const subsApi = useSubscriptions(ownerAddress, !demo);
+  const subsApi = useSubscriptions(ownerAddress, true);
   const { theme, toggle } = useTheme();
   const [agentOn, setAgentOn] = useState(() => getAgentEnabled(ownerAddress));
   // Keep a LIVE ref so an in-flight brain turn's frozen executor reads the CURRENT
@@ -276,24 +271,14 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
   // the identity dropdown (navbar) — new local UI state, no data dependency
   const [idOpen, setIdOpen] = useState(false);
 
-  // DEMO money (DEV-only choreography) vs the REAL on-chain state
-  const dm = useDemoMoney();
-  const yourMoney = demo ? dm.yourMoney : api.state.wallet.ui;
-  const agentBalance = demo ? dm.balance : agent.balance.ui;
-  const agentConnected = demo ? true : agent.armed;
+  const yourMoney = api.state.wallet.ui;
+  const agentBalance = agent.balance.ui;
+  const agentConnected = agent.armed;
   const busy = api.pending != null;
-  const displayHandle = demo ? WALLET.handle : api.state.handle || handle || '…@suize';
+  const displayHandle = api.state.handle || handle || '…@suize';
 
   // ── map the real on-chain state into the list rows ─────────────────────────
   const subs = useMemo<SubRow[]>(() => {
-    if (demo) {
-      return WALLET.books.subs.map((s, i) => ({
-        key: String(i),
-        name: s.name,
-        renews: s.renews,
-        perMonth: s.perMonth,
-      }));
-    }
     // push-not-pull: each renewal is paid inline from the owner's wallet, so the
     // honest line is the paid-through clock — a LAPSED sub (past its paid-through,
     // no auto-renew covered it) must SAY so, never an optimistic guess.
@@ -308,17 +293,9 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
       perMonth: s.amountUi,
       warn: s.lapsed,
     }));
-  }, [demo, subsApi.rows]);
+  }, [subsApi.rows]);
 
   const activity = useMemo<LedgerRow[]>(() => {
-    if (demo) {
-      const rows = dm.booked ? [WALLET.books.flightRow, ...WALLET.books.activity] : WALLET.books.activity;
-      return rows.map((a, i) => ({
-        id: `d${i}`, what: a.what, who: a.who, when: a.when, whenTitle: a.whenTitle, amount: a.amount,
-        // the booked flight (index 0 once booked) is the AGENT acting; the rest is you.
-        account: dm.booked && i === 0 ? 'agent' : 'main',
-      }));
-    }
     const agentAddr = agent.agentAddress?.toLowerCase();
     const apiRows: { ts: number; row: LedgerRow }[] = api.state.activity.map((a) => {
       const isAgent = agentAddr != null && a.counterparty?.toLowerCase() === agentAddr;
@@ -376,26 +353,23 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
       },
     }));
     return [...apiRows, ...sendRows].sort((a, b) => b.ts - a.ts).map((r) => r.row);
-  }, [demo, dm.booked, api.state.activity, agent.agentAddress, agent.sends]);
+  }, [api.state.activity, agent.agentAddress, agent.sends]);
 
-  // ── the sheet ops — demo mutates locally; production runs the real verbs ───
+  // ── the sheet ops — the real on-chain verbs ───
   async function onSend(amt: number, to: string) {
-    if (demo) return dm.send(amt);
     const resolved = await resolveRecipient(to, client);
     if (!resolved.address) throw new Error(`Could not find ${to} — check the name and try again.`);
     // pass the typed recipient as the optimistic row's label (what the user knows).
     await api.sendWallet({ amountRaw: toRaw(amt), to: resolved.address, label: to.trim() });
   }
   async function onFundAgent(amt: number) {
-    if (demo) return dm.topUp(amt);
     await agent.fund(toRaw(amt));
   }
   async function onWithdrawAgent(amt: number) {
-    if (demo) return;
     await agent.withdraw(toRaw(amt)); // back to your wallet (MAIN member signs alone)
   }
   async function onConfirmCancel() {
-    if (demo || !cancelSub) return;
+    if (!cancelSub) return;
     await api.cancelSubscription(cancelSub.key);
     subsApi.refresh();
   }
@@ -469,16 +443,17 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
           const canon = await reverseHandle(to, client);
           const label = canon ?? `${to.slice(0, 6)}…${to.slice(-4)}`;
           const doSend = async () => {
-            await agent.spend(to, toRaw(amount)); // FROM the sub-account (the cap) — NEVER main
+            const digest = await agent.spend(to, toRaw(amount)); // FROM the sub-account (the cap) — NEVER main
             addKnownPayee(ownerAddress, to); // first successful send → a known payee
+            return digest;
           };
           if (plan.kind === 'auto') {
-            await doSend();
+            const digest = await doSend();
             recordAutoAction(ownerAddress, sig);
             return {
               kind: 'immediate',
               content: `Sent ${usd(amount)} to ${label} from the agent sub-account — auto-approved.`,
-              receipt: { title: canon ? `Sent to ${canon}` : `Sent to ${label}`, meta: `${usd(amount)} · auto` },
+              receipt: { title: canon ? `Sent to ${canon}` : `Sent to ${label}`, meta: `${usd(amount)} · auto`, digest },
             };
           }
           return {
@@ -494,8 +469,8 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
             ],
             cta: 'Send',
             commit: async () => {
-              await doSend();
-              return `Sent ${usd(amount)} to ${label}.`;
+              const digest = await doSend();
+              return { message: `Sent ${usd(amount)} to ${label}.`, digest };
             },
           };
         }
@@ -531,9 +506,9 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
             ],
             cta: 'Cancel subscription',
             commit: async () => {
-              await api.cancelSubscription(target.id);
+              const digest = await api.cancelSubscription(target.id);
               subsApi.refresh();
-              return `Cancelled ${target.label}.`;
+              return { message: `Cancelled ${target.label}.`, digest };
             },
           };
         }
@@ -553,11 +528,11 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
           const raw = partial ? toRaw(amt) : BigInt(agent.balance.raw);
           const doSweep = () => agent.withdraw(raw);
           if (plan.kind === 'auto') {
-            await doSweep();
+            const digest = await doSweep();
             return {
               kind: 'immediate',
               content: `Brought ${usd(amt)} back to your wallet — auto-approved.`,
-              receipt: { title: 'Brought funds back', meta: `${usd(amt)} · auto` },
+              receipt: { title: 'Brought funds back', meta: `${usd(amt)} · auto`, digest },
             };
           }
           return {
@@ -572,8 +547,8 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
             ],
             cta: 'Bring it back',
             commit: async () => {
-              await doSweep();
-              return `Brought ${usd(amt)} back to your wallet.`;
+              const digest = await doSweep();
+              return { message: `Brought ${usd(amt)} back to your wallet.`, digest };
             },
           };
         }
@@ -636,7 +611,7 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
               { k: 'Paid from', v: 'agent sub-account' },
             ],
             cta: `Publish · ${usd(price)}`,
-            commit: async (onStep) => publish(onStep),
+            commit: async (onStep) => ({ message: await publish(onStep) }),
           };
         }
         default:
@@ -653,7 +628,6 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
   // intermediary explainer sheet — the card's CTA acts directly. Popup blocked →
   // full-page fallback.
   function connectSubaccount() {
-    if (demo) return;
     const popup = window.open('/agent-connect?arm=1', 'suize-agent-arm', 'width=460,height=760');
     if (!popup) {
       window.location.href = '/agent-connect?arm=1';
@@ -701,7 +675,7 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
   // this is a no-op until memory is turned on. Registers the backend's derived
   // delegate key on a user-owned account so the agent can remember across sessions.
   useEffect(() => {
-    if (demo || !ownerAddress || memAccount) return;
+    if (!ownerAddress || memAccount) return;
     let live = true;
     void ensureMemwalAccount({
       owner: ownerAddress,
@@ -715,7 +689,7 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ownerAddress, demo]);
+  }, [ownerAddress]);
 
   // ── the LEFT split bars: each balance as a share of the combined total ──────
   const total = yourMoney + agentBalance;
@@ -780,8 +754,10 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
         .rc-idrow--out:hover { color: var(--rd-bear); }
 
         /* ── BODY: subscriptions LEFT · editorial CENTRE · Stillness chat RIGHT ── */
+        /* Money is the prominent surface: subs | money | chat. The chat takes ~45% of the
+           deck (owner-set) while the money side still leads on the left. */
         .rc-body { flex: 1 1 auto; min-height: 0; display: grid;
-          grid-template-columns: minmax(258px, 308px) minmax(0, 1fr) minmax(372px, 430px); }
+          grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) clamp(440px, 45%, 760px); }
         .rc-left { overflow-y: auto; padding: var(--pad); display: flex; flex-direction: column; gap: 16px; border-right: 1px solid var(--rd-hair); }
         .rc-mid { overflow-y: auto; padding: clamp(18px, 2vw, 30px) clamp(20px, 2.4vw, 40px); display: flex; flex-direction: column; gap: clamp(18px, 2.2vh, 28px); }
         .rc-right { min-height: 0; border-left: 1px solid var(--rd-hair); display: flex; flex-direction: column; }
@@ -1001,16 +977,14 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <span style={{ ...moneyStyle(14) }}>{money(s.perMonth)}<span style={{ color: FG4, fontWeight: 400, fontSize: 10.5 }}>/mo</span></span>
-                      {!demo ? (
-                        <button
-                          type="button"
-                          className="rc-cancel"
-                          disabled={busy}
-                          onClick={() => setCancelSub(subs.find((x) => x.key === s.key) ?? null)}
-                        >
-                          {WALLET.books.cancel}
-                        </button>
-                      ) : null}
+                      <button
+                        type="button"
+                        className="rc-cancel"
+                        disabled={busy}
+                        onClick={() => setCancelSub(subs.find((x) => x.key === s.key) ?? null)}
+                      >
+                        {WALLET.books.cancel}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1059,7 +1033,6 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
                   <button
                     type="button"
                     className="rc-arm"
-                    disabled={demo}
                     onClick={() => setAgentOn((v) => !v)}
                     aria-label={agentOn ? 'Pause agent' : 'Resume agent'}
                     style={{ color: agentOn ? BULL : BEAR, boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${agentOn ? BULL : BEAR} 32%, transparent)` }}
@@ -1078,12 +1051,11 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 'auto', paddingTop: 16, flexWrap: 'wrap' }}>
                     <button type="button" className="rc-btn rc-btn--warm" disabled={busy} onClick={() => setSheet('fundAgent')}>{WALLET.books.agent.fund}</button>
-                    <button type="button" className="rc-btn rc-btn--ghost" disabled={demo || busy} onClick={() => setSheet('withdrawAgent')}>{WALLET.books.agent.withdraw}</button>
+                    <button type="button" className="rc-btn rc-btn--ghost" disabled={busy} onClick={() => setSheet('withdrawAgent')}>{WALLET.books.agent.withdraw}</button>
                     <button
                       type="button"
                       className={`rc-btn ${agentOn ? 'rc-btn--danger' : 'rc-btn--ghost'}`}
                       style={{ marginLeft: 'auto' }}
-                      disabled={demo}
                       onClick={() => setAgentOn((v) => !v)}
                     >
                       {agentOn ? WALLET.books.agent.pause : WALLET.books.agent.resume}
@@ -1094,20 +1066,19 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
                   <div className="rc-auto">
                     <span className="rc-autolab">Auto-approve</span>
                     <div className="rc-seg">
-                      <button type="button" className={`rc-segb${dials.mode === 'each' ? ' on' : ''}`} disabled={demo} onClick={() => updateDials({ ...dials, mode: 'each' })}>Each</button>
-                      <button type="button" className={`rc-segb${dials.mode === 'under' ? ' on' : ''}`} disabled={demo} onClick={() => updateDials({ ...dials, mode: 'under' })}>
+                      <button type="button" className={`rc-segb${dials.mode === 'each' ? ' on' : ''}`} onClick={() => updateDials({ ...dials, mode:'each' })}>Each</button>
+                      <button type="button" className={`rc-segb${dials.mode === 'under' ? ' on' : ''}`} onClick={() => updateDials({ ...dials, mode:'under' })}>
                         Under&nbsp;$
                         <input
                           className="rc-capin"
                           value={dials.thresholdUsd}
                           inputMode="numeric"
                           aria-label="Auto-approve threshold in USDC"
-                          disabled={demo}
                           onClick={(e) => { e.stopPropagation(); updateDials({ ...dials, mode: 'under' }); }}
                           onChange={(e) => updateDials({ ...dials, thresholdUsd: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
                         />
                       </button>
-                      <button type="button" className={`rc-segb${dials.mode === 'full' ? ' on' : ''}`} disabled={demo} onClick={() => updateDials({ ...dials, mode: 'full' })}>Full auto</button>
+                      <button type="button" className={`rc-segb${dials.mode === 'full' ? ' on' : ''}`} onClick={() => updateDials({ ...dials, mode:'full' })}>Full auto</button>
                     </div>
                     <span style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 11.5, color: FG4 }}>new payees always confirm</span>
                   </div>
@@ -1160,25 +1131,23 @@ export function WalletDeck({ ownerAddress, handle, demo = false, onOpenBusiness,
           </section>
         </main>
 
-        {/* ── RIGHT — the Stillness assistant column ── */}
+        {/* ── RIGHT — the assistant pane (≤35%: floating history + centered conversation) ── */}
         <aside className="rc-right rc-fade" style={{ animationDelay: '90ms' }}>
           <AssistantPanel
-            demo={demo}
             agentOn={agentOn}
             ownerAddress={ownerAddress}
-            onBooked={demo ? dm.onBooked : undefined}
-            runAgentTool={demo ? undefined : runAgentTool}
-            memwalAccountId={demo ? undefined : memAccount ?? undefined}
+            runAgentTool={runAgentTool}
+            memwalAccountId={memAccount ?? undefined}
           />
         </aside>
       </div>
 
       {/* ── THE MONEY SHEETS ── */}
       {sheet === 'addFunds' ? (
-        <AddFundsSheet handle={displayHandle} address={ownerAddress} requestEnabled={demo} onClose={() => setSheet(null)} />
+        <AddFundsSheet handle={displayHandle} address={ownerAddress} requestEnabled={false} onClose={() => setSheet(null)} />
       ) : null}
       {sheet === 'send' ? (
-        <SendSheet available={yourMoney} onSend={onSend} claimEnabled={demo} onClose={() => setSheet(null)} />
+        <SendSheet available={yourMoney} onSend={onSend} claimEnabled={false} onClose={() => setSheet(null)} />
       ) : null}
       {sheet === 'fundAgent' ? (
         <FundAgentSheet available={yourMoney} onFund={onFundAgent} onClose={() => setSheet(null)} />

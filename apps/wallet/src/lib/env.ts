@@ -77,6 +77,11 @@ export const SUINS_PARENT = 'suize';
 export const EXPLORER_TX = (digest: string) =>
   `https://suiscan.xyz/${NETWORK}/tx/${digest}`;
 
+/** Walruscan blob page — where an anchored conversation blob LIVES on Walrus (the
+ *  "anchored ↗" badge points here, not to the Sui tx). */
+export const WALRUS_BLOB = (blobId: string) =>
+  `https://walruscan.com/${NETWORK}/blob/${blobId}`;
+
 /**
  * SuiVision tx-block URL for a digest — used by the chat confirm card's "View on
  * SuiVision" link after a send executes. Testnet → https://testnet.suivision.xyz/...;

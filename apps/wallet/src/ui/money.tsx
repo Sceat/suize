@@ -1,10 +1,8 @@
 /**
  * Shared MONEY surfaces (visual-first, owner law): the live subscriptions list,
- * the verifiable activity ledger, the custody note. PROP-DRIVEN — production
- * feeds real `useAccount` data; the DEV demo seam feeds the sample books.
- * `useDemoMoney` is the demo-only balance choreography (the SF booking tick).
+ * the verifiable activity ledger, the custody note. PROP-DRIVEN — fed real
+ * `useAccount` data by the wallet deck.
  */
-import { useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUpRight } from '../system';
 import { WALLET, money, signedMoney } from './copy';
 
@@ -194,55 +192,4 @@ export function renewsIn(lastChargedMs: number, periodMs: number): string {
   const next = lastChargedMs + periodMs;
   const days = Math.max(0, Math.ceil((next - Date.now()) / 86400000));
   return days === 0 ? 'renews today' : `renews in ${days} day${days === 1 ? '' : 's'}`;
-}
-
-// ── DEMO-ONLY (the DEV seam) — the SF-booking balance choreography ────────────
-
-export function useDemoMoney() {
-  const reduce = useMemo(
-    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-    [],
-  );
-  const [balance, setBalance] = useState<number>(WALLET.balanceStart);
-  const [yourMoney, setYourMoney] = useState<number>(WALLET.books.your.amount);
-  const [paidFlash, setPaidFlash] = useState(false);
-  const [booked, setBooked] = useState(false);
-  const tickingRef = useRef(false);
-
-  function onBooked() {
-    if (tickingRef.current) return;
-    tickingRef.current = true;
-    setBooked(true);
-    setPaidFlash(true);
-    const start = WALLET.balanceStart;
-    const end = WALLET.balanceStart - WALLET.flightAmount;
-    if (reduce) {
-      setBalance(end);
-      return;
-    }
-    const t0 = performance.now();
-    const DUR = 900;
-    const tick = (now: number) => {
-      const p = Math.min(1, (now - t0) / DUR);
-      const eased = 1 - Math.pow(1 - p, 3);
-      setBalance(start + (end - start) * eased);
-      if (p < 1) requestAnimationFrame(tick);
-      else setBalance(end);
-    };
-    requestAnimationFrame(tick);
-  }
-
-  const topUp = (amt: number) => {
-    const a = Math.min(amt, yourMoney);
-    setYourMoney((v) => v - a);
-    setBalance((v) => v + a);
-  };
-  const withdraw = (amt: number) => {
-    const a = Math.min(amt, balance);
-    setBalance((v) => v - a);
-    setYourMoney((v) => v + a);
-  };
-  const send = (amt: number) => setYourMoney((v) => Math.max(0, v - amt));
-
-  return { balance, yourMoney, paidFlash, booked, onBooked, topUp, withdraw, send };
 }

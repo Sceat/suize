@@ -134,7 +134,7 @@ const RPC_TIMEOUT_MS = 30_000;
 export interface BrainTurnHandlers {
   onChunk: (delta: string) => void;
   onToolUse: (toolUseId: string, tool: string, input: Record<string, unknown>) => void;
-  onDone: (stopReason: string | null, limited?: boolean) => void;
+  onDone: (stopReason: string | null, limited?: boolean, contextTokens?: number) => void;
   onError: (message: string) => void;
 }
 const brainTurns = new Map<string, BrainTurnHandlers>();
@@ -396,7 +396,7 @@ async function handleMessage(packet: ServerPacket, ws: WebSocket): Promise<void>
         const h = brainTurns.get(packet.id);
         if (h) {
           brainTurns.delete(packet.id);
-          h.onDone(packet.data.stopReason, packet.data.limited);
+          h.onDone(packet.data.stopReason, packet.data.limited, packet.data.contextTokens);
         }
       }
       return;

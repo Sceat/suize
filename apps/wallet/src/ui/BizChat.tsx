@@ -1,7 +1,7 @@
 /**
  * The BUSINESS ANALYTICS CHAT — read-side narration only (the number wall
- * holds). PRODUCTION starts honest-empty (no fabricated revenue talk, chips
- * hidden); the DEV `demo` seam seeds the sample exchange + the chart artifact.
+ * holds). Starts honest-empty (no fabricated revenue talk) and answers
+ * honestly until there is real revenue to narrate.
  */
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp } from '../system';
@@ -15,13 +15,8 @@ interface BizMsg {
   list?: readonly { k: string; v: string }[];
 }
 
-const SEED: BizMsg[] = [
-  { who: 'you', text: BUSINESS.thread[0].text },
-  { who: 'ai', text: BUSINESS.thread[1].text, bars: true },
-];
-
-export function BizChat({ demo = false }: { demo?: boolean }) {
-  const [msgs, setMsgs] = useState<BizMsg[]>(demo ? SEED : []);
+export function BizChat() {
+  const [msgs, setMsgs] = useState<BizMsg[]>([]);
   const [typing, setTyping] = useState(false);
   const [draft, setDraft] = useState('');
   const threadRef = useRef<HTMLDivElement>(null);
@@ -40,18 +35,13 @@ export function BizChat({ demo = false }: { demo?: boolean }) {
     }, 1000);
   }
 
-  function onChip(i: number) {
-    const r = BUSINESS.chipReplies[i];
-    ask(BUSINESS.chips[i], { who: 'ai', text: r.text, list: 'list' in r ? r.list : undefined });
-  }
-
   function onSend(e: React.FormEvent) {
     e.preventDefault();
     const t = draft.trim();
     if (!t) return;
     setDraft('');
-    // demo plays the analyst; production answers honestly (no revenue to narrate yet)
-    ask(t, { who: 'ai', text: demo ? BUSINESS.scriptedReply : BUSINESS.prodReply });
+    // answer honestly — no revenue to narrate yet
+    ask(t, { who: 'ai', text: BUSINESS.prodReply });
   }
 
   const maxBar = Math.max(...BUSINESS.week.bars);
@@ -63,7 +53,7 @@ export function BizChat({ demo = false }: { demo?: boolean }) {
         {BUSINESS.chatTitle}
       </div>
       <div className="rd-bizchat__thread" ref={threadRef}>
-        {!demo && msgs.length === 0 ? <p className="rd-empty-line">{BUSINESS.chatEmpty}</p> : null}
+        {msgs.length === 0 ? <p className="rd-empty-line">{BUSINESS.chatEmpty}</p> : null}
         {msgs.map((m, i) => (
           <Row key={i} who={m.who}>
             {m.text}
@@ -102,15 +92,6 @@ export function BizChat({ demo = false }: { demo?: boolean }) {
         ))}
         {typing ? <TypingRow /> : null}
       </div>
-      {demo ? (
-        <div className="rd-bizchat__chips">
-          {BUSINESS.chips.map((c, i) => (
-            <button key={c} type="button" className="rd-chip" onClick={() => onChip(i)}>
-              {c}
-            </button>
-          ))}
-        </div>
-      ) : null}
       <form className="rd-bizchat__composer" onSubmit={onSend}>
         <input
           value={draft}

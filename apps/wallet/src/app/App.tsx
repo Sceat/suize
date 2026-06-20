@@ -15,9 +15,8 @@
  * the merchant feed exists. Everything renders inside the `.rd` chassis (the
  * ambient field + grain that give the glass its contrast).
  *
- * DEV-ONLY PREVIEW (import.meta.env.DEV — stripped from production):
- *   `?preview=hello|claim|home|business` renders a screen WITHOUT real OAuth;
- *   `&demo=1` paints the populated sample books + the assistant choreography.
+ * Auth is the ONLY way in — there is no preview/bypass route. Every screen is
+ * gated behind the real Enoki zkLogin session.
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
@@ -41,21 +40,6 @@ const WS_CONNECT_TIMEOUT_MS = 28_000;
 type Phase = 'authenticating' | 'onboarding' | 'home' | 'redirecting';
 type Face = 'wallet' | 'business';
 
-// ── DEV-ONLY preview states (tree-shaken from production via import.meta.env.DEV) ──
-type Preview = 'hello' | 'claim' | 'home' | 'business' | null;
-const PREVIEW_STATES = ['hello', 'claim', 'home', 'business'] as const;
-
-/** Read `?preview=<state>` — only ever called inside an `import.meta.env.DEV` guard. */
-function readPreview(): Preview {
-  if (typeof window === 'undefined') return null;
-  const p = new URLSearchParams(window.location.search).get('preview');
-  return (PREVIEW_STATES.includes(p as (typeof PREVIEW_STATES)[number]) ? p : null) as Preview;
-}
-
-/** DEV preview-only placeholder identity (never reaches production). */
-const PREVIEW_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000000';
-const PREVIEW_HANDLE = 'alice@suize';
-
 export function App() {
   return <RealApp />;
 }
@@ -77,71 +61,30 @@ function RealApp() {
   const [optimisticHandle, setOptimisticHandle] = useState('');
   const displayHandle = identity.handle || optimisticHandle;
 
-  // DEV-ONLY: a `?preview=` state suppresses real auth so the design hatch renders
-  // in isolation. `false` in production (folds away → tree-shaken).
-  const previewActive = import.meta.env.DEV && readPreview() !== null;
-
   // ── safety timeout: never spin forever on the Loader ──────────────────────────
   const waitingForClick = auth.status === 'idle' && auth.canSignIn;
   useEffect(() => {
-    if (previewActive) return;
     if (phase !== 'authenticating') return;
     if (waitingForClick) return; // showing the Hello CTA — don't bounce the user
     const ms = auth.status === 'signed-in' ? WS_CONNECT_TIMEOUT_MS : SIGN_IN_TIMEOUT_MS;
     const t = setTimeout(() => setPhase('redirecting'), ms);
     return () => clearTimeout(t);
-  }, [previewActive, auth.status, phase, waitingForClick]);
+  }, [auth.status, phase, waitingForClick]);
 
   // ── route by auth + handle once signed in ─────────────────────────────────────
   useEffect(() => {
-    if (previewActive) return;
     if (auth.status === 'signed-in' && phase === 'authenticating') {
       if (identity.loading) return; // wait for handle resolution
       setPhase(identity.hasHandle ? 'home' : 'onboarding');
     }
-  }, [previewActive, auth.status, phase, identity.loading, identity.hasHandle]);
+  }, [auth.status, phase, identity.loading, identity.hasHandle]);
 
   // ── redirect to the landing on failure/cancel/timeout ─────────────────────────
   useEffect(() => {
-    if (previewActive) return;
     if (phase === 'redirecting' && typeof window !== 'undefined') {
       window.location.href = LANDING_URL;
     }
-  }, [previewActive, phase]);
-
-  // ── DEV-ONLY preview (stripped from production) ───────────────────────────────
-  if (import.meta.env.DEV) {
-    const preview = readPreview();
-    if (preview) {
-      const demo = new URLSearchParams(window.location.search).get('demo') === '1';
-      const owner = auth.ownerAddress ?? PREVIEW_ADDRESS;
-      const handle = identity.handle || PREVIEW_HANDLE;
-      return (
-        <Chassis business={preview === 'business'}>
-          {preview === 'hello' ? <HelloScreen onGoogle={() => {}} /> : null}
-          {preview === 'claim' ? <ClaimFlow preview onDone={() => {}} /> : null}
-          {preview === 'home' ? (
-            <WalletDeck
-              ownerAddress={owner}
-              handle={handle}
-              demo={demo}
-              onOpenBusiness={() => {}}
-              onSignOut={() => {}}
-            />
-          ) : null}
-          {preview === 'business' ? (
-            <BusinessConsole
-              ownerAddress={owner}
-              handle={handle}
-              demo={demo}
-              onBack={() => {}}
-              onSignOut={() => {}}
-            />
-          ) : null}
-        </Chassis>
-      );
-    }
-  }
+  }, [phase]);
 
   // ── REAL phases ───────────────────────────────────────────────────────────────
   if (phase === 'authenticating' || phase === 'redirecting') {

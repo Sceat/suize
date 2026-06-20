@@ -1563,66 +1563,14 @@ export function App() {
     }
   }, [addr, manager_id, signAndExecute, client, refresh_balances])
 
-  // ----- AUTO-RECOVER stranded game-account funds (ONCE per manager) ----------
-  // Money can sit in the manager's INTERNAL balance — settled winnings redeemed
-  // via an external path, an old redeem from before the auto-sweep, or leftover
-  // bet-funding buffer — and the WALLET is the only balance the UI reliably shows.
-  // So on load we sweep any manager balance back to the wallet via
-  // router::withdraw_all (gasless, no rake, user-signed): funds never strand and
-  // the displayed balance is always whole, with no button to hunt for.
-  //
-  // Bulletproof by construction: the manager is resolved DIRECTLY (fetch_manager,
-  // proven to work in-browser) so a no-bet session where the manager_id STATE never
-  // landed still recovers; the balance is read via read_manager_balance's
-  // devInspect-free fallback. Skips silently when empty (no needless tx) and takes
-  // the global write lock so it can never race a bet/claim and strand it. The ref
-  // is claimed synchronously right after the resolve await, so the manager_id
-  // null→resolved double-render can't fire two sweeps.
-  const swept_for_ref = useRef<string | null>(null)
-  useEffect(() => {
-    if (!addr) return
-    let alive = true
-    ;(async () => {
-      try {
-        const mgr = manager_id ?? (await fetch_manager(addr))
-        if (!alive || !mgr) return
-        if (swept_for_ref.current === mgr) return
-        swept_for_ref.current = mgr // claim the slot (atomic: no await before this)
-        const bal = await read_manager_balance(client, mgr, addr)
-        // Skip a NEGLIGIBLE balance: never fire a tx (or a misleading "Moved
-        // $0.00" notice) for sub-cent dust — e.g. leftover bet-funding buffer.
-        // The manual Withdraw + the redeem-path sweep still take the FULL balance,
-        // and the dust still shows in the displayed total (manager + wallet), so
-        // nothing is hidden or stranded. 0.01 dUSDC = 10_000 base units (6-dp).
-        if (!alive || bal < 10_000n) return
-        // Another sponsored write holds the lock (a bet/claim in flight) — defer and
-        // let a later resolution retry, never race it.
-        if (tx_pending_ref.current) {
-          swept_for_ref.current = null
-          return
-        }
-        set_tx_pending(true)
-        try {
-          const res = await signAndExecute({
-            transaction: build_withdraw_all_tx(mgr),
-          })
-          await client.waitForTransaction({ digest: res.digest })
-          if (!alive) return
-          set_notice(`Moved ${fmt_usd(bal)} to your wallet.`)
-          set_notice_kind(null)
-          refresh_balances()
-        } finally {
-          set_tx_pending(false)
-        }
-      } catch {
-        // best-effort — allow a retry on the next manager resolution
-        if (alive) swept_for_ref.current = null
-      }
-    })()
-    return () => {
-      alive = false
-    }
-  }, [addr, manager_id, client, signAndExecute, refresh_balances])
+  // NOTE (2026-06-19 reduction): the on-load BALANCE auto-sweep was REMOVED. It
+  // fired router::withdraw_all on every load with ≥1¢ of leftover dust, grabbing
+  // the global tx_pending lock — which greys BOTH bet buttons while it runs (up to
+  // ~8s if the WS is still connecting) and adds a doomed/slow tx on a flaky sponsor.
+  // It was a THIRD redundant recovery: the redeem path already appends withdraw_all
+  // (settled wins land in the wallet), and read_manager_balance's getObject fallback
+  // surfaces any leftover in the displayed total, recoverable via the manual Withdraw.
+  // Net: recovery without the on-load lock churn that blocked betting.
 
   // ----- SEED the GAINS/LOSS log on load — from ON-CHAIN EVENTS (D2) ----------
   // So past results (WINS INCLUDED) show after a refresh. Fires ONCE per manager

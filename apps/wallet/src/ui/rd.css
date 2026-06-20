@@ -647,131 +647,143 @@ grown into an app surface).
   30% { opacity: 1; transform: translateY(-3px); }
 }
 
-/* THE AGENTIC LOADER — terminal treatment. A dim `>` shell prompt that breathes, the
-   status verb in mono ink, and a blinking BLOCK cursor trailing it. No chrome — no
-   border, no plate, no glass fill: it sits inline like a quiet command echo. The
-   elapsed beat is pinned LEFT at a fixed width behind a hairline gutter rule, so the
-   time reads as a log timestamp and never shifts as the verb/cursor change width. */
-.rd-loader {
+/* THE THINKING LINE — lean, ChatGPT-style. A single verb (a step verb when pinned,
+   else a rotating thinking verb) read by a monochrome shimmer sweeping the word, with a
+   quiet elapsed counter that joins after a couple seconds. No chrome, no plate. */
+.rd-think {
   display: inline-flex;
   align-items: baseline;
   gap: 9px;
-  padding: 4px 2px;
-  font-family: var(--rd-mono);
-  font-size: 12px;
-  line-height: 1.3;
+  padding: 5px 2px;
+  font-family: var(--rd-sans);
+  font-size: 13.5px;
 }
-.rd-loader__t {
-  flex: 0 0 auto;
-  min-width: 26px; /* fixed width on the LEFT — the time never shifts with the verb/cursor */
-  align-self: center;
-  padding-right: 9px;
-  border-right: 1px solid var(--rd-hair);
-  font-variant-numeric: tabular-nums;
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
-  text-align: right;
-  color: var(--rd-fg-4);
-}
-/* the shell prompt — a quiet `>` in THE blue, one slow breath */
-.rd-loader__spark {
-  display: inline-flex;
-  align-items: center;
-  align-self: center;
-  font-family: var(--rd-mono);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--rd-blue);
-  animation: rd-loader-prompt 2.4s ease-in-out infinite;
-}
-@keyframes rd-loader-prompt {
-  0%, 100% { opacity: 0.45; }
-  50% { opacity: 1; }
-}
-/* the typed status verb — quiet mono ink, faintly breathing so it reads "live" */
-.rd-loader__label {
-  display: inline-flex;
-  align-items: baseline;
+.rd-think__verb {
   font-weight: 500;
   letter-spacing: 0.005em;
-  color: var(--rd-fg-2);
-  animation: rd-loader-breathe 2.4s ease-in-out infinite;
+  /* a light band travels across the word (a loader treatment, monochrome — not a
+     decorative heading gradient): fg-4 → fg → fg-4, swept by background-position. */
+  color: var(--rd-fg-3);
+  background: linear-gradient(100deg, var(--rd-fg-4) 32%, var(--rd-fg) 50%, var(--rd-fg-4) 68%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: rd-think-shimmer 1.7s linear infinite;
 }
-@keyframes rd-loader-breathe {
-  0%, 100% { color: var(--rd-fg-3); }
-  50% { color: var(--rd-fg); }
+@keyframes rd-think-shimmer {
+  from { background-position: 180% 0; }
+  to { background-position: -80% 0; }
 }
-/* the blinking BLOCK cursor — a solid half-em block, hard step blink (terminal cadence) */
-.rd-loader__ell {
-  display: inline-block;
-  width: 0.52em;
-  height: 1.02em;
-  margin-left: 3px;
-  transform: translateY(0.13em);
-  background: var(--rd-fg-2);
-  animation: rd-loader-caret 1.06s steps(1, end) infinite;
-}
-.rd-loader__ell::after { content: none; }
-@keyframes rd-loader-caret {
-  0%, 50% { opacity: 1; }
-  50.01%, 100% { opacity: 0; }
+.rd-think__t {
+  align-self: center;
+  font-family: var(--rd-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--rd-fg-4);
 }
 @media (prefers-reduced-motion: reduce) {
-  .rd-loader__spark,
-  .rd-loader__label,
-  .rd-loader__ell { animation: none; }
-  .rd-loader__spark { opacity: 0.75; }
-  .rd-loader__label { color: var(--rd-fg-2); }
-  /* a steady (non-blinking) caret still signals "in progress" without motion */
-  .rd-loader__ell { background: var(--rd-fg-3); opacity: 0.7; }
+  .rd-think__verb {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: var(--rd-fg-2);
+    color: var(--rd-fg-2);
+  }
+}
+
+/* "Thought for Xs" — the quiet collapsed thinking marker that sits above an answer
+   (the lean record of the beat that just finished). */
+.rd-thought {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 1px 0 1px 2px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--rd-fg-4);
+}
+.rd-thought svg {
+  color: var(--rd-fg-4);
+  opacity: 0.85;
 }
 
 /* a confirmed/declined action, collapsed into a permanent RECEIPT that stays in the
    thread (instead of the card vanishing). Reads as a line-item: a check, the action on
    the LEFT, the amount + status pinned RIGHT in mono (tabular) — like a printed receipt
    line, deliberately NOT a chat bubble. A dashed top rule is the torn-perforation cue. */
+/* A SETTLED on-chain action — deliberately NOT a chat bubble. A flat, full-width ledger
+   card: a status tick in a tinted chip, the action + a mono detail line, and an explorer
+   link on the right. Dark-ChatGPT-clean; the only accent is the success/fail tick. */
 .rd-receipt {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   align-self: stretch;
   width: 100%;
-  margin: 5px 0;
-  padding: 9px 12px;
-  border-radius: 9px;
-  background: var(--rd-glass-fill);
-  border: 1px solid var(--rd-hair);
-  border-top: 1px dashed var(--rd-hair-strong);
+  margin: 2px 0;
+  padding: 9px 11px 9px 9px;
+  border-radius: var(--rd-r-12);
+  background: var(--rd-raised);
+  border: 1px solid color-mix(in srgb, var(--rd-bull) 20%, var(--rd-hair));
   font-size: 12.5px;
   color: var(--rd-fg-2);
 }
-.rd-receipt > svg { color: var(--rd-blue); flex: 0 0 auto; }
-.rd-receipt__x {
+.rd-receipt__icon {
   flex: 0 0 auto;
-  width: 13px;
-  text-align: center;
-  color: var(--rd-fg-4);
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--rd-bull) 16%, transparent);
+  color: var(--rd-bull);
+}
+.rd-receipt__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 .rd-receipt__title {
-  flex: 1 1 auto;
-  font-weight: 560;
+  font-weight: 600;
   color: var(--rd-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .rd-receipt__meta {
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding-left: 10px;
   font-family: var(--rd-mono);
   font-size: 10.5px;
   letter-spacing: 0.01em;
   color: var(--rd-fg-3);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
-.rd-receipt.is-bad { opacity: 0.78; }
-.rd-receipt.is-bad .rd-receipt__title { color: var(--rd-fg-2); font-weight: 520; }
+.rd-receipt__link {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: var(--rd-r-8);
+  border: 1px solid var(--rd-hair);
+  background: color-mix(in srgb, var(--rd-raised) 55%, transparent);
+  font-family: var(--rd-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--rd-fg-3);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.16s ease, border-color 0.16s ease;
+}
+.rd-receipt__link:hover { color: var(--rd-blue); border-color: var(--rd-hair-blue); }
+.rd-receipt.is-bad { border-color: color-mix(in srgb, var(--rd-bear) 22%, var(--rd-hair)); }
+.rd-receipt.is-bad .rd-receipt__icon { background: color-mix(in srgb, var(--rd-bear) 14%, transparent); color: var(--rd-bear); }
+.rd-receipt.is-bad .rd-receipt__title { color: var(--rd-fg-2); font-weight: 560; }
 
 /* a LIVE, framed preview of a just-published site (mirrors the Deploy app's SitePreview):
    a scaled iframe thumbnail + a host/Open bar. The iframe is decorative; the whole card
@@ -1654,83 +1666,64 @@ its own line) */
   border-radius: var(--rd-r-22);
   overflow: hidden;
 }
-.rd-asst__head {
+
+/* ==========================================================================
+   CHAT — a FLOATING glass history control (top-left) over a CENTERED
+   conversation column (ChatGPT-clean). The chat pane itself is ≤35% wide.
+   ========================================================================== */
+.rd-asst--chat { position: relative; }
+
+/* ONE floating glass card pinned top-left: the recent-chats list with a "New chat" line
+   at the bottom of the SAME card. Compact — never a full-height rail/column. */
+.rd-hist {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  z-index: 7;
+  width: 214px;
+  max-height: min(340px, 54%);
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 13px 16px 11px;
-  border-bottom: 1px solid var(--rd-hair);
-  flex: 0 0 auto;
+  flex-direction: column;
+  border-radius: var(--rd-r-12);
+  border: 1px solid var(--rd-hair-strong);
+  overflow: hidden;
+  box-shadow: 0 18px 44px -24px rgba(8, 20, 38, 0.5);
 }
-.rd-asst__title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--rd-fg-3);
-  white-space: nowrap;
-}
-.rd-asst__arm {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--rd-fg-2);
-  white-space: nowrap;
-}
-/* recent conversations — a TOP-DOWN list (owner law: never a single line) */
-.rd-asst__recent {
+.rd-hist__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 10px 10px 8px;
-  border-bottom: 1px solid var(--rd-hair-2);
-  flex: 0 0 auto;
 }
-.rd-asst__recenthead {
+.rd-hist__empty {
+  font-family: var(--rd-serif);
+  font-style: italic;
+  font-size: 12.5px;
+  color: var(--rd-fg-4);
+  padding: 12px 10px;
+  margin: 0;
+  line-height: 1.5;
+}
+.rd-hist__item { display: flex; align-items: center; border-radius: var(--rd-r-8); transition: background 0.14s ease; }
+.rd-hist__item:hover { background: var(--rd-quiet); }
+.rd-hist__item.is-active { background: var(--rd-wash); }
+.rd-hist__pick {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 6px 6px;
-}
-.rd-asst__new {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 9px;
-  border-radius: var(--rd-r-8);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--rd-fg-3);
-  transition: color 0.16s ease, background 0.16s ease;
-}
-.rd-asst__new:hover {
-  color: var(--rd-blue);
-  background: var(--rd-wash);
-}
-.rd-asst__item {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
+  flex-direction: column;
+  gap: 1px;
   text-align: left;
-  padding: 7px 8px;
-  border-radius: var(--rd-r-8);
-  transition: background 0.16s ease;
+  padding: 7px 4px 7px 10px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
 }
-.rd-asst__item:hover {
-  background: var(--rd-quiet);
-}
-.rd-asst__item.is-active {
-  background: var(--rd-quiet);
-}
-.rd-asst__itemtitle {
+.rd-hist__title {
+  font-family: var(--rd-sans);
   font-size: 12.5px;
   font-weight: 500;
   color: var(--rd-fg-2);
@@ -1738,14 +1731,95 @@ its own line) */
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.rd-asst__item.is-active .rd-asst__itemtitle {
-  color: var(--rd-fg);
-  font-weight: 600;
-}
-.rd-asst__itemwhen {
+.rd-hist__item.is-active .rd-hist__title { color: var(--rd-fg); font-weight: 600; }
+.rd-hist__when { font-family: var(--rd-mono); font-size: 9.5px; letter-spacing: 0.03em; color: var(--rd-fg-4); }
+.rd-hist__del {
   flex: 0 0 auto;
-  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  border-radius: var(--rd-r-4);
+  background: transparent;
+  border: 0;
   color: var(--rd-fg-4);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.14s ease, color 0.14s ease, background 0.14s ease;
+}
+.rd-hist__item:hover .rd-hist__del { opacity: 1; }
+.rd-hist__del:hover { color: var(--rd-bear); background: var(--rd-bear-fill); }
+/* the "New chat" line — a footer row INSIDE the same card, divided by a hairline */
+.rd-hist__new {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 14px;
+  border: 0;
+  border-top: 1px solid var(--rd-hair);
+  background: transparent;
+  color: var(--rd-blue-deep);
+  font-family: var(--rd-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+:root[data-theme='dark'] .rd-hist__new { color: var(--rd-blue-bright); }
+.rd-hist__new:hover { background: var(--rd-wash); }
+
+/* the on-chain trace badge floats top-right (the Walrus anchor receipt) — a small glass
+   pill so it reads clearly over the conversation without stealing the eye. */
+.rd-asst__trace {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 7;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: var(--rd-r-8);
+  border: 1px solid var(--rd-hair);
+  background: color-mix(in srgb, var(--rd-raised) 80%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  backdrop-filter: blur(16px) saturate(1.5);
+  font-family: var(--rd-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--rd-fg-2);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: border-color 0.16s ease, color 0.16s ease;
+}
+.rd-asst__trace svg { color: var(--rd-bull); }
+a.rd-asst__trace:hover { border-color: var(--rd-hair-blue); color: var(--rd-fg); }
+
+/* the conversation is a centered column with a hard line-length cap (ChatGPT-clean).
+   It owns the inter-message spacing now (the thread's gap only reaches this wrapper). */
+.rd-asst__convo {
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* The chat pane is wide (≈45%), so the conversation + composer sit in a centered column
+   with a PERCENTAGE side gutter — never flush to the edges, at any panel width. The top
+   pad clears the floating controls. */
+.rd-asst--chat .rd-asst__thread { padding: 56px clamp(20px, 7%, 72px) 8px; }
+.rd-asst--chat .rd-asst__composer { width: calc(100% - clamp(40px, 14%, 144px)); max-width: 600px; margin: 4px auto 12px; }
+.rd-asst--chat .rd-asst__notice { text-align: center; }
+/* a deployed-site preview reads as a tidy card, never a full-width banner */
+.rd-asst--chat .rd-siteprev { max-width: 460px; }
+@media (max-width: 560px) {
+  .rd-hist { top: 10px; left: 10px; }
+  .rd-asst--chat .rd-asst__thread { padding: 50px 16px 8px; }
+  .rd-asst--chat .rd-asst__composer { width: calc(100% - 32px); }
 }
 .rd-asst__thread {
   flex: 1 1 auto;
@@ -1781,16 +1855,24 @@ its own line) */
   font-size: 11px;
   padding: 6px 11px;
 }
+/* THE COMPOSER — a two-row card: the input row on top, a thin tool BAR beneath it
+   (model · context · memory). The bar reads as a HUD ledge, divided from the input by a
+   faint hairline, not a second box. */
 .rd-asst__composer {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
   margin: 4px 12px 12px;
-  padding: 4px 4px 4px 14px;
-  border-radius: var(--rd-r-12);
+  padding: 5px 6px 6px;
+  border-radius: var(--rd-r-16);
   border: 1px solid var(--rd-hair);
   background: var(--rd-raised);
   flex: 0 0 auto;
+}
+.rd-composer__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 9px;
 }
 .rd-asst__composer input {
   flex: 1 1 auto;
@@ -1799,9 +1881,9 @@ its own line) */
   outline: none;
   background: transparent;
   font-family: var(--rd-sans);
-  font-size: 13px;
+  font-size: 13.5px;
   color: var(--rd-fg);
-  padding: 8px 0;
+  padding: 9px 0;
 }
 .rd-asst__composer input::placeholder {
   color: var(--rd-fg-4);
@@ -1810,7 +1892,218 @@ its own line) */
   width: 32px;
   height: 32px;
   border-radius: var(--rd-r-8);
+  flex: 0 0 auto;
 }
+
+/* ── the tool bar ── */
+.rd-composer__bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+  padding: 5px 2px 0;
+  border-top: 1px solid var(--rd-hair-2);
+}
+.rd-composer__spacer { flex: 1 1 auto; }
+.rd-composer__div { width: 1px; height: 14px; background: var(--rd-hair); flex: 0 0 auto; margin: 0 3px; }
+
+/* ── the model chip + glass popover ── */
+.rd-mdl { position: relative; flex: 0 0 auto; }
+.rd-mdl__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 9px;
+  border-radius: var(--rd-r-8);
+  border: 1px solid var(--rd-hair);
+  background: var(--rd-quiet);
+  color: var(--rd-fg-2);
+  font-family: var(--rd-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+.rd-mdl__chip:hover,
+.rd-mdl__chip.is-open { background: var(--rd-raised-2); color: var(--rd-fg); border-color: var(--rd-hair-strong); }
+.rd-mdl__chip > svg:first-child { color: var(--rd-blue); flex: 0 0 auto; }
+.rd-mdl__chipname { white-space: nowrap; }
+.rd-mdl__chev { color: var(--rd-fg-4); flex: 0 0 auto; transition: transform 0.2s var(--rd-ease); }
+.rd-mdl__chip.is-open .rd-mdl__chev { transform: rotate(180deg); }
+
+.rd-mdl__scrim { position: fixed; inset: 0; z-index: 40; }
+.rd-mdl__pop {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 9px);
+  z-index: 41;
+  width: 292px;
+  max-width: min(292px, 80vw);
+  padding: 8px;
+  border-radius: var(--rd-r-16);
+  transform-origin: left bottom;
+  animation: rd-pop-in 0.18s var(--rd-ease) both;
+  /* a MENU must read regardless of the bright chat/balance behind it — near-solid,
+     not the 52% glass fill (which washed out over the page). Blur stays for polish. */
+  background: color-mix(in srgb, var(--rd-raised) 97%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(24px) saturate(1.4);
+}
+@keyframes rd-pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.rd-mdl__poptitle {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+  padding: 4px 8px 8px;
+}
+.rd-mdl__list { display: flex; flex-direction: column; gap: 2px; }
+.rd-mdl__opt {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 9px;
+  border-radius: var(--rd-r-12);
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+.rd-mdl__opt:not(:disabled):hover { background: var(--rd-quiet); }
+.rd-mdl__opt.is-active { background: var(--rd-wash); border-color: var(--rd-hair-blue); }
+.rd-mdl__opt:disabled { cursor: default; }
+.rd-mdl__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: var(--rd-r-8);
+  background: var(--rd-raised-2);
+  color: var(--rd-fg-3);
+  border: 1px solid var(--rd-hair-2);
+}
+.rd-mdl__opt.is-active .rd-mdl__mark { background: color-mix(in srgb, var(--rd-blue) 14%, transparent); color: var(--rd-blue); }
+.rd-mdl__optbody { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 auto; }
+.rd-mdl__optname { font-size: 13px; font-weight: 600; color: var(--rd-fg); white-space: nowrap; }
+.rd-mdl__opt:disabled .rd-mdl__optname { color: var(--rd-fg-2); }
+.rd-mdl__opttag { font-size: 11px; color: var(--rd-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rd-mdl__badge {
+  flex: 0 0 auto;
+  font-family: var(--rd-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 6px;
+  border-radius: var(--rd-r-4);
+  color: var(--rd-fg-3);
+  background: var(--rd-raised-2);
+  border: 1px solid var(--rd-hair);
+}
+.rd-mdl__badge.is-free {
+  color: var(--rd-bull);
+  background: color-mix(in srgb, var(--rd-bull) 12%, transparent);
+  border-color: color-mix(in srgb, var(--rd-bull) 28%, transparent);
+}
+.rd-mdl__note {
+  margin: 8px 4px 2px;
+  padding-top: 9px;
+  border-top: 1px solid var(--rd-hair);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--rd-fg-2);
+}
+
+/* ── the glass hover tooltip (shared by context + memory) ── */
+.rd-ctx__pop,
+.rd-mem__pop {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  z-index: 41;
+  width: 224px;
+  padding: 11px 13px;
+  border-radius: var(--rd-r-12);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(5px);
+  transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s;
+  pointer-events: none;
+  /* near-solid so the tip reads over the bright thread, not the 52% glass fill */
+  background: color-mix(in srgb, var(--rd-raised) 97%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(24px) saturate(1.4);
+}
+.rd-ctx__poptitle {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rd-fg-3);
+}
+.rd-ctx__popbody,
+.rd-mem__pop { font-size: 11.5px; line-height: 1.5; color: var(--rd-fg-2); }
+
+/* ── the context-window meter ── */
+.rd-ctx {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px;
+  cursor: default;
+  outline: none;
+}
+.rd-ctx__pop { left: 50%; margin-left: -112px; }
+.rd-ctx:hover .rd-ctx__pop,
+.rd-ctx:focus-visible .rd-ctx__pop { opacity: 1; visibility: visible; transform: translateY(0); }
+.rd-ctx__ring { display: block; flex: 0 0 auto; }
+.rd-ctx__track { fill: none; stroke: var(--rd-hair); stroke-width: 2.4; }
+.rd-ctx__fill { fill: none; stroke: var(--rd-blue); stroke-width: 2.4; stroke-linecap: round; transition: stroke-dashoffset 0.4s var(--rd-ease); }
+.rd-ctx__pct {
+  font-family: var(--rd-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--rd-fg-3);
+}
+
+/* ── the memory switch ── */
+.rd-mem {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: var(--rd-r-8);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--rd-fg-4);
+  cursor: pointer;
+  font-family: var(--rd-sans);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.rd-mem:hover { background: var(--rd-quiet); color: var(--rd-fg-2); }
+.rd-mem.is-on { color: var(--rd-blue-deep); }
+.rd-mem.is-on:hover { background: var(--rd-wash); }
+.rd-mem:disabled { cursor: default; opacity: 0.7; }
+.rd-mem__label { white-space: nowrap; }
+.rd-mem__pop { right: 0; }
+.rd-mem:hover .rd-mem__pop,
+.rd-mem:focus-visible .rd-mem__pop { opacity: 1; visibility: visible; transform: translateY(0); }
 /* the confirm card without glass (the flat rail) still needs a surface */
 
 /* ==========================================================================

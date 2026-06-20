@@ -35,9 +35,12 @@ export type SignPersonalMessage = (args: { message: Uint8Array }) => Promise<{ s
 export interface TraceEntry {
   seq: number;
   ts: number;
-  kind: 'msg' | 'tool';
+  kind: 'msg' | 'tool' | 'receipt';
   role?: 'user' | 'assistant';
   text?: string;
+  /** receipt only — the secondary line (e.g. "$1.50 · done") and whether it FAILED/declined. */
+  meta?: string;
+  bad?: boolean;
   tool?: string;
   outcome?: 'ok' | 'err';
   txDigest?: string;
@@ -287,6 +290,7 @@ export interface FlushResult {
   digest: string;
   count: number;
   contentHashHex: string;
+  blobId: string;
 }
 
 /**
@@ -315,7 +319,7 @@ export async function flushAndAnchor(opts: {
     client: suiClient,
     signTransaction,
   });
-  return { digest, count: entries.length, contentHashHex: toHexStr(contentHash) };
+  return { digest, count: entries.length, contentHashHex: toHexStr(contentHash), blobId };
 }
 
 /**

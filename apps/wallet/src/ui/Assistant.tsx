@@ -5,46 +5,39 @@
  * (the deck) — NOT a duplicate switch here. This panel only READS `agentOn`
  * (to quiet the composer when the agent is paused).
  *
- * PRODUCTION is honest: the conversational layer is still being built, so the
- * thread starts empty (chips invite a try; the reply says plainly what works
- * today) and there is NO fabricated history and NO fabricated confirm card.
- * The `demo` seam (DEV-only) plays the full SF choreography — ask → plan →
- * found-it → confirm card → "Book it" → `onBooked()` ticks the host balances.
+ * The panel runs the REAL brain chat over the WS: the user types, the brain
+ * streams narration and proposes tools, and the WALLET runs each tool locally
+ * (reads answer instantly; writes surface an inline confirm card the user signs).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, Check, ExternalLink, Plus, ICON_STROKE } from '../system';
-import { ASSISTANT, WALLET, money, type ChatMsg } from './copy';
-import { Divider, Row, Spark, TypingRow, rich } from './bits';
+import { ArrowUp, Check, ExternalLink, Plus, X, Brain, Sparkles, Lock, ChevronDown, ICON_STROKE } from '../system';
+import {
+  listChats,
+  loadChat,
+  saveChat,
+  deleteChat,
+  newChatId,
+  getActiveChatId,
+  setActiveChatId,
+  type ChatMeta,
+  type ChatTurn,
+} from '../data/conversations';
+import { WALLET } from './copy';
+import { Row, Spark, rich } from './bits';
 import { wsBrainChat, wsBrainToolResult } from '../data/ws';
 import type { AgentToolRunner, ToolRun } from '../data/agentTools';
 import type { BrainMessage } from '@suize/shared/protocol';
 import { useSuiClient, useSignTransaction, useSignPersonalMessage } from '@mysten/dapp-kit';
-import { EXPLORER_TX } from '../lib/env';
+import { EXPLORER_TX, WALRUS_BLOB } from '../lib/env';
 import { readTraceBuffer, setTraceBuffer, flushAndAnchor, fetchLatestAnchor, restoreFromChain, type TraceEntry } from '../data/trace';
-
-const reduceMotion = () =>
-  typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-const SEED_STEPS = WALLET.thread.length + 1;
-
-type ConfirmState = 'pending' | 'done' | 'declined';
-
-interface Extra {
-  who: 'you' | 'ai';
-  text: string;
-}
 
 export interface AssistantPanelProps {
   /** READ-ONLY here — the Pause/Resume control lives on the agent card. Quiets the
    *  composer when the agent is paused. */
   agentOn: boolean;
-  /** the host ticks its balance + activity when the DEMO booking confirms */
-  onBooked?: () => void;
-  /** DEV demo seam — seeded thread + sample history + the confirm card */
-  demo?: boolean;
-  /** PRODUCTION: the wallet's agent tool runner (reads + write-confirm plans). When
-   *  present (and not demo), the panel runs the REAL brain chat instead of the stub. */
-  runAgentTool?: AgentToolRunner;
+  /** the wallet's agent tool runner (reads + write-confirm plans) — drives the real
+   *  brain chat: the user types, the brain proposes tools, the WALLET runs each one. */
+  runAgentTool: AgentToolRunner;
   /** the user's MemWal memory account id (if onboarded) — sent with each turn so the
    *  brain recalls/stores memory under it. Undefined = no memory this session. */
   memwalAccountId?: string;
@@ -54,19 +47,14 @@ export interface AssistantPanelProps {
 }
 
 export function AssistantPanel(props: AssistantPanelProps) {
-  // Production with the agent wired → the REAL brain chat. Demo (DEV-only) or a
-  // missing tool runner → the legacy panel (the SF choreography / honest empty thread).
-  if (!props.demo && props.runAgentTool) {
-    return (
-      <BrainAssistant
-        agentOn={props.agentOn}
-        runAgentTool={props.runAgentTool}
-        memwalAccountId={props.memwalAccountId}
-        ownerAddress={props.ownerAddress ?? ''}
-      />
-    );
-  }
-  return <LegacyAssistant {...props} />;
+  return (
+    <BrainAssistant
+      agentOn={props.agentOn}
+      runAgentTool={props.runAgentTool}
+      memwalAccountId={props.memwalAccountId}
+      ownerAddress={props.ownerAddress ?? ''}
+    />
+  );
 }
 
 // In-session transcript store — keeps the chat alive across unmounts (e.g. switching to
@@ -74,265 +62,235 @@ export function AssistantPanel(props: AssistantPanelProps) {
 // in-memory only (cleared on reload), so no chat history is persisted to disk.
 const TRANSCRIPTS = new Map<string, Turn[]>();
 
-function LegacyAssistant({ agentOn, onBooked, demo = false }: AssistantPanelProps) {
-  const reduce = useMemo(reduceMotion, []);
+// ─────────────────────────────────────────────────────────────────────────────
+// THE COMPOSER COCKPIT — the toolbar under the input (model · context · memory),
+// shared by both assistants. The wallet's brain is Claude Haiku today (fast,
+// included); stronger models are teased as "Soon" — when they land they bill live
+// to the agent's USDC balance over x402, so the picker shows the roadmap, no price.
+// ─────────────────────────────────────────────────────────────────────────────
+const MODELS: { id: string; name: string; tag: string; active?: boolean }[] = [
+  { id: 'haiku', name: 'Claude Haiku', tag: 'Fast · always on', active: true },
+  { id: 'opus', name: 'Claude Opus', tag: 'Deepest reasoning' },
+  { id: 'fable', name: 'Claude Fable', tag: 'Creative & precise' },
+  { id: 'gpt', name: 'GPT-5.5', tag: 'OpenAI frontier' },
+  { id: 'glm', name: 'GLM-5.2', tag: 'Open weights' },
+];
 
-  const [convo, setConvo] = useState<string>(demo ? 'sf' : 'new');
-  const [seedShown, setSeedShown] = useState(reduce ? SEED_STEPS : 0);
-  const seedRef = useRef(reduce ? SEED_STEPS : 0);
-  const setSeed = (n: number) => {
-    seedRef.current = n;
-    setSeedShown(n);
-  };
-  const [typing, setTyping] = useState(false);
-  const [confirm, setConfirm] = useState<ConfirmState>('pending');
-  const [payoffShown, setPayoffShown] = useState(false);
-  const [extras, setExtras] = useState<Record<string, Extra[]>>({});
-  const [draft, setDraft] = useState('');
-  const threadRef = useRef<HTMLDivElement>(null);
+/** The active model's REAL context window. Claude Haiku 4.5 = 200K tokens (NOT 1M — that's
+ *  the premium models). Server-side compaction isn't available on Haiku, so the meter is the
+ *  honest fill-then-drop signal and the tooltip says so. */
+const CTX_WINDOW = 200_000;
 
-  // ── seeded choreography (DEMO only; StrictMode/cleanup-safe via seedRef) ──
+/** Compact token count for the meter/tooltip: 850 → "850", 1234 → "1.2K", 200000 → "200K". */
+const fmtTokens = (n: number): string =>
+  n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K` : String(Math.max(0, Math.round(n)));
+
+/** The model chip + a glass popover. Only Haiku is selectable today; the rest read
+ *  "Soon" (they'll bill from the agent's USDC balance over x402). */
+function ModelMenu() {
+  const [open, setOpen] = useState(false);
   useEffect(() => {
-    if (!demo || convo !== 'sf') return;
-    if (seedRef.current >= SEED_STEPS) return;
-    if (seedRef.current > 0) {
-      setTyping(false);
-      setSeed(SEED_STEPS);
-      return;
-    }
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    const at = (ms: number, fn: () => void) => timers.push(setTimeout(fn, ms));
-    let t = 500;
-    WALLET.thread.forEach((m, i) => {
-      if (m.who === 'ai') {
-        at(t, () => setTyping(true));
-        t += 1050;
-        at(t, () => {
-          setTyping(false);
-          setSeed(i + 1);
-        });
-        t += 620;
-      } else {
-        at(t, () => setSeed(i + 1));
-        t += 650;
-      }
-    });
-    at(t + 150, () => setSeed(SEED_STEPS));
-    return () => {
-      timers.forEach(clearTimeout);
-      setTyping(false);
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [convo, demo]);
-
-  // auto-scroll to the foot on every thread change
-  useEffect(() => {
-    const el = threadRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [seedShown, typing, payoffShown, extras, convo, confirm]);
-
-  function onBook() {
-    setConfirm('done');
-    onBooked?.();
-    if (reduce) {
-      setPayoffShown(true);
-      return;
-    }
-    setTyping(true);
-    setTimeout(() => {
-      setTyping(false);
-      setPayoffShown(true);
-    }, 900);
-  }
-
-  function onDecline() {
-    setConfirm('declined');
-    setTyping(true);
-    setTimeout(() => {
-      setTyping(false);
-      setPayoffShown(true);
-    }, 700);
-  }
-
-  function send(text: string) {
-    const msg = text.trim();
-    if (!msg || !agentOn) return;
-    setDraft('');
-    setExtras((e) => ({ ...e, [convo]: [...(e[convo] ?? []), { who: 'you', text: msg }] }));
-    setTyping(true);
-    setTimeout(
-      () => {
-        setTyping(false);
-        setExtras((e) => ({
-          ...e,
-          // production answers HONESTLY (the AI is roadmap); the demo plays co-pilot
-          [convo]: [...(e[convo] ?? []), { who: 'ai', text: demo ? WALLET.scriptedReply : WALLET.prodReply }],
-        }));
-      },
-      reduce ? 0 : 1100,
-    );
-  }
-
-  const activeHistory = demo ? WALLET.history.find((h) => h.id === convo) : undefined;
-  const isSeed = demo && convo === 'sf';
-  const isNew = convo === 'new';
-  const liveExtras = extras[convo] ?? [];
-  const flightBooked = confirm === 'done';
-
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
   return (
-    <div className="rd-asst rd-glass">
-      {/* head — the assistant identity (the agent on/off control is the agent
-          card's Pause/Resume button, not a duplicate switch here) */}
-      <div className="rd-asst__head">
-        <span className="rd-asst__title">
-          <Spark />
-          {ASSISTANT.title}
-        </span>
-      </div>
-
-      {/* recent conversations — TOP-DOWN list (DEMO history only; production has
-          no past conversations to fabricate) */}
-      {demo ? (
-        <div className="rd-asst__recent">
-          <div className="rd-asst__recenthead">
-            <span className="rd-label">{ASSISTANT.recentLabel}</span>
-            <button type="button" className="rd-asst__new" onClick={() => setConvo('new')}>
-              <Plus size={11} strokeWidth={2} aria-hidden />
-              {WALLET.newChat}
-            </button>
-          </div>
-          {WALLET.history.map((h) => (
-            <button
-              key={h.id}
-              type="button"
-              className={`rd-asst__item${convo === h.id ? ' is-active' : ''}`}
-              onClick={() => setConvo(h.id)}
-            >
-              <span className="rd-asst__itemtitle">{h.title}</span>
-              <span className="rd-asst__itemwhen">{h.when}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {/* the thread */}
-      <div className="rd-asst__thread" ref={threadRef}>
-        {isNew && liveExtras.length === 0 ? (
-          <div className="rd-asst__empty">
-            <p className="rd-asst__emptytitle">What can I handle for you?</p>
-            <div className="rd-chips">
-              {(demo ? WALLET.chips : [WALLET.prodChip]).map((c) => (
-                <button key={c} type="button" className="rd-chip" onClick={() => send(c)}>
-                  {c}
+    <div className="rd-mdl">
+      <button
+        type="button"
+        className={`rd-mdl__chip${open ? ' is-open' : ''}`}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <Sparkles size={13} strokeWidth={ICON_STROKE} aria-hidden />
+        <span className="rd-mdl__chipname">Claude Haiku</span>
+        <ChevronDown size={12} strokeWidth={2.2} aria-hidden className="rd-mdl__chev" />
+      </button>
+      {open ? (
+        <>
+          <span className="rd-mdl__scrim" onClick={() => setOpen(false)} aria-hidden />
+          <div className="rd-mdl__pop rd-glass" role="menu">
+            <div className="rd-mdl__poptitle">Model</div>
+            <div className="rd-mdl__list">
+              {MODELS.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={`rd-mdl__opt${m.active ? ' is-active' : ''}`}
+                  role="menuitemradio"
+                  aria-checked={!!m.active}
+                  disabled={!m.active}
+                >
+                  <span className="rd-mdl__mark">
+                    {m.active ? (
+                      <Sparkles size={14} strokeWidth={ICON_STROKE} aria-hidden />
+                    ) : (
+                      <Lock size={13} strokeWidth={ICON_STROKE} aria-hidden />
+                    )}
+                  </span>
+                  <span className="rd-mdl__optbody">
+                    <span className="rd-mdl__optname">{m.name}</span>
+                    <span className="rd-mdl__opttag">{m.tag}</span>
+                  </span>
+                  <span className={`rd-mdl__badge${m.active ? ' is-free' : ''}`}>{m.active ? 'Free' : 'Soon'}</span>
                 </button>
               ))}
             </div>
+            <p className="rd-mdl__note">Stronger models are paid live from your agent’s USDC balance over x402.</p>
           </div>
-        ) : null}
-
-        {!isSeed && !isNew && activeHistory && 'transcript' in activeHistory
-          ? (activeHistory.transcript as readonly ChatMsg[]).map((m, i) => (
-              <Row key={i} who={m.who}>
-                {rich(m.text)}
-              </Row>
-            ))
-          : null}
-
-        {isSeed
-          ? WALLET.thread.map((m, i) => (
-              <div key={i} style={{ display: 'contents' }}>
-                {m.divider && i < seedShown ? <Divider label={m.divider} /> : null}
-                <Row who={m.who} landed={i < seedShown}>
-                  {rich(m.text)}
-                </Row>
-              </div>
-            ))
-          : null}
-
-        {isSeed && seedShown >= SEED_STEPS ? (
-          <div className="rd-row rd-row--ai is-in">
-            <article className={`rd-confirm rd-glass${flightBooked ? ' is-done' : ''}`}>
-              <div className="rd-confirm__head">
-                <Spark />
-                {WALLET.confirmCard.label}
-              </div>
-              <div className="rd-confirm__body">
-                <span className="rd-confirm__merchant">{WALLET.confirmCard.merchant}</span>
-                <span className="rd-confirm__detail">{WALLET.confirmCard.detail}</span>
-                <span className="rd-confirm__amount">{money(WALLET.confirmCard.amount)}</span>
-                <span className="rd-confirm__source">{WALLET.confirmCard.source}</span>
-              </div>
-              {confirm === 'pending' ? (
-                <div className="rd-confirm__acts">
-                  <button type="button" className="rd-cta" onClick={onBook} disabled={!agentOn}>
-                    {WALLET.confirmCard.yes}
-                  </button>
-                  <button type="button" className="rd-btn" onClick={onDecline}>
-                    {WALLET.confirmCard.no}
-                  </button>
-                </div>
-              ) : null}
-              <div className="rd-confirm__done">
-                <Check size={14} strokeWidth={2.2} aria-hidden />
-                Booked · receipt logged
-              </div>
-              {confirm === 'declined' ? (
-                <div className="rd-confirm__done" style={{ display: 'flex', color: 'var(--rd-fg-3)' }}>
-                  Skipped — still watching prices
-                </div>
-              ) : null}
-            </article>
-          </div>
-        ) : null}
-
-        {isSeed && payoffShown && confirm === 'done' ? (
-          <Row who="ai">
-            {rich(WALLET.payoff)}
-            <a className="rd-paid" href="#receipt" onClick={(e) => e.preventDefault()}>
-              <i>
-                <Check size={10} strokeWidth={2.4} aria-hidden />
-              </i>
-              {WALLET.paidChip}
-              <ExternalLink size={10} strokeWidth={ICON_STROKE} aria-hidden />
-            </a>
-          </Row>
-        ) : null}
-        {isSeed && payoffShown && confirm === 'declined' ? <Row who="ai">{rich(WALLET.declined)}</Row> : null}
-
-        {liveExtras.map((m, i) => (
-          <Row key={`x${i}`} who={m.who}>
-            {rich(m.text)}
-          </Row>
-        ))}
-
-        {typing ? <TypingRow /> : null}
-      </div>
-
-      {/* the composer */}
-      <form
-        className="rd-asst__composer"
-        onSubmit={(e) => {
-          e.preventDefault();
-          send(draft);
-        }}
-      >
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={agentOn ? WALLET.composer : WALLET.composerOff}
-          disabled={!agentOn}
-          aria-label="Message your wallet"
-        />
-        <button type="submit" className="rd-composer__send" aria-label="Send" disabled={!agentOn || !draft.trim()}>
-          <ArrowUp size={15} strokeWidth={2} aria-hidden />
-        </button>
-      </form>
+        </>
+      ) : null}
     </div>
   );
 }
 
-// (The floating AssistantDock died with the dock-pill pattern — both faces now
-// keep their chat as a PERMANENT column, owner law 2026-06-10.)
+/** The REAL context-window meter: a ring + a glass hover popup. `tokens`/`window` come
+ *  from the SDK's `usage` (the live count, not an estimate). Haiku can't compact, so the
+ *  tooltip says so — as it fills, the oldest messages drop. */
+function ContextMeter({ tokens, window }: { tokens: number; window: number }) {
+  const pct = Math.max(0, Math.min(100, (tokens / window) * 100));
+  const r = 6;
+  const circ = 2 * Math.PI * r;
+  const filled = pct / 100;
+  return (
+    <span className="rd-ctx" tabIndex={0} aria-label={`Context window: ${fmtTokens(tokens)} of ${fmtTokens(window)} tokens`}>
+      <svg className="rd-ctx__ring" width="15" height="15" viewBox="0 0 16 16" aria-hidden>
+        <circle cx="8" cy="8" r={r} className="rd-ctx__track" />
+        <circle
+          cx="8"
+          cy="8"
+          r={r}
+          className="rd-ctx__fill"
+          strokeDasharray={circ}
+          strokeDashoffset={circ * (1 - filled)}
+          transform="rotate(-90 8 8)"
+        />
+      </svg>
+      <span className="rd-ctx__pct">{pct.toFixed(1)}%</span>
+      <span className="rd-ctx__pop rd-glass" role="tooltip">
+        <span className="rd-ctx__poptitle">Context window</span>
+        <span className="rd-ctx__popbody">
+          <strong>{fmtTokens(tokens)}</strong> of {fmtTokens(window)} tokens in play — how much of this conversation the
+          AI is holding at once. Compaction isn’t available on this model, so the oldest messages drop as it fills.
+        </span>
+      </span>
+    </span>
+  );
+}
+
+/** The memory switch + a glass hover popup. On by default (MemWal); click → ephemeral. */
+function MemoryToggle({ on, available, onToggle }: { on: boolean; available: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" className={`rd-mem${on ? ' is-on' : ''}`} onClick={onToggle} disabled={!available} aria-pressed={on}>
+      <Brain size={14} strokeWidth={ICON_STROKE} aria-hidden />
+      <span className="rd-mem__label">{on ? 'Memory' : 'Ephemeral'}</span>
+      <span className="rd-mem__pop rd-glass" role="tooltip">
+        {!available
+          ? 'Memory isn’t set up for this session.'
+          : on
+            ? 'Memory is on by default, provided by MemWal. Click to disable and enter ephemeral mode.'
+            : 'Ephemeral mode — nothing is remembered. Click to turn memory back on.'}
+      </span>
+    </button>
+  );
+}
+
+/** The toolbar under the composer input: model · context · memory. */
+function ComposerBar({
+  ctxTokens,
+  ctxWindow,
+  memoryOn,
+  memoryAvailable,
+  onToggleMemory,
+}: {
+  ctxTokens: number;
+  ctxWindow: number;
+  memoryOn: boolean;
+  memoryAvailable: boolean;
+  onToggleMemory: () => void;
+}) {
+  return (
+    <div className="rd-composer__bar">
+      <ModelMenu />
+      <span className="rd-composer__spacer" />
+      <ContextMeter tokens={ctxTokens} window={ctxWindow} />
+      <span className="rd-composer__div" aria-hidden />
+      <MemoryToggle on={memoryOn} available={memoryAvailable} onToggle={onToggleMemory} />
+    </div>
+  );
+}
+
+/** "Thought for Xs" — the quiet collapsed thinking marker above an answer. */
+function ThoughtMark({ sec }: { sec: number }) {
+  return (
+    <div className="rd-thought" aria-hidden>
+      <Sparkles size={11} strokeWidth={ICON_STROKE} />
+      {sec >= 1 ? `Thought for ${sec}s` : 'Thought for a moment'}
+    </div>
+  );
+}
+
+/** Compact relative time for the history list. */
+function relTime(ms: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (s < 60) return 'now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d`;
+  return `${Math.floor(d / 7)}w`;
+}
+
+/** THE CHAT HISTORY RAIL — a glass sticky column (top-left of the wide chat): a "New chat"
+ *  button over the list of saved conversations (IndexedDB-backed; the active one also
+ *  anchors to Walrus via the trace path). Click to switch, the × to forget. */
+function ChatHistory({
+  chats,
+  activeId,
+  onNew,
+  onSwitch,
+  onDelete,
+}: {
+  chats: ChatMeta[];
+  activeId: string;
+  onNew: () => void;
+  onSwitch: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  // ONE floating glass card pinned top-left of the chat: the recent-chats list with a
+  // "New chat" line at the bottom of the SAME card (never a full panel/column).
+  return (
+    <div className="rd-hist rd-glass">
+      <div className="rd-hist__list">
+        {chats.length === 0 ? (
+          <p className="rd-hist__empty">Your chats are saved here.</p>
+        ) : (
+          chats.map((c) => (
+            <div key={c.id} className={`rd-hist__item${c.id === activeId ? ' is-active' : ''}`}>
+              <button type="button" className="rd-hist__pick" onClick={() => onSwitch(c.id)} title={c.title}>
+                <span className="rd-hist__title">{c.title}</span>
+                <span className="rd-hist__when">{relTime(c.updatedAt)}</span>
+              </button>
+              <button type="button" className="rd-hist__del" onClick={() => onDelete(c.id)} aria-label="Forget this chat">
+                <X size={12} strokeWidth={2} aria-hidden />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+      <button type="button" className="rd-hist__new" onClick={onNew} title="Start a new chat">
+        <Plus size={13} strokeWidth={2.4} aria-hidden />
+        New chat
+      </button>
+    </div>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THE BRAIN ASSISTANT — the REAL conversational wallet (production). Drives the
@@ -345,7 +303,17 @@ function LegacyAssistant({ agentOn, onBooked, demo = false }: AssistantPanelProp
 // ─────────────────────────────────────────────────────────────────────────────
 // A thread entry: a chat bubble (`you`/`ai`), OR a compact RECEIPT — a confirmed
 // (or declined) action that turned into a small permanent record instead of vanishing.
-type Turn = { who: 'you' | 'ai'; text: string; kind?: 'receipt'; meta?: string; bad?: boolean };
+type Turn = { who: 'you' | 'ai'; text: string; kind?: 'receipt'; meta?: string; bad?: boolean; digest?: string; thoughtSec?: number };
+
+/** Reconstruct a thread Turn from a persisted trace entry — a RECEIPT keeps its kind + meta +
+ *  explorer digest so it survives a reload as a receipt card, not a plain chat bubble. */
+function entryToTurn(e: TraceEntry): Turn {
+  if (e.kind === 'receipt') {
+    return { who: 'ai', kind: 'receipt', text: e.text ?? '', meta: e.meta, bad: e.bad, digest: e.txDigest };
+  }
+  return { who: e.role === 'user' ? 'you' : 'ai', text: e.text ?? '' };
+}
+
 type CardPhase = 'pending' | 'working' | 'done' | 'error';
 interface ActiveCard {
   toolUseId: string;
@@ -353,7 +321,7 @@ interface ActiveCard {
   subtitle?: string;
   rows: { k: string; v: string }[];
   cta: string;
-  commit: (onStep?: (label: string) => void) => Promise<string>;
+  commit: (onStep?: (label: string) => void) => Promise<{ message: string; digest?: string }>;
   phase: CardPhase;
   error?: string;
 }
@@ -374,14 +342,12 @@ const TOOL_STATUS: Record<string, string> = {
 };
 const THINKING_VERBS = ['Thinking', 'Working it out', 'One moment', 'Putting it together'];
 
-/** The agentic loader — an EDITORIAL-TERMINAL treatment: a fixed tabular elapsed clock
- *  on the LEFT (gutter-ruled), a mono `>` prompt caret in the family blue, then a
- *  bracketed `[ verb… ]` plate whose verb is read by a single travelling highlight (the
- *  "scanline"). `label` pins a step-specific verb; without one it cycles the generic
- *  thinking verbs. Real model thinking runs under the hood — this is the on-screen
- *  treatment, no raw reasoning shown. (Styling: `.rd-loader*` in rd.css — the brackets
- *  are drawn by `.rd-loader__label`'s ::before/::after; the verb's sweep lives on
- *  `.rd-loader__verb`; the ellipsis dots fill via `.rd-loader__ell`'s ::after.) */
+/** The thinking line — LEAN, ChatGPT-style: a single verb read by a monochrome shimmer
+ *  sweeping the word, with a quiet elapsed counter that joins after ~2s. `label` pins a
+ *  step-specific verb (e.g. "Checking your balance"); without one it cycles the generic
+ *  thinking verbs. Real model thinking runs under the hood — no raw reasoning shown; when
+ *  the turn answers, this collapses to a "Thought for Xs" mark (ThoughtMark) above it.
+ *  (Styling: `.rd-think*` in rd.css — the shimmer lives on `.rd-think__verb`.) */
 function LoaderRow({ label }: { label?: string | null }) {
   const [tick, setTick] = useState(0);
   const start = useRef(Date.now());
@@ -394,20 +360,14 @@ function LoaderRow({ label }: { label?: string | null }) {
   // feedback before the model's thinking lands; then a step verb (if pinned) or rotating
   // generic verbs. The elapsed beat sits on the LEFT (fixed width) so it never shifts as
   // the verb / animated ellipsis change width.
-  const verb = label ?? (tick < 3 ? 'Sure, let me do that' : THINKING_VERBS[Math.floor((tick - 3) / 3) % THINKING_VERBS.length]!);
+  // Lean, ChatGPT-style: a single shimmering verb (a step verb when pinned, else the
+  // rotating thinking verbs). A quiet elapsed counter joins after a couple seconds.
+  const verb = label ?? THINKING_VERBS[Math.floor(tick / 3) % THINKING_VERBS.length]!;
   return (
     <div className="rd-row rd-row--ai is-in">
-      <span className="rd-loader" aria-live="polite" aria-label={`${verb}…`}>
-        <span className="rd-loader__t">{elapsed >= 1 ? `${elapsed}s` : ''}</span>
-        {/* a quiet breathing shell prompt */}
-        <span className="rd-loader__spark" aria-hidden="true">
-          &gt;
-        </span>
-        {/* the typed status verb + a blinking block cursor */}
-        <span className="rd-loader__label">
-          {verb}
-          <i className="rd-loader__ell" aria-hidden="true" />
-        </span>
+      <span className="rd-think" aria-live="polite" aria-label={`${verb}…`}>
+        <span className="rd-think__verb">{verb}</span>
+        {elapsed >= 2 ? <span className="rd-think__t">{elapsed}s</span> : null}
       </span>
     </div>
   );
@@ -491,9 +451,28 @@ function BrainAssistant({
   const [workingLabel, setWorkingLabel] = useState<string | null>(null); // live progress on a committing card
   const [card, setCard] = useState<ActiveCard | null>(null);
   const [draft, setDraft] = useState('');
+  const [ephemeral, setEphemeral] = useState(false); // memory OFF for this session
+  // Multi-conversation history (IndexedDB archive; the active one also rides the Walrus trace).
+  const [chatId, setChatId] = useState<string>(() => getActiveChatId(ownerAddress) || newChatId());
+  const [chats, setChats] = useState<ChatMeta[]>([]);
+  const [contextTokens, setContextTokens] = useState(0); // live context size from the SDK usage
   const threadRef = useRef<HTMLDivElement>(null);
   const aiIdxRef = useRef(-1); // index of the streaming AI turn in `turns`
+  const thinkStartRef = useRef(0); // when the current model wait began → "Thought for Xs"
   const busy = thinking || card != null;
+
+  // Memory is on by default when MemWal is set up; the user can drop to ephemeral mode
+  // (no memory id sent → the brain neither recalls nor stores this session).
+  const memoryAvailable = Boolean(memwalAccountId);
+  const memoryOn = memoryAvailable && !ephemeral;
+  const effectiveMemwal = ephemeral ? undefined : memwalAccountId;
+  // The REAL context size comes from the SDK's `usage`, reported on each turn's done frame.
+  // Until the first turn lands (or for a freshly-loaded conversation), fall back to a
+  // chars→tokens (÷4) estimate so the meter is never dead.
+  const ctxTokensShown = useMemo(() => {
+    if (contextTokens > 0) return contextTokens;
+    return Math.round(turns.reduce((n, t) => n + (t.text?.length ?? 0), 0) / 4);
+  }, [contextTokens, turns]);
 
   // ── Verifiable history (trace) — ADDITIVE + non-blocking; never touches the chat
   // or money flow. capture → IndexedDB → Seal-encrypt → Walrus → on-chain anchor.
@@ -502,7 +481,7 @@ function BrainAssistant({
   const suiClient = useSuiClient();
   const { mutateAsync: signTx } = useSignTransaction();
   const { mutateAsync: signPM } = useSignPersonalMessage();
-  const [traceBadge, setTraceBadge] = useState<{ count: number; digest: string } | null>(null);
+  const [traceBadge, setTraceBadge] = useState<{ count: number; digest: string; blobId: string } | null>(null);
   const [traceSaving, setTraceSaving] = useState(false);
   const tracedCountRef = useRef(0);
   const restoredRef = useRef(false);
@@ -517,12 +496,12 @@ function BrainAssistant({
         const buf = await readTraceBuffer(ownerAddress);
         const restored: Turn[] = buf
           .filter((e) => (e.text ?? '').trim())
-          .map((e) => ({ who: e.role === 'user' ? 'you' : 'ai', text: e.text ?? '' }));
+          .map(entryToTurn);
         if (alive && restored.length) setTurns(restored);
       }
       const a = await fetchLatestAnchor(ownerAddress, suiClient as never);
       if (alive && a) {
-        setTraceBadge({ count: a.count, digest: a.digest });
+        setTraceBadge({ count: a.count, digest: a.digest, blobId: a.blobId });
         // Auto cross-device restore: the chain is AHEAD of our local buffer (a fresh
         // device or a cleared cache) → silently decrypt the latest blob (the zkLogin
         // session signs the Seal SessionKey — no popup, same path as silent-renew) and
@@ -543,11 +522,7 @@ function BrainAssistant({
               restoredRef.current = true;
               await setTraceBuffer(ownerAddress, entries);
               tracedCountRef.current = entries.length; // now in sync with the chain
-              setTurns(
-                entries
-                  .filter((e) => (e.text ?? '').trim())
-                  .map((e) => ({ who: e.role === 'user' ? 'you' : 'ai', text: e.text ?? '' })),
-              );
+              setTurns(entries.filter((e) => (e.text ?? '').trim()).map(entryToTurn));
             } else {
               tracedCountRef.current = local.length; // restore returned nothing → anchor local
             }
@@ -574,55 +549,78 @@ function BrainAssistant({
     if (!ownerAddress || turns.length === 0 || thinking) return;
     const entries: TraceEntry[] = turns
       .filter((t) => t.text.trim())
-      .map((t, seq) => ({
-        seq,
-        ts: Date.now(),
-        kind: 'msg',
-        role: t.who === 'you' ? 'user' : 'assistant',
-        text: t.text,
-      }));
+      .map((t, seq) =>
+        t.kind === 'receipt'
+          ? {
+              seq,
+              ts: Date.now(),
+              kind: 'receipt' as const,
+              role: 'assistant' as const,
+              text: t.text,
+              meta: t.meta,
+              bad: t.bad,
+              txDigest: t.digest,
+            }
+          : {
+              seq,
+              ts: Date.now(),
+              kind: 'msg' as const,
+              role: t.who === 'you' ? 'user' : 'assistant',
+              text: t.text,
+            },
+      );
     void setTraceBuffer(ownerAddress, entries);
   }, [ownerAddress, turns, thinking]);
 
-  // Flush + anchor on tab-hide (+ a coarse 2-min backstop). Background, non-fatal.
+  // Flush + anchor the encrypted transcript to Walrus. Background, non-fatal, idempotent
+  // (only writes when there's NEW content past what's already anchored).
+  const flushingRef = useRef(false);
+  const anchorNow = useCallback(async () => {
+    if (!ownerAddress || flushingRef.current) return;
+    const buf = await readTraceBuffer(ownerAddress);
+    if (buf.length === 0 || buf.length <= tracedCountRef.current) return; // nothing new
+    flushingRef.current = true;
+    setTraceSaving(true);
+    try {
+      const r = await flushAndAnchor({
+        owner: ownerAddress,
+        suiClient: suiClient as never,
+        signPersonalMessage: signPM,
+        signTransaction: signTx,
+      });
+      if (r) {
+        tracedCountRef.current = r.count;
+        setTraceBadge({ count: r.count, digest: r.digest, blobId: r.blobId });
+      }
+    } catch (e) {
+      console.warn('[trace] flush pending (non-fatal):', (e as Error).message);
+    } finally {
+      flushingRef.current = false;
+      setTraceSaving(false);
+    }
+  }, [ownerAddress, suiClient, signPM, signTx]);
+
+  // Anchor triggers: on tab-hide + a coarse 2-min backstop.
   useEffect(() => {
     if (!ownerAddress) return;
-    let flushing = false;
-    const flush = async () => {
-      if (flushing) return;
-      const buf = await readTraceBuffer(ownerAddress);
-      if (buf.length === 0 || buf.length <= tracedCountRef.current) return; // nothing new
-      flushing = true;
-      setTraceSaving(true);
-      try {
-        const r = await flushAndAnchor({
-          owner: ownerAddress,
-          suiClient: suiClient as never,
-          signPersonalMessage: signPM,
-          signTransaction: signTx,
-        });
-        if (r) {
-          tracedCountRef.current = r.count;
-          setTraceBadge({ count: r.count, digest: r.digest });
-        }
-      } catch (e) {
-        console.warn('[trace] flush pending (non-fatal):', (e as Error).message);
-      } finally {
-        flushing = false;
-        setTraceSaving(false);
-      }
-    };
     const onVis = () => {
-      if (document.visibilityState === 'hidden') void flush();
+      if (document.visibilityState === 'hidden') void anchorNow();
     };
     document.addEventListener('visibilitychange', onVis);
-    const id = window.setInterval(() => void flush(), 120_000);
+    const id = window.setInterval(() => void anchorNow(), 120_000);
     return () => {
       document.removeEventListener('visibilitychange', onVis);
       window.clearInterval(id);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ownerAddress]);
+  }, [ownerAddress, anchorNow]);
+
+  // …AND ~16s after a turn settles, so the "anchored ↗" badge appears DURING a session,
+  // not only when the user leaves. Debounced — a new message resets the timer.
+  useEffect(() => {
+    if (!ownerAddress || thinking || turns.length === 0) return;
+    const t = window.setTimeout(() => void anchorNow(), 16_000);
+    return () => window.clearTimeout(t);
+  }, [ownerAddress, thinking, turns, anchorNow]);
 
   // Persist the transcript on every change so a remount (after the business switch)
   // rehydrates it; drop the trailing empty AI placeholder so it doesn't restore blank.
@@ -631,6 +629,22 @@ function BrainAssistant({
     const last = turns[turns.length - 1];
     TRANSCRIPTS.set(ownerAddress, last && last.who === 'ai' && !last.text.trim() ? turns.slice(0, -1) : turns);
   }, [ownerAddress, turns]);
+
+  // Load the conversation list + pin the active-chat pointer (the history-rail source).
+  useEffect(() => {
+    if (!ownerAddress) return;
+    setActiveChatId(ownerAddress, chatId);
+    void listChats(ownerAddress).then(setChats);
+    // once per owner — new/switch refresh the list themselves
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownerAddress]);
+
+  // Archive the active conversation to IndexedDB on every SETTLED change (idempotent) and
+  // refresh the list so titles/order stay current. Skipped while streaming.
+  useEffect(() => {
+    if (!ownerAddress || thinking) return;
+    void saveChat(ownerAddress, chatId, turns as ChatTurn[]).then(() => listChats(ownerAddress).then(setChats));
+  }, [ownerAddress, chatId, turns, thinking]);
 
   useEffect(() => {
     const el = threadRef.current;
@@ -642,7 +656,14 @@ function BrainAssistant({
       const i = aiIdxRef.current;
       if (i < 0 || !prev[i]) return prev;
       const next = prev.slice();
-      next[i] = { ...next[i]!, text: next[i]!.text + delta };
+      const cur = next[i]!;
+      // The first token of this segment closes the "thinking" beat → stamp its duration.
+      const firstToken = !cur.text && cur.thoughtSec == null;
+      next[i] = {
+        ...cur,
+        text: cur.text + delta,
+        thoughtSec: firstToken ? Math.max(0, Math.round((Date.now() - thinkStartRef.current) / 1000)) : cur.thoughtSec,
+      };
       return next;
     });
   }, []);
@@ -662,9 +683,10 @@ function BrainAssistant({
         // An auto-approved money action (no card) still leaves a visible ✓ receipt.
         if (run.receipt) {
           const r = run.receipt;
-          setTurns((prev) => [...prev, { who: 'ai', kind: 'receipt', text: r.title, meta: r.meta }]);
+          setTurns((prev) => [...prev, { who: 'ai', kind: 'receipt', text: r.title, meta: r.meta, digest: r.digest }]);
         }
         wsBrainToolResult(toolUseId, run.content, run.isError ?? false);
+        thinkStartRef.current = Date.now();
         setThinking(true); // keep the loader up while the model reasons about the next step
         return;
       }
@@ -694,9 +716,10 @@ function BrainAssistant({
           appendAi(delta);
         },
         onToolUse: (id, tool, input) => void onToolUse(id, tool, input),
-        onDone: (stopReason) => {
+        onDone: (stopReason, _limited, ctxTokens) => {
           setThinking(false);
           setStatus(null);
+          if (ctxTokens != null && ctxTokens > 0) setContextTokens(ctxTokens); // live token meter
           aiIdxRef.current = -1;
           // NEVER vanish into nothing. If the trailing AI bubble is still empty: when the
           // turn was CUT OFF (max_tokens / max_steps) fill it with a recoverable line
@@ -734,9 +757,9 @@ function BrainAssistant({
           });
           aiIdxRef.current = -1;
         },
-      }, memwalAccountId);
+      }, effectiveMemwal);
     },
-    [appendAi, onToolUse, memwalAccountId],
+    [appendAi, onToolUse, effectiveMemwal],
   );
 
   const send = useCallback(
@@ -744,6 +767,7 @@ function BrainAssistant({
       const msg = text.trim();
       if (!msg || !agentOn || busy) return;
       setDraft('');
+      thinkStartRef.current = Date.now();
       setTurns((prev) => {
         const next: Turn[] = [...prev, { who: 'you', text: msg }, { who: 'ai', text: '' }];
         aiIdxRef.current = next.length - 1;
@@ -760,19 +784,57 @@ function BrainAssistant({
     [agentOn, busy, startTurn],
   );
 
+  // ── history controls (new / switch / forget) ──
+  const newChat = useCallback(() => {
+    setCard(null);
+    setThinking(false);
+    setStatus(null);
+    const id = newChatId();
+    setChatId(id);
+    setActiveChatId(ownerAddress, id);
+    setTurns([]);
+    TRANSCRIPTS.set(ownerAddress, []);
+    void setTraceBuffer(ownerAddress, []); // fresh Walrus base for the new conversation
+  }, [ownerAddress]);
+
+  const switchChat = useCallback(
+    (id: string) => {
+      if (id === chatId) return;
+      setCard(null);
+      setThinking(false);
+      setStatus(null);
+      setChatId(id);
+      setActiveChatId(ownerAddress, id);
+      void loadChat(ownerAddress, id).then((t) => {
+        const ts = t as Turn[];
+        setTurns(ts);
+        TRANSCRIPTS.set(ownerAddress, ts);
+      });
+    },
+    [ownerAddress, chatId],
+  );
+
+  const removeChat = useCallback(
+    (id: string) => {
+      void deleteChat(ownerAddress, id).then(() => listChats(ownerAddress).then(setChats));
+      if (id === chatId) newChat(); // forgetting the active one → start fresh
+    },
+    [ownerAddress, chatId, newChat],
+  );
+
   // A confirmed/declined card doesn't vanish — it COLLAPSES into a permanent receipt that
   // stays in the thread, placed BEFORE the model's follow-up narration so the order reads
   // "you asked → ✓ here's the record → here's my note" (not an ambiguous receipt AFTER the
   // reply). Drops the empty pre-card placeholder, appends the receipt, then a fresh
   // placeholder the post-action narration streams into (aiIdxRef → that fresh placeholder).
-  const collapseToReceipt = useCallback((c: ActiveCard, line: string, bad = false) => {
+  const collapseToReceipt = useCallback((c: ActiveCard, line: string, bad = false, digest?: string) => {
     const cost = c.rows.find((r) => r.k === 'Cost' || r.k === 'Amount')?.v;
     const meta = bad ? line : [cost, line].filter(Boolean).join(' · ');
     setTurns((prev) => {
       const last = prev[prev.length - 1];
       const base =
         last && last.who === 'ai' && last.kind !== 'receipt' && !last.text.trim() ? prev.slice(0, -1) : prev;
-      const next: Turn[] = [...base, { who: 'ai', kind: 'receipt', text: c.title, meta, bad }, { who: 'ai', text: '' }];
+      const next: Turn[] = [...base, { who: 'ai', kind: 'receipt', text: c.title, meta, bad, digest }, { who: 'ai', text: '' }];
       aiIdxRef.current = next.length - 1;
       return next;
     });
@@ -785,11 +847,12 @@ function BrainAssistant({
     setCard({ ...c, phase: 'working' });
     void c
       .commit((label) => setWorkingLabel(label)) // live progress on the working card
-      .then((ok) => {
-        collapseToReceipt(c, 'done'); // card → permanent receipt, narration streams below it
+      .then((res) => {
+        collapseToReceipt(c, 'done', false, res.digest); // card → permanent receipt + explorer link
         setCard(null);
         setWorkingLabel(null);
-        wsBrainToolResult(c.toolUseId, ok, false);
+        wsBrainToolResult(c.toolUseId, res.message, false);
+        thinkStartRef.current = Date.now();
         setThinking(true); // the model narrates the outcome next
       })
       .catch((e) => {
@@ -798,6 +861,7 @@ function BrainAssistant({
         setCard(null);
         setWorkingLabel(null);
         wsBrainToolResult(c.toolUseId, `That failed: ${m}`, true);
+        thinkStartRef.current = Date.now();
         setThinking(true);
       });
   }
@@ -807,6 +871,7 @@ function BrainAssistant({
     collapseToReceipt(card, 'declined', true);
     wsBrainToolResult(card.toolUseId, 'The user declined this action.', true);
     setCard(null);
+    thinkStartRef.current = Date.now();
     setThinking(true); // let the model acknowledge the decline
   }
 
@@ -821,38 +886,24 @@ function BrainAssistant({
   const showLoader = thinking && !card && awaitingOutput;
 
   return (
-    <div className="rd-asst rd-glass">
-      <div className="rd-asst__head">
-        <span className="rd-asst__title">
-          <Spark />
-          {ASSISTANT.title}
-        </span>
-        {traceSaving ? (
-          <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.5, whiteSpace: 'nowrap' }}>saving…</span>
-        ) : traceBadge ? (
-          <a
-            href={EXPLORER_TX(traceBadge.digest)}
-            target="_blank"
-            rel="noreferrer"
-            title="Encrypted on chain — only you can read it. Tap for the on-chain receipt."
-            style={{
-              marginLeft: 'auto',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              fontSize: 11,
-              opacity: 0.65,
-              textDecoration: 'none',
-              color: 'inherit',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            <Check size={11} strokeWidth={2.6} aria-hidden /> {traceBadge.count} · anchored ↗
-          </a>
-        ) : null}
-      </div>
+    <div className="rd-asst rd-asst--chat rd-glass">
+      <ChatHistory chats={chats} activeId={chatId} onNew={newChat} onSwitch={switchChat} onDelete={removeChat} />
+      {traceSaving ? (
+        <span className="rd-asst__trace" style={{ opacity: 0.6 }}>saving…</span>
+      ) : traceBadge ? (
+        <a
+          className="rd-asst__trace"
+          href={WALRUS_BLOB(traceBadge.blobId)}
+          target="_blank"
+          rel="noreferrer"
+          title="Your chat, encrypted and stored on Walrus — only you can read it. Tap to view the blob."
+        >
+          <Check size={11} strokeWidth={2.6} aria-hidden /> {traceBadge.count} · on Walrus ↗
+        </a>
+      ) : null}
 
       <div className="rd-asst__thread" ref={threadRef}>
+        <div className="rd-asst__convo">
         {empty ? (
           <div className="rd-asst__empty">
             <p className="rd-asst__emptytitle">What can I handle for you?</p>
@@ -876,9 +927,25 @@ function BrainAssistant({
           if (m.kind === 'receipt') {
             return (
               <div key={i} className={`rd-receipt is-in${m.bad ? ' is-bad' : ''}`}>
-                {m.bad ? <span className="rd-receipt__x" aria-hidden>·</span> : <Check size={12} strokeWidth={2.4} aria-hidden />}
-                <span className="rd-receipt__title">{m.text}</span>
-                {m.meta ? <span className="rd-receipt__meta">{m.meta}</span> : null}
+                <span className="rd-receipt__icon" aria-hidden>
+                  {m.bad ? <X size={12} strokeWidth={2.6} /> : <Check size={12} strokeWidth={2.8} />}
+                </span>
+                <span className="rd-receipt__body">
+                  <span className="rd-receipt__title">{m.text}</span>
+                  {m.meta ? <span className="rd-receipt__meta">{m.meta}</span> : null}
+                </span>
+                {m.digest ? (
+                  <a
+                    className="rd-receipt__link"
+                    href={EXPLORER_TX(m.digest)}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="View this transaction on the explorer"
+                  >
+                    Explorer
+                    <ExternalLink size={11} strokeWidth={2.2} aria-hidden />
+                  </a>
+                ) : null}
               </div>
             );
           }
@@ -899,15 +966,17 @@ function BrainAssistant({
             const prose = [before, after].filter(Boolean).join('\n\n');
             return (
               <div key={i} style={{ display: 'contents' }}>
+                {m.thoughtSec != null ? <ThoughtMark sec={m.thoughtSec} /> : null}
                 {prose ? <Row who="ai">{rich(prose)}</Row> : null}
                 <SitePreview url={url} />
               </div>
             );
           }
           return (
-            <Row key={i} who={m.who}>
-              {rich(m.text)}
-            </Row>
+            <div key={i} style={{ display: 'contents' }}>
+              {m.who === 'ai' && m.thoughtSec != null ? <ThoughtMark sec={m.thoughtSec} /> : null}
+              <Row who={m.who}>{rich(m.text)}</Row>
+            </div>
           );
         })}
 
@@ -958,6 +1027,7 @@ function BrainAssistant({
         ) : null}
 
         {showLoader ? <LoaderRow label={status} /> : null}
+        </div>
       </div>
 
       <form
@@ -967,21 +1037,30 @@ function BrainAssistant({
           send(draft);
         }}
       >
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={agentOn ? WALLET.composer : WALLET.composerOff}
-          disabled={!agentOn || busy}
-          aria-label="Message your wallet"
+        <div className="rd-composer__top">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={agentOn ? WALLET.composer : WALLET.composerOff}
+            disabled={!agentOn || busy}
+            aria-label="Message your wallet"
+          />
+          <button
+            type="submit"
+            className="rd-composer__send"
+            aria-label="Send"
+            disabled={!agentOn || busy || !draft.trim()}
+          >
+            <ArrowUp size={15} strokeWidth={2} aria-hidden />
+          </button>
+        </div>
+        <ComposerBar
+          ctxTokens={ctxTokensShown}
+          ctxWindow={CTX_WINDOW}
+          memoryOn={memoryOn}
+          memoryAvailable={memoryAvailable}
+          onToggleMemory={() => setEphemeral((e) => !e)}
         />
-        <button
-          type="submit"
-          className="rd-composer__send"
-          aria-label="Send"
-          disabled={!agentOn || busy || !draft.trim()}
-        >
-          <ArrowUp size={15} strokeWidth={2} aria-hidden />
-        </button>
       </form>
 
       {/* persistent one-line footer under the composer — the agent's work lives in this

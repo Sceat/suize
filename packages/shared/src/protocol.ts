@@ -357,6 +357,10 @@ export interface BrainToolResult {
 export interface BrainChatDone {
   stopReason: string | null;
   limited?: boolean;
+  /** The model's CURRENT context size in tokens — the last turn's full input (incl. cache
+   *  reads/creation), straight from the SDK's `usage`. The wallet renders this as the live
+   *  context-window meter over the model's window. Absent when no model call was made. */
+  contextTokens?: number;
 }
 
 // ===========================================================================

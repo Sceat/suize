@@ -10,6 +10,8 @@
  */
 export {
   Lock,
+  Brain,
+  Sparkles,
   ShieldCheck,
   Activity,
   HeartPulse,

@@ -473,7 +473,16 @@ const route = async (ws: WsSocket, frame: ClientPacket): Promise<void> => {
       // settles. Identity is the verified ws.data.address (never a frame field);
       // the wallet executes every proposal locally. `send` is bound here so the
       // brain module never imports the socket — it only emits frames.
-      await handleBrainChat(address, id, frame.data, (packet) => sendPacket(ws, packet));
+      //
+      // FIRE-AND-FORGET — do NOT await: a brain turn `await`s a SECOND inbound
+      // frame (`brainToolResult`) mid-flight, so awaiting the turn inside the
+      // message handler can wedge this socket's frame processing until the turn
+      // ends — the tool round-trip then takes tens of seconds. Running the turn
+      // concurrently lets the result frame land immediately. (handleBrainChat has
+      // its own try/finally; the catch is belt-and-suspenders against a stray reject.)
+      void handleBrainChat(address, id, frame.data, (packet) => sendPacket(ws, packet)).catch((e) =>
+        console.error("[brain] turn crashed:", (e as Error).message),
+      );
       return;
     }
 

@@ -23,8 +23,9 @@ export type ToolRun =
       /** true marks a failure/decline the model should acknowledge (not retry). */
       isError?: boolean;
       /** an AUTO-APPROVED money action (no card) still drops a visible ✓ receipt in the
-       *  chat so the user always SEES what moved (title + a meta line, e.g. "$5.00 · auto"). */
-      receipt?: { title: string; meta?: string };
+       *  chat so the user always SEES what moved (title + a meta line, e.g. "$5.00 · auto").
+       *  `digest` (when on-chain) anchors the receipt's explorer link. */
+      receipt?: { title: string; meta?: string; digest?: string };
     }
   | {
       /** a money action — the Assistant shows a confirm card before anything happens. */
@@ -37,11 +38,12 @@ export type ToolRun =
       rows: { k: string; v: string }[];
       /** the confirm button label, e.g. "Send". */
       cta: string;
-      /** signs + executes the action LOCALLY; resolves to a short success line the
-       *  model reads back, or throws on failure. Called ONLY after the user taps.
-       *  `onStep` (optional) reports live progress for slow actions (e.g. a deploy:
-       *  building payment → authorizing → publishing) so the working state is legible. */
-      commit: (onStep?: (label: string) => void) => Promise<string>;
+      /** signs + executes the action LOCALLY; resolves to `{ message, digest? }` — `message`
+       *  is the short success line the model reads back, `digest` (when on-chain) anchors the
+       *  receipt's explorer link. Throws on failure. Called ONLY after the user taps. `onStep`
+       *  (optional) reports live progress for slow actions (e.g. a deploy: building payment →
+       *  authorizing → publishing) so the working state is legible. */
+      commit: (onStep?: (label: string) => void) => Promise<{ message: string; digest?: string }>;
     };
 
 /** Run an agent tool by name with its (model-proposed) input. */

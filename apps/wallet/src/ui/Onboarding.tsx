@@ -9,8 +9,6 @@
  *                 exactly the legs the old StepSettingUp ran — now rendered as
  *                 the calm build manifest instead of a lone loader. Any failure
  *                 surfaces a calm retry, never a silent success.
- *
- * DEV preview (`?preview=claim`) passes `preview` so no real claim fires.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSignTransaction, useSuiClient } from '@mysten/dapp-kit';
@@ -65,12 +63,9 @@ type Avail = 'idle' | 'invalid' | 'checking' | 'free' | 'taken' | 'error';
 
 export function ClaimFlow({
   suggestedName = '',
-  preview = false,
   onDone,
 }: {
   suggestedName?: string;
-  /** DEV-only: never fire a real claim (no session in the preview). */
-  preview?: boolean;
   /** Completion handler — receives the just-claimed "<name>@suize" handle so the
    *  caller can show it OPTIMISTICALLY the instant Home renders (the chain
    *  reverse-record read lags the claim by a beat). */
@@ -82,9 +77,9 @@ export function ClaimFlow({
   return (
     <div className="rd-jny">
       {beat === 'name' ? (
-        <NameBeat value={name} onChange={(v) => setName(clean(v))} preview={preview} onNext={() => setBeat('setup')} />
+        <NameBeat value={name} onChange={(v) => setName(clean(v))} onNext={() => setBeat('setup')} />
       ) : (
-        <SetupBeat name={name} preview={preview} onDone={onDone} onPickAnother={() => setBeat('name')} />
+        <SetupBeat name={name} onDone={onDone} onPickAnother={() => setBeat('name')} />
       )}
     </div>
   );
@@ -93,12 +88,10 @@ export function ClaimFlow({
 function NameBeat({
   value,
   onChange,
-  preview,
   onNext,
 }: {
   value: string;
   onChange: (v: string) => void;
-  preview: boolean;
   onNext: () => void;
 }) {
   const [avail, setAvail] = useState<Avail>('idle');
@@ -122,10 +115,6 @@ function NameBeat({
       setAvail('invalid');
       return;
     }
-    if (preview) {
-      setAvail('free');
-      return;
-    }
     setAvail('checking');
     let cancelled = false;
     const t = setTimeout(() => {
@@ -146,7 +135,7 @@ function NameBeat({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [value, preview, client, retry]);
+  }, [value, client, retry]);
 
   // self-healing backoff: when the chain read failed ('error'), schedule a fresh
   // attempt so waiting does what the copy says — no retype required.
@@ -244,12 +233,10 @@ const STEP_MS = 850;
 
 function SetupBeat({
   name,
-  preview,
   onDone,
   onPickAnother,
 }: {
   name: string;
-  preview: boolean;
   onDone: (handle: string) => void;
   /** Back to the name picker — the recovery for a "name taken" claim race. */
   onPickAnother: () => void;
@@ -274,7 +261,7 @@ function SetupBeat({
   const claimedRef = useRef(false);
   // the real "<name>@suize" the backend confirmed — threaded out to onDone so Home
   // shows it optimistically before the chain reverse-record read catches up. Falls
-  // back to the locally-built handle for the preview / already-claimed paths.
+  // back to the locally-built handle for the already-claimed path.
   const claimedHandle = useRef(`${name}${JOURNEY.name.suffix}`);
 
   // the visual cadence — rows appear; row 2 WAITS for the real claim
@@ -285,11 +272,11 @@ function SetupBeat({
     at(200, () => setShown(1));
     at(200 + STEP_MS * 0.8, () => setDone(1));
     at(300 + STEP_MS, () => setShown(2));
-    // row 2's DONE comes from the claim promise (or the preview timer below)
+    // row 2's DONE comes from the real claim promise below
     return () => timers.forEach(clearTimeout);
   }, [reduce, error, attempt]);
 
-  // the REAL claim (or the preview's timed stand-in).
+  // the REAL claim.
   //
   // StrictMode subtlety: the dev double-mount runs effect → cleanup → effect,
   // but `firedAttempt` (a ref, surviving the fake unmount) blocks the re-fire —
@@ -309,7 +296,7 @@ function SetupBeat({
       setTimeout(() => setDone(3), reduce ? 0 : STEP_MS * 0.8);
     };
 
-    if (preview || claimedRef.current) {
+    if (claimedRef.current) {
       setTimeout(finish, reduce ? 0 : 300 + STEP_MS * 2);
       return;
     }
@@ -342,7 +329,7 @@ function SetupBeat({
         }
       }
     })();
-  }, [preview, name, ownerAddress, signTransaction, error, attempt, reduce]);
+  }, [name, ownerAddress, signTransaction, error, attempt, reduce]);
 
   const finished = done >= total;
 

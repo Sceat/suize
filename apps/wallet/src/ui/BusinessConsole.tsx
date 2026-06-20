@@ -12,11 +12,10 @@
  * `charged` kind — each row checkable on-chain), the standing-orders feed is the dogfooded
  * `suizeSubs.watch`, and the Business Profile is your real on-chain BusinessProfile (mint /
  * edit on the Profile screen, $0.10). MRR/ARR + the revenue chart show calm honest empty
- * states until the data exists. The DEV `?demo=1` seam paints the full sample book.
+ * states until the data exists.
  *
  * NUMBER WALL: every on-chain amount here is real wallet/chain data or a shared constant —
- * never an LLM/tool argument. The ONE place a fee appears is the single expandable receipt
- * artifact (demo) — the trust proof; no fees anywhere else.
+ * never an LLM/tool argument.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSignTransaction, useSuiClient } from '@mysten/dapp-kit';
@@ -27,7 +26,6 @@ import {
   Activity,
   Send,
   ArrowUpRight,
-  ArrowUp,
   ArrowRight,
   RefreshCw,
   Coins,
@@ -40,30 +38,25 @@ import {
   CreditCard,
   Landmark,
   CandlestickChart,
-  ShieldCheck,
 } from '../system';
 import { useTheme } from '../system/theme';
 import { useAccount } from '../data/useAccount';
 import { resolveRecipient } from '../data/suins';
 import type { SuiClient } from '../data/suins';
-import { BUSINESS, CONSOLE, money } from './copy';
+import { CONSOLE, money } from './copy';
 import { exactWhen, fullWhen, type LedgerRow } from './money';
 import { BizChat } from './BizChat';
-import { AddFundsSheet, MoveSheet, SendSheet, NewChargeSheet } from './sheets';
+import { AddFundsSheet, SendSheet, NewChargeSheet } from './sheets';
 import { ProfileTab } from './ProfileTab';
 import { loadProfile, type BusinessProfileView } from '../data/profile';
 import { type SignTransaction, type BuildClient } from '../data/sponsored';
 import { wsCreateCharge } from '../data/ws';
 
 type Screen = 'dashboard' | 'profile';
-type SheetKind = 'addFunds' | 'send' | 'transfer' | 'newCharge' | null;
+type SheetKind = 'addFunds' | 'send' | 'newCharge' | null;
 
 const USDC_SCALE = 1_000_000n;
 const toRaw = (ui: number): bigint => (BigInt(Math.round(ui * 100)) * USDC_SCALE) / 100n;
-
-/** compact USD — `$12.5k` (for tight chart/KPI labels). */
-const usdK = (n: number): string =>
-  Math.abs(n) >= 1000 ? `$${(n / 1000).toFixed(1)}k` : money(n);
 
 const short = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
 
@@ -73,40 +66,9 @@ type ChargeKind = keyof typeof KIND_GLYPH;
 const kindOf = (memo: string): ChargeKind =>
   /sub/i.test(memo) ? 'subscription' : /top|usage/i.test(memo) ? 'top-up' : 'one-off';
 
-/* ── smooth-curve helpers — a "nice +chart", not bars ──────────────────────── */
-function smoothLine(pts: readonly (readonly [number, number])[]): string {
-  if (pts.length < 2) return pts.length ? `M${pts[0][0]} ${pts[0][1]}` : '';
-  let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[i - 1] ?? pts[i];
-    const p1 = pts[i];
-    const p2 = pts[i + 1];
-    const p3 = pts[i + 2] ?? p2;
-    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
-    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
-    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
-    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
-    d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
-  }
-  return d;
-}
-function areaPaths(values: number[], w: number, h: number, padTop = 6) {
-  const max = Math.max(...values);
-  const min = Math.min(...values);
-  const range = max - min || 1;
-  const pts = values.map((v, i) => {
-    const x = values.length > 1 ? (i / (values.length - 1)) * w : w / 2;
-    const y = padTop + (h - padTop) * (1 - (v - min) / range);
-    return [x, y] as const;
-  });
-  const line = smoothLine(pts);
-  const area = `${line} L${w.toFixed(1)} ${h} L0 ${h} Z`;
-  return { pts, line, area };
-}
-
 /**
  * DOGFOOD: the merchant-side subscription feed via `@suize/pay`'s `suizeSubs.watch` — the
- * same helper a real merchant drops in. Newest 12, de-duped by digest. Off in the demo seam.
+ * same helper a real merchant drops in. Newest 12, de-duped by digest.
  */
 function useMerchantSubs(merchantAddress: string, enabled: boolean): SubEvent[] {
   const [events, setEvents] = useState<SubEvent[]>([]);
@@ -129,14 +91,13 @@ function useMerchantSubs(merchantAddress: string, enabled: boolean): SubEvent[] 
 export interface BusinessConsoleProps {
   ownerAddress: string;
   handle: string;
-  demo?: boolean;
   /** back to the personal wallet face */
   onBack: () => void;
   /** disconnects the zkLogin session */
   onSignOut?: () => void;
 }
 
-export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, onSignOut }: BusinessConsoleProps) {
+export function BusinessConsole({ ownerAddress, handle, onBack, onSignOut }: BusinessConsoleProps) {
   const client = useSuiClient() as unknown as SuiClient;
   const { mutateAsync: signTransactionRaw } = useSignTransaction();
   const signTransaction = signTransactionRaw as unknown as SignTransaction;
@@ -148,13 +109,12 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
   const [sheet, setSheet] = useState<SheetKind>(null);
   const [idOpen, setIdOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [openReceipt, setOpenReceipt] = useState<string | null>(null);
 
   // The business's public BusinessProfile (logo/name/site) — drives the rail card + Profile.
   const [profile, setProfile] = useState<BusinessProfileView | null>(null);
   const reloadProfile = useCallback(
     (retry = false) => {
-      if (demo || !ownerAddress) return;
+      if (!ownerAddress) return;
       const read = (n: number) => {
         loadProfile(client as unknown as Parameters<typeof loadProfile>[0], ownerAddress).then((p) => {
           setProfile(p);
@@ -166,19 +126,17 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
       };
       read(0);
     },
-    [demo, ownerAddress, client],
+    [ownerAddress, client],
   );
   useEffect(() => {
     reloadProfile();
   }, [reloadProfile]);
 
-  const [demoAvailable, setDemoAvailable] = useState<number>(CONSOLE.balance.amount);
-  const available = demo ? demoAvailable : api.state.wallet.ui;
-  const merchant = demo ? BUSINESS.merchant : handle || '…@suize';
+  const available = api.state.wallet.ui;
+  const merchant = handle || '…@suize';
 
   // the REAL charges ledger — ONLY actual x402 pay actions (kind 'charged').
   const charges = useMemo<LedgerRow[]>(() => {
-    if (demo) return [];
     return api.state.activity
       .filter((a) => a.kind === 'charged')
       .map((a) => ({
@@ -191,11 +149,10 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
         verifyHref: a.pending ? undefined : SUIVISION_TX(a.txDigest),
         pending: a.pending,
       }));
-  }, [demo, api.state.activity]);
+  }, [api.state.activity]);
 
   // this month's settled revenue = the sum of REAL charges this month.
   const monthTotal = useMemo(() => {
-    if (demo) return BUSINESS.monthTotal;
     const now = new Date();
     return api.state.activity
       .filter((a) => a.kind === 'charged' && a.amountUi != null && a.ts)
@@ -204,25 +161,16 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
         return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
       })
       .reduce((sum, a) => sum + (a.amountUi ?? 0), 0);
-  }, [demo, api.state.activity]);
+  }, [api.state.activity]);
 
-  const merchantSubs = useMerchantSubs(ownerAddress, !demo);
+  const merchantSubs = useMerchantSubs(ownerAddress, true);
 
   const stats = useMemo(
-    () => (demo ? { mrr: CONSOLE.mrr.v, arr: CONSOLE.arr.v, subs: BUSINESS.stats[0].v } : { mrr: '$0.00', arr: '$0.00', subs: '0' }),
-    [demo],
+    () => ({ mrr: '$0.00', arr: '$0.00', subs: '0' }),
+    [],
   );
 
   const busy = api.pending != null;
-
-  // chart + sparkline geometry (demo only — production has no series yet) ----------
-  const months: number[] = [...CONSOLE.months.bars];
-  const monthMax = Math.max(...months);
-  const peakIdx = months.indexOf(monthMax);
-  const AR_W = 720;
-  const AR_H = 150;
-  const areaC = areaPaths(months, AR_W, AR_H, 16);
-  const peakPt = areaC.pts[peakIdx];
 
   const copyAddr = () => {
     void navigator.clipboard?.writeText(ownerAddress).catch(() => {});
@@ -231,10 +179,6 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
   };
 
   async function onSend(amt: number, to: string) {
-    if (demo) {
-      setDemoAvailable((v) => Math.max(0, v - amt));
-      return;
-    }
     const resolved = await resolveRecipient(to, client);
     if (!resolved.address) throw new Error(`Could not find ${to} — check the name and try again.`);
     await api.sendWallet({ amountRaw: toRaw(amt), to: resolved.address });
@@ -242,14 +186,13 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
 
   /** Create a no-code charge link for this merchant (the authed session). */
   async function onCreateCharge(input: { price: string; webhook: string; ref?: string }): Promise<string> {
-    if (demo) return `https://api.suize.io/charge/demo-${input.price.replace('.', '')}`;
     const { url } = await wsCreateCharge(input);
     return url;
   }
 
-  const profileName = profile?.name || (demo ? BUSINESS.merchant : '');
-  const profileSite = profile?.website || (demo ? 'https://acme.dev' : '');
-  const profileLogo = profile?.imageUrl || (demo ? 'https://suize.io/logo.png' : '');
+  const profileName = profile?.name || '';
+  const profileSite = profile?.website || '';
+  const profileLogo = profile?.imageUrl || '';
 
   return (
     <div className={`bz${isDark ? ' is-dark' : ''}`}>
@@ -309,7 +252,7 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
                   {profile ? <BadgeCheck size={14} strokeWidth={ICON_STROKE} className="bz-verified" /> : null}
                 </span>
                 <span className="bz-biz-site">
-                  {profile || demo ? (profileSite.replace(/^https?:\/\//, '') || merchant) : 'Set up your profile'}
+                  {profile ? (profileSite.replace(/^https?:\/\//, '') || merchant) : 'Set up your profile'}
                   <ArrowUpRight size={11} strokeWidth={ICON_STROKE} />
                 </span>
               </span>
@@ -320,11 +263,9 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
           <div className="bz-fade" style={{ animationDelay: '50ms' }}>
             <div className="bz-lefthead">
               <span className="bz-eyebrow">This month</span>
-              {demo ? <span className="bz-delta-up"><ArrowUp size={11} strokeWidth={2.4} />{BUSINESS.delta.split(' ')[0]}</span> : null}
             </div>
             <div className="bz-kpis">
               <div className="bz-kpi"><span className="bz-kpi-k">Active subscriptions</span><span className="bz-kpi-v">{stats.subs}</span></div>
-              {demo ? <div className="bz-kpi"><span className="bz-kpi-k">Agents that paid</span><span className="bz-kpi-v">{BUSINESS.stats[2].v}</span></div> : null}
               <div className="bz-kpi"><span className="bz-kpi-k">Run-rate (ARR)</span><span className="bz-kpi-v">{stats.arr}</span></div>
             </div>
           </div>
@@ -336,17 +277,7 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
               <span className="bz-leftnote">renew on-chain</span>
             </div>
             <div className="bz-subs">
-              {demo ? (
-                CONSOLE.renewals.map((r) => (
-                  <div key={r.payer} className="bz-sub">
-                    <div style={{ minWidth: 0 }}>
-                      <div className="bz-sub-who">{r.payer}</div>
-                      <div className="bz-sub-meta">{r.plan} · {r.when}</div>
-                    </div>
-                    <span className="bz-sub-amt">{money(r.amount)}<span className="bz-per">/mo</span></span>
-                  </div>
-                ))
-              ) : merchantSubs.length > 0 ? (
+              {merchantSubs.length > 0 ? (
                 merchantSubs.map((e) => (
                   <div key={`${e.txDigest}-${e.kind}`} className="bz-sub">
                     <div style={{ minWidth: 0 }}>
@@ -407,10 +338,9 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
                   <i className="bz-card-grain" aria-hidden />
                   <div className="bz-card-top">
                     <span className="bz-card-label"><Landmark size={13} strokeWidth={ICON_STROKE} />Net revenue<span className="bz-card-sub">this month</span></span>
-                    {demo ? <span className="bz-card-pill"><ArrowUp size={10} strokeWidth={2.6} />{BUSINESS.delta.split(' ')[0]}</span> : null}
                   </div>
                   <div className="bz-card-num">{money(monthTotal)}</div>
-                  <div className="bz-card-note">{demo ? `${BUSINESS.stats[2].v} paying agents` : 'Settled on-chain'}</div>
+                  <div className="bz-card-note">Settled on-chain</div>
                 </div>
 
                 <div className="bz-card bz-card--mrr">
@@ -424,26 +354,12 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
                 </div>
               </section>
 
-              {/* REVENUE — a smooth 12-month area chart (demo); honest empty in production */}
+              {/* REVENUE — a smooth 12-month area chart; honest empty until there's a series */}
               <section className="bz-panel bz-fade" style={{ animationDelay: '120ms' }}>
                 <div className="bz-panel-head">
                   <span className="bz-panel-title"><CandlestickChart size={15} strokeWidth={ICON_STROKE} />Revenue · 12 months</span>
-                  {demo ? <span className="bz-panel-meta">peak {usdK(monthMax * 1000)} · {CONSOLE.months.labels[peakIdx]}</span> : null}
                 </div>
-                {demo ? (
-                  <div className="bz-areawrap">
-                    <svg className="bz-area" viewBox={`0 0 ${AR_W} ${AR_H}`} preserveAspectRatio="none" aria-hidden>
-                      <defs><linearGradient id="bzareafill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--bz-blue)" stopOpacity="0.20" /><stop offset="100%" stopColor="var(--bz-blue)" stopOpacity="0" /></linearGradient></defs>
-                      <path d={areaC.area} fill="url(#bzareafill)" />
-                      <path className="bz-area-line" d={areaC.line} fill="none" stroke="var(--bz-blue)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-                      <circle cx={peakPt[0]} cy={peakPt[1]} r="4" fill="var(--bz-blue)" />
-                    </svg>
-                    <span className="bz-area-peaktag" style={{ left: `${(peakPt[0] / AR_W) * 100}%`, top: `${(peakPt[1] / AR_H) * 100}%` }}>{usdK(monthMax * 1000)}</span>
-                    <div className="bz-area-labels">{CONSOLE.months.labels.map((l, i) => <span key={i} className={`bz-area-lab${i === peakIdx ? ' is-peak' : ''}`}>{l}</span>)}</div>
-                  </div>
-                ) : (
-                  <p className="bz-empty bz-empty--pad">{CONSOLE.emptyRevenue}</p>
-                )}
+                <p className="bz-empty bz-empty--pad">{CONSOLE.emptyRevenue}</p>
               </section>
 
               {/* CHARGES — the on-chain settled-revenue ledger */}
@@ -453,37 +369,7 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
                   <span className="bz-panel-meta">every line checkable on-chain</span>
                 </div>
                 <div className="bz-table">
-                  {demo ? (
-                    BUSINESS.ledger.map((row) => {
-                      const k = kindOf(row.memo);
-                      const Glyph = KIND_GLYPH[k];
-                      const id = `${row.payer}-${row.when}`;
-                      const hasReceipt = 'open' in row && row.open;
-                      const isOpen = hasReceipt && openReceipt === id;
-                      return (
-                        <div key={id} className={`bz-trow-wrap${isOpen ? ' is-open' : ''}`}>
-                          <button type="button" className="bz-trow" onClick={hasReceipt ? () => setOpenReceipt(isOpen ? null : id) : undefined} style={hasReceipt ? undefined : { cursor: 'default' }}>
-                            <span className={`bz-trow-glyph bz-k-${k}`}><Glyph size={16} strokeWidth={ICON_STROKE} /></span>
-                            <span className="bz-trow-id"><span className="bz-trow-payer">{row.payer}</span><span className="bz-trow-memo">{row.memo}</span></span>
-                            <span className="bz-trow-when">{row.when}</span>
-                            <span className="bz-trow-amt">+{money(row.amount)}</span>
-                            {hasReceipt ? <span className="bz-trow-receipt"><ShieldCheck size={12} strokeWidth={ICON_STROKE} />Receipt</span> : <span className="bz-trow-spacer" />}
-                          </button>
-                          {isOpen ? (
-                            <div className="bz-receipt">
-                              <div className="bz-receipt-head"><BadgeCheck size={12} strokeWidth={ICON_STROKE} />Settled on-chain · the balance change is the receipt</div>
-                              <div className="bz-receipt-rows">
-                                {BUSINESS.receipt.rows.map((r) => (
-                                  <div key={r.k} className={`bz-receipt-r${'strong' in r && r.strong ? ' is-net' : ''}`}><span>{r.k}</span><b>{r.v}</b></div>
-                                ))}
-                              </div>
-                              <div className="bz-receipt-foot">{BUSINESS.receipt.foot}</div>
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })
-                  ) : charges.length > 0 ? (
+                  {charges.length > 0 ? (
                     charges.map((c) => {
                       const k = kindOf(c.what);
                       const Glyph = KIND_GLYPH[k];
@@ -512,15 +398,14 @@ export function BusinessConsole({ ownerAddress, handle, demo = false, onBack, on
 
         {/* ── RIGHT — the business's AI analyst (the real BizChat) ── */}
         <aside className="bz-right bz-fade" style={{ animationDelay: '90ms' }}>
-          <BizChat demo={demo} />
+          <BizChat />
         </aside>
       </div>
 
       {/* ── THE MONEY SHEETS (the same verbs as the consumer wallet) ── */}
-      {sheet === 'addFunds' ? <AddFundsSheet handle={merchant} address={ownerAddress} requestEnabled={demo} onClose={() => setSheet(null)} /> : null}
-      {sheet === 'send' ? <SendSheet available={available} onSend={onSend} claimEnabled={demo} onClose={() => setSheet(null)} /> : null}
+      {sheet === 'addFunds' ? <AddFundsSheet handle={merchant} address={ownerAddress} requestEnabled={false} onClose={() => setSheet(null)} /> : null}
+      {sheet === 'send' ? <SendSheet available={available} onSend={onSend} claimEnabled={false} onClose={() => setSheet(null)} /> : null}
       {sheet === 'newCharge' ? <NewChargeSheet onCreate={onCreateCharge} onClose={() => setSheet(null)} /> : null}
-      {sheet === 'transfer' && demo ? <MoveSheet kind="transfer" available={available} onMove={(amt) => setDemoAvailable((v) => Math.max(0, v - amt))} onClose={() => setSheet(null)} /> : null}
     </div>
   );
 }
