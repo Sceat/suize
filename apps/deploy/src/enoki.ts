@@ -1,4 +1,4 @@
-import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+import { SuiGrpcClient } from '@mysten/sui/grpc'
 import { registerEnokiWallets } from '@mysten/enoki'
 import { RPC_URL, SUI_NETWORK } from './config'
 
@@ -38,7 +38,7 @@ export const setup_enoki = (): void => {
     return
   }
   try {
-    const client = new SuiJsonRpcClient({ url: RPC_URL, network: SUI_NETWORK })
+    const client = new SuiGrpcClient({ baseUrl: RPC_URL, network: SUI_NETWORK })
     const result = registerEnokiWallets({
       client,
       network: SUI_NETWORK,

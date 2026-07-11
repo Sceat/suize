@@ -40,9 +40,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { resolveTxt, resolveCname, resolve as resolveDns } from "node:dns/promises";
 import type { Server } from "bun";
 import { parseTar, type ParsedTarFileItem } from "nanotar";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import type { SuiGrpcClient } from "@mysten/sui/grpc";
+import type { SuiGraphQLClient } from "@mysten/sui/graphql";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
+import { bcs } from "@mysten/sui/bcs";
 import { fromBase64 } from "@mysten/sui/utils";
 import { verifyPersonalMessageSignature } from "@mysten/sui/verify";
 import {
@@ -56,6 +58,7 @@ import type {
   DomainChallengeResponse,
 } from "@suize/shared";
 import { config } from "../config";
+import { grpcClient, graphqlClient, queryEventPage } from "../sui";
 import { json, getIp } from "../http";
 import { deployDailyCeiling } from "../quota";
 import { encodeObjectIdToBase36 } from "./base36";
@@ -178,13 +181,18 @@ const SUI_ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/;
 // scheme/port/path). Apex or sub — the worker resolves whatever string is stored.
 const DOMAIN_RE = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
-let _suiClient: SuiJsonRpcClient | null = null;
+let _suiClient: SuiGrpcClient | null = null;
+let _gql: SuiGraphQLClient | null = null;
 let _wallet: Ed25519Keypair | null = null;
 
-const suiClient = (): SuiJsonRpcClient => {
-  if (!_suiClient) _suiClient = new SuiJsonRpcClient({ url: config.suiRpcUrl, network: config.suiNetwork });
+const suiClient = (): SuiGrpcClient => {
+  if (!_suiClient) _suiClient = grpcClient();
   return _suiClient;
 };
+
+// GraphQL client for the indexer-shaped reads gRPC core can't express — the
+// SiteCreated / Domain* event scans (site listing, created-at, linked domains).
+const gqlClient = (): SuiGraphQLClient => (_gql ??= graphqlClient());
 
 const wallet = (): Ed25519Keypair => {
   if (!_wallet) _wallet = Ed25519Keypair.fromSecretKey(config.deployWalletKey!);
@@ -339,50 +347,66 @@ const createSiteOnChain = async (
     res = await suiClient().signAndExecuteTransaction({
       transaction: tx,
       signer: wallet(),
-      options: { showObjectChanges: true, showEffects: true },
+      include: { effects: true },
     });
   } catch (err) {
     throw new DeployError(`create_site failed: ${(err as Error).message}`, 502);
   }
 
-  if (res.effects?.status?.status === "failure") {
-    const abortErr = res.effects.status.error ?? "unknown";
-    // EDigestUsed (site.move code 0): this payment digest already minted a Site —
-    // the on-chain one-site-per-payment guard fired (a retry that landed here after
-    // the first mint already committed, or a double-submit). Surface 409, the
-    // multi-replica-safe replacement for the old in-memory settledDeploys 409. The
-    // SDK formats a MoveAbort as e.g.
-    //   MoveAbort(MoveLocation { ... name: Identifier("site") ... }, 0) in command 0
-    // so we match the `site` module + the `, <code>)` abort code 0.
-    if (/MoveAbort\b/.test(abortErr) && /Identifier\("site"\)/.test(abortErr) && /,\s*0\)/.test(abortErr)) {
+  // gRPC TransactionResult is a discriminated union { $kind, Transaction | FailedTransaction };
+  // unwrap to the inner Transaction (carries digest + status + effects).
+  const exec = res.Transaction ?? res.FailedTransaction;
+  if (!exec.status.success) {
+    // gRPC surfaces a STRUCTURED ExecutionError (not a string). EDigestUsed
+    // (site.move abort code 0): this payment digest already minted a Site — the
+    // on-chain one-site-per-payment guard fired (a retry that landed after the first
+    // mint committed, or a double-submit). Match the `site` module + abort code "0"
+    // structurally (cleaner + more robust than the old MoveAbort-string regex), and
+    // surface 409 (the multi-replica-safe replacement for the old settledDeploys 409).
+    const err = exec.status.error;
+    if (err?.$kind === "MoveAbort" && err.MoveAbort.location?.module === "site" && err.MoveAbort.abortCode === "0") {
       throw new DeployError("payment already used for a deploy", 409);
     }
-    throw new DeployError(`create_site aborted: ${abortErr}`, 502);
+    throw new DeployError(`create_site aborted: ${err?.message ?? "unknown"}`, 502);
   }
 
+  // Find the minted Site among the tx's CREATED objects. gRPC effects give the
+  // created object IDs (idOperation 'Created'); we read each object's TYPE (always
+  // populated) and match the Site type — the other created object is the SiteAdminCap
+  // (transferred to the service wallet). This mirrors the old objectChanges type-match.
   const siteType = `${DEPLOY_PACKAGE}::site::Site`;
-  const created = (res.objectChanges ?? []).find(
-    (c): c is Extract<typeof c, { type: "created" }> =>
-      c.type === "created" && c.objectType === siteType,
-  );
-  if (!created) {
+  const createdIds = (exec.effects?.changedObjects ?? [])
+    .filter((c) => c.idOperation === "Created")
+    .map((c) => c.objectId);
+  let siteId: string | null = null;
+  for (const id of createdIds) {
+    try {
+      if ((await suiClient().getObject({ objectId: id })).object.type === siteType) {
+        siteId = id;
+        break;
+      }
+    } catch {
+      /* an unreadable created object — skip, try the next */
+    }
+  }
+  if (!siteId) {
     throw new DeployError("create_site: Site object not found in tx effects", 502);
   }
 
   // Confirm finality before we hand back a URL the worker will immediately read —
   // bounded, and LOUD on failure. Deliberately non-fatal: the mint already
-  // succeeded (effects checked above), so throwing here would tell the caller a
+  // succeeded (status checked above), so throwing here would tell the caller a
   // live Site failed — and release a charge that already paid for it.
   try {
-    await suiClient().waitForTransaction({ digest: res.digest, timeout: 15_000 });
+    await suiClient().waitForTransaction({ digest: exec.digest, timeout: 15_000 });
   } catch {
     console.warn(
-      `[deploy] create_site ${res.digest} executed but not yet indexed after 15s — ` +
+      `[deploy] create_site ${exec.digest} executed but not yet indexed after 15s — ` +
         `the returned URL may 404 briefly while the worker's fullnode catches up`,
     );
   }
 
-  return { siteId: created.objectId, digest: res.digest };
+  return { siteId, digest: exec.digest };
 };
 
 // ---------------------------------------------------------------------------
@@ -735,21 +759,18 @@ export interface OwnedSite {
 export const sitesForOwner = async (owner: string, maxPages = 10): Promise<OwnedSite[]> => {
   const ownerLc = owner.toLowerCase();
   const out = new Map<string, OwnedSite>();
-  let cursor: any = null;
+  const gql = gqlClient();
+  const type = `${DEPLOY_PACKAGE}::site::SiteCreated`;
+  let before: string | null = null;
   for (let page = 0; page < maxPages; page++) {
-    const events = await suiClient().queryEvents({
-      query: { MoveEventType: `${DEPLOY_PACKAGE}::site::SiteCreated` },
-      order: "descending",
-      cursor,
-      limit: 50,
-    });
-    for (const ev of events.data) {
-      const pj = ev.parsedJson as SiteCreatedJson;
+    const p = await queryEventPage(gql, type, before);
+    for (const ev of p.events) {
+      const pj = ev.json as SiteCreatedJson;
       if (!pj?.site_id || String(pj.owner ?? "").toLowerCase() !== ownerLc) continue;
       if (!out.has(pj.site_id)) out.set(pj.site_id, { siteId: pj.site_id, sizeBytes: toNum(pj.size_bytes) });
     }
-    if (!events.hasNextPage || events.nextCursor == null) break;
-    cursor = events.nextCursor;
+    if (!p.hasMore || !p.cursor) break;
+    before = p.cursor;
   }
   return [...out.values()];
 };
@@ -765,17 +786,13 @@ const handleListSites = async (req: Request, url: URL, origin: string | null, se
 
   try {
     // Page through SiteCreated events (newest first). Filter by owner client-side
-    // (the event carries `owner` in parsedJson — there's no on-chain index by
-    // owner, matching SPEC §7 "read SiteCreated events, keep it simple").
-    const events = await suiClient().queryEvents({
-      query: { MoveEventType: `${DEPLOY_PACKAGE}::site::SiteCreated` },
-      order: "descending",
-      limit: 50,
-    });
+    // (the event carries `owner` in its JSON — there's no on-chain index by owner,
+    // matching SPEC §7 "read SiteCreated events, keep it simple").
+    const page = await queryEventPage(gqlClient(), `${DEPLOY_PACKAGE}::site::SiteCreated`);
 
     const sites: SiteInfo[] = [];
-    for (const ev of events.data) {
-      const pj = ev.parsedJson as SiteCreatedJson;
+    for (const ev of page.events) {
+      const pj = ev.json as SiteCreatedJson;
       if (!pj?.site_id) continue;
       if (ownerFilter && pj.owner !== ownerFilter) continue;
       const siteId = pj.site_id;
@@ -787,7 +804,7 @@ const handleListSites = async (req: Request, url: URL, origin: string | null, se
         // size/fileCount now ride on the SiteCreated event (real on-chain values).
         sizeBytes: toNum(pj.size_bytes),
         fileCount: toNum(pj.file_count),
-        createdAtMs: ev.timestampMs ? Number(ev.timestampMs) : 0,
+        createdAtMs: ev.timestampMs,
         domains: [],
       });
     }
@@ -804,14 +821,18 @@ const handleGetSite = async (req: Request, siteId: string, origin: string | null
   if (!SUI_ADDRESS_RE.test(siteId)) return json({ error: "invalid site id" }, 400, origin);
 
   try {
-    const res = await suiClient().getObject({ id: siteId, options: { showContent: true } });
-    const content = res.data?.content;
-    if (!content || content.dataType !== "moveObject") {
+    // gRPC getObject THROWS on a missing object → treat that as 404 (not the outer
+    // 502). `.object.json` is the Move struct's fields.
+    let obj;
+    try {
+      obj = (await suiClient().getObject({ objectId: siteId, include: { json: true } })).object;
+    } catch {
       return json({ error: "site not found" }, 404, origin);
     }
-    const fields = content.fields as Record<string, unknown>;
+    if (!obj?.json) return json({ error: "site not found" }, 404, origin);
     const expectedType = `${DEPLOY_PACKAGE}::site::Site`;
-    if (content.type !== expectedType) return json({ error: "not a Site object" }, 404, origin);
+    if (obj.type !== expectedType) return json({ error: "not a Site object" }, 404, origin);
+    const fields = obj.json as Record<string, unknown>;
 
     // Linked domains + creation timestamp (from the SiteCreated event — the Move
     // struct doesn't store time) + the Walrus storage end-epoch (the binding blob's
@@ -870,20 +891,17 @@ const handleGetSite = async (req: Request, siteId: string, origin: string | null
  */
 const createdAtMsForSite = async (siteId: string): Promise<number> => {
   try {
-    let cursor: any = null;
+    const gql = gqlClient();
+    const type = `${DEPLOY_PACKAGE}::site::SiteCreated`;
+    let before: string | null = null;
     for (let page = 0; page < 10; page++) {
-      const events = await suiClient().queryEvents({
-        query: { MoveEventType: `${DEPLOY_PACKAGE}::site::SiteCreated` },
-        order: "descending",
-        limit: 50,
-        cursor,
-      });
-      for (const ev of events.data) {
-        const pj = ev.parsedJson as SiteCreatedJson;
-        if (pj?.site_id === siteId) return ev.timestampMs ? Number(ev.timestampMs) : 0;
+      const p = await queryEventPage(gql, type, before);
+      for (const ev of p.events) {
+        const pj = ev.json as SiteCreatedJson;
+        if (pj?.site_id === siteId) return ev.timestampMs;
       }
-      if (!events.hasNextPage) break;
-      cursor = events.nextCursor ?? null;
+      if (!p.hasMore || !p.cursor) break;
+      before = p.cursor;
     }
   } catch (err) {
     console.error("[deploy/created-at]", (err as Error).message);
@@ -894,31 +912,34 @@ const createdAtMsForSite = async (siteId: string): Promise<number> => {
 /** Domains currently linked to a site, from the DomainLinked/DomainUnlinked event log. */
 const domainsForSite = async (siteId: string): Promise<string[]> => {
   try {
-    const [linked, unlinked] = await Promise.all([
-      suiClient().queryEvents({
-        query: { MoveEventType: `${DEPLOY_PACKAGE}::domain_registry::DomainLinked` },
-        order: "descending",
-        limit: 200,
-      }),
-      suiClient().queryEvents({
-        query: { MoveEventType: `${DEPLOY_PACKAGE}::domain_registry::DomainUnlinked` },
-        order: "descending",
-        limit: 200,
-      }),
-    ]);
-    // Latest event per domain wins (the registry is a Table keyed by domain).
+    const gql = gqlClient();
+    // Page each event type newest-first over the indexer (~200-event window). Latest
+    // event per domain wins; linked is processed before unlinked so an (impossible)
+    // exact-timestamp tie resolves unlinked-wins, exactly as before.
+    const collect = async (type: string, maxEvents = 200) => {
+      const acc: { json: Record<string, unknown>; ts: number }[] = [];
+      let before: string | null = null;
+      while (acc.length < maxEvents) {
+        const p = await queryEventPage(gql, type, before);
+        for (const ev of p.events) acc.push({ json: ev.json, ts: ev.timestampMs });
+        if (!p.hasMore || !p.cursor) break;
+        before = p.cursor;
+      }
+      return acc;
+    };
+    const linked = await collect(`${DEPLOY_PACKAGE}::domain_registry::DomainLinked`);
+    const unlinked = await collect(`${DEPLOY_PACKAGE}::domain_registry::DomainUnlinked`);
+
     const latest = new Map<string, { site?: string; linked: boolean; ts: number }>();
-    for (const ev of linked.data) {
-      const pj = ev.parsedJson as { domain?: string; site_id?: string };
+    for (const { json, ts } of linked) {
+      const pj = json as { domain?: string; site_id?: string };
       if (!pj?.domain) continue;
-      const ts = ev.timestampMs ? Number(ev.timestampMs) : 0;
       const prev = latest.get(pj.domain);
       if (!prev || ts >= prev.ts) latest.set(pj.domain, { site: pj.site_id, linked: true, ts });
     }
-    for (const ev of unlinked.data) {
-      const pj = ev.parsedJson as { domain?: string };
+    for (const { json, ts } of unlinked) {
+      const pj = json as { domain?: string };
       if (!pj?.domain) continue;
-      const ts = ev.timestampMs ? Number(ev.timestampMs) : 0;
       const prev = latest.get(pj.domain);
       if (!prev || ts >= prev.ts) latest.set(pj.domain, { linked: false, ts });
     }
@@ -1097,11 +1118,9 @@ const cnameRoutesToUs = async (domain: string, expectedTarget: string): Promise<
 /** Read the on-chain `owner` address recorded on a Site object, or null if unreadable. */
 const siteOwner = async (siteId: string): Promise<string | null> => {
   try {
-    const res = await suiClient().getObject({ id: siteId, options: { showContent: true } });
-    const content = res.data?.content;
-    if (!content || content.dataType !== "moveObject") return null;
-    if (content.type !== `${DEPLOY_PACKAGE}::site::Site`) return null;
-    const owner = (content.fields as Record<string, unknown>).owner;
+    const obj = (await suiClient().getObject({ objectId: siteId, include: { json: true } })).object;
+    if (!obj?.json || obj.type !== `${DEPLOY_PACKAGE}::site::Site`) return null;
+    const owner = (obj.json as Record<string, unknown>).owner;
     return typeof owner === "string" ? owner : null;
   } catch {
     return null;
@@ -1175,12 +1194,13 @@ const linkDomainOnChain = async (siteId: string, domain: string): Promise<string
     const res = await suiClient().signAndExecuteTransaction({
       transaction: tx,
       signer: wallet(),
-      options: { showEffects: true },
+      include: { effects: true },
     });
-    if (res.effects?.status?.status === "failure") {
-      throw new DeployError(`link_domain aborted: ${res.effects.status.error ?? "unknown"}`, 409);
+    const exec = res.Transaction ?? res.FailedTransaction;
+    if (!exec.status.success) {
+      throw new DeployError(`link_domain aborted: ${exec.status.error?.message ?? "unknown"}`, 409);
     }
-    return res.digest;
+    return exec.digest;
   } catch (err) {
     if (err instanceof DeployError) throw err;
     throw new DeployError(`link_domain failed: ${(err as Error).message}`, 502);
@@ -1210,12 +1230,13 @@ const unlinkDomainOnChain = async (domain: string): Promise<string> => {
     const res = await suiClient().signAndExecuteTransaction({
       transaction: tx,
       signer: wallet(),
-      options: { showEffects: true },
+      include: { effects: true },
     });
-    if (res.effects?.status?.status === "failure") {
-      throw new DeployError(`unlink_domain aborted: ${res.effects.status.error ?? "unknown"}`, 502);
+    const exec = res.Transaction ?? res.FailedTransaction;
+    if (!exec.status.success) {
+      throw new DeployError(`unlink_domain aborted: ${exec.status.error?.message ?? "unknown"}`, 502);
     }
-    return res.digest;
+    return exec.digest;
   } catch (err) {
     if (err instanceof DeployError) throw err;
     throw new DeployError(`unlink_domain failed: ${(err as Error).message}`, 502);
@@ -1225,17 +1246,18 @@ const unlinkDomainOnChain = async (domain: string): Promise<string> => {
 /** Which site a domain currently points at (latest DomainLinked not since unlinked). */
 const siteForDomain = async (domain: string): Promise<string | null> => {
   try {
-    const field = await suiClient().getDynamicFieldObject({
+    // gRPC dynamic-field read (same parent + name derivation as the old
+    // getDynamicFieldObject): the registry maps domain (String) → site ID. The value
+    // comes back BCS-encoded; decode it as an address/ID. A missing link THROWS
+    // (derived field not found) → caught → null (unlinked), matching the old behavior.
+    const field = await suiClient().getDynamicField({
       parentId: DOMAIN_REGISTRY_OBJECT,
-      name: { type: "0x1::string::String", value: domain },
+      name: { type: "0x1::string::String", bcs: bcs.string().serialize(domain).toBytes() },
     });
-    const content = field.data?.content;
-    if (content?.dataType === "moveObject") {
-      const value = (content.fields as Record<string, unknown>).value;
-      if (typeof value === "string") return value;
-    }
+    const valueBcs = field.dynamicField?.value?.bcs;
+    if (valueBcs && valueBcs.length > 0) return bcs.Address.parse(valueBcs);
   } catch {
-    /* not found */
+    /* not found / unlinked */
   }
   return null;
 };
@@ -1247,23 +1269,26 @@ const siteForDomain = async (domain: string): Promise<string | null> => {
  */
 const findAdminCapForSite = async (siteId: string): Promise<string | null> => {
   const capType = `${DEPLOY_PACKAGE}::site::SiteAdminCap`;
+  // Extracted so the loop-reassigned cursor doesn't feed back into the generic
+  // listOwnedObjects inference (TS7022): the param type is fixed here, independent
+  // of the loop.
+  const capPage = (c: string | null) =>
+    suiClient().listOwnedObjects({
+      owner: serviceAddress(),
+      type: capType,
+      include: { json: true },
+      cursor: c,
+    });
   try {
-    let cursor: string | null | undefined = undefined;
+    let cursor: string | null = null;
     for (let page = 0; page < 10; page++) {
-      const owned = await suiClient().getOwnedObjects({
-        owner: serviceAddress(),
-        filter: { StructType: capType },
-        options: { showContent: true },
-        cursor: cursor ?? null,
-      });
-      for (const o of owned.data) {
-        const content = o.data?.content;
-        if (content?.dataType !== "moveObject") continue;
-        const sid = (content.fields as Record<string, unknown>).site_id;
-        if (sid === siteId) return o.data?.objectId ?? null;
+      const owned = await capPage(cursor);
+      for (const o of owned.objects) {
+        const sid = (o.json as Record<string, unknown> | null | undefined)?.site_id;
+        if (sid === siteId) return o.objectId;
       }
       if (!owned.hasNextPage) break;
-      cursor = owned.nextCursor;
+      cursor = owned.cursor;
     }
   } catch (err) {
     console.error("[deploy/admin-cap]", (err as Error).message);
@@ -1661,14 +1686,12 @@ const handleWalletAddress = (req: Request, origin: string | null, server?: Serve
 export const deployReady = async (): Promise<boolean> => {
   if (!DEPLOY_ENABLED) return false;
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1500);
-    try {
-      const seq = await suiClient().getLatestCheckpointSequenceNumber({ signal: controller.signal });
-      return typeof seq === "string" && seq.length > 0;
-    } finally {
-      clearTimeout(timer);
-    }
+    // Cheapest gRPC liveness read (checkpoint height), 1.5s-bounded.
+    const info = await Promise.race([
+      suiClient().ledgerService.getServiceInfo({}),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 1500)),
+    ]);
+    return typeof info.response.checkpointHeight === "bigint";
   } catch {
     return false;
   }

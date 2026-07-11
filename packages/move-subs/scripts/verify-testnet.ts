@@ -30,7 +30,6 @@ import {
   SUBS_MOVE_TARGETS,
   CRASH_MOVE_TARGETS,
   WALLET_MOVE_TARGETS,
-  fullnodeUrl,
 } from '@suize/shared'
 
 // ── constants ────────────────────────────────────────────────────────────────
@@ -84,7 +83,17 @@ function loadEnokiKey(): string | undefined {
   }
 }
 
-const client = new SuiJsonRpcClient({ url: fullnodeUrl('testnet'), network: 'testnet' })
+// 2026-07-10: Mysten retired public JSON-RPC (fullnodeUrl deleted from @suize/shared).
+// This harness's ~17 call sites are still JSON-RPC-shaped — full gRPC/GraphQL migration is
+// scheduled with the mainnet republish (marketing/DEMO-DAY-PLAN.md workstream A). To run it
+// TODAY, point it at a live third-party JSON-RPC endpoint explicitly:
+const RPC_URL = process.env.SUBS_VERIFY_JSONRPC_URL
+if (!RPC_URL)
+  throw new Error(
+    'Mysten public JSON-RPC is retired and this script is pending gRPC migration. ' +
+      'Set SUBS_VERIFY_JSONRPC_URL to a live JSON-RPC endpoint (e.g. https://sui-testnet-rpc.publicnode.com) to run as-is.',
+  )
+const client = new SuiJsonRpcClient({ url: RPC_URL, network: 'testnet' })
 const signer = loadCliKeypair()
 const sender = signer.toSuiAddress()
 const enokiKey = loadEnokiKey()

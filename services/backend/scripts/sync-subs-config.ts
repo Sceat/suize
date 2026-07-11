@@ -23,18 +23,19 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
 import {
   packageIds,
   resolveNetwork,
   resolveTreasury,
-  fullnodeUrl,
+  grpcUrl,
   TREASURY_SUINS_DOTTED,
   SUI_ADDRESS_RE,
   USDC_TYPES,
 } from "@suize/shared";
+import { treasuryResolver } from "../src/sui";
 
 const network = resolveNetwork(process.env.SUI_NETWORK);
 const DRY_RUN = process.env.DRY_RUN === "1";
@@ -81,22 +82,22 @@ async function main() {
   const { SUBS } = packageIds(network);
   if (SUBS.PACKAGE === "0x0") throw new Error(`subs not published on ${network} — nothing to sync`);
 
-  const client = new SuiJsonRpcClient({ url: fullnodeUrl(network), network });
+  const client = new SuiGrpcClient({ network, baseUrl: grpcUrl(network) });
 
-  // The canonical values to enforce.
-  const targetTreasury = await resolveTreasury(client);
+  // The canonical values to enforce. gRPC has no resolveNameServiceAddress, so adapt
+  // the client to the shared TreasuryResolver (name→address via NameService.lookupName).
+  const targetTreasury = await resolveTreasury(treasuryResolver(client));
   if (!targetTreasury || !SUI_ADDRESS_RE.test(targetTreasury)) {
     throw new Error(`${TREASURY_SUINS_DOTTED} did not resolve to a valid address on ${network} — aborting (won't guess)`);
   }
   const usdcType = USDC_TYPES[network];
 
   // The current on-chain SubsConfig.
-  const cfg = await client.getObject({ id: SUBS.CONFIG_OBJECT, options: { showContent: true } });
-  const content = cfg.data?.content;
-  if (!content || content.dataType !== "moveObject") {
+  const cfgObj = (await client.getObject({ objectId: SUBS.CONFIG_OBJECT, include: { json: true } })).object;
+  if (!cfgObj?.json) {
     throw new Error(`could not read SubsConfig from ${SUBS.CONFIG_OBJECT}`);
   }
-  const fields = content.fields as Record<string, unknown>;
+  const fields = cfgObj.json as Record<string, unknown>;
   const curTreasury = (fields.treasury as string) ?? "";
   const curCoin = extractCoinType(fields.coin_type);
 
@@ -117,12 +118,11 @@ async function main() {
   // Find the SubsAdminCap the signer holds.
   const admin = loadAdminKeypair();
   const adminAddr = admin.toSuiAddress();
-  const caps = await client.getOwnedObjects({
+  const caps = await client.listOwnedObjects({
     owner: adminAddr,
-    filter: { StructType: `${SUBS.PACKAGE}::subscription::SubsAdminCap` },
-    options: { showType: true },
+    type: `${SUBS.PACKAGE}::subscription::SubsAdminCap`,
   });
-  const capId = caps.data[0]?.data?.objectId;
+  const capId = caps.objects[0]?.objectId;
   if (!capId) throw new Error(`signer ${adminAddr} holds no SubsAdminCap — wrong wallet?`);
 
   console.log(`\nsigner: ${adminAddr}\n  cap:    ${capId}\n  config: ${SUBS.CONFIG_OBJECT}`);
@@ -149,12 +149,13 @@ async function main() {
   const res = await client.signAndExecuteTransaction({
     transaction: tx,
     signer: admin,
-    options: { showEffects: true },
+    include: { effects: true },
   });
-  if (res.effects?.status?.status !== "success") {
-    throw new Error(`sync failed: ${res.effects?.status?.error}`);
+  const exec = res.Transaction ?? res.FailedTransaction;
+  if (!exec.status.success) {
+    throw new Error(`sync failed: ${exec.status.error?.message ?? "unknown"}`);
   }
-  console.log(`\n✓ synced (treasury${treasuryOk ? "" : " set"}, coin_type${coinOk ? "" : " set"}). digest: ${res.digest}`);
+  console.log(`\n✓ synced (treasury${treasuryOk ? "" : " set"}, coin_type${coinOk ? "" : " set"}). digest: ${exec.digest}`);
 }
 
 main().catch((e) => {

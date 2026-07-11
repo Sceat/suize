@@ -11,11 +11,11 @@
 // Exits non-zero on ANY drift (so it can gate a deploy). Keep EXPECT in lockstep with the
 // PTB builders: bump the `args` here whenever you add/remove a moveCall argument.
 
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
-import { PACKAGE_IDS, resolveNetwork, fullnodeUrl } from "@suize/shared";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
+import { PACKAGE_IDS, resolveNetwork, grpcUrl } from "@suize/shared";
 
 const network = resolveNetwork(process.env.SUI_NETWORK);
-const client = new SuiJsonRpcClient({ url: fullnodeUrl(network), network });
+const client = new SuiGrpcClient({ network, baseUrl: grpcUrl(network) });
 
 // EXPECT[i].args = the number of VALUE arguments the PTB supplies (everything EXCEPT the
 // runtime-injected `&mut TxContext`; `&Clock`, objects, and pure values all count).
@@ -52,7 +52,8 @@ async function main() {
     }
     let sig: { parameters?: unknown[]; typeParameters?: unknown[] };
     try {
-      sig = await client.getNormalizedMoveFunction({ package: pkg, module, function: fn });
+      // gRPC getMoveFunction → { function: { parameters, typeParameters, ... } }.
+      sig = (await client.getMoveFunction({ packageId: pkg, moduleName: module, name: fn })).function;
     } catch (err) {
       console.error(`✗ ${module}::${fn} — could not read signature: ${(err as Error).message}`);
       drift++;

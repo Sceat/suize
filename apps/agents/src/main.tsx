@@ -2,7 +2,7 @@ import React, { useEffect } from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { SuiClientProvider, WalletProvider, createNetworkConfig } from '@mysten/dapp-kit'
-import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+import { SuiGrpcClient } from '@mysten/sui/grpc'
 import { registerEnokiWallets, isEnokiNetwork } from '@mysten/enoki'
 import { Analytics } from '@vercel/analytics/react'
 import '@mysten/dapp-kit/dist/index.css'
@@ -40,7 +40,7 @@ function RegisterEnoki() {
     if (!ENOKI_API_KEY || !GOOGLE_CLIENT_ID) return
     if (!isEnokiNetwork(NETWORK)) return
 
-    const client = new SuiJsonRpcClient({ url: RPC_URL, network: NETWORK })
+    const client = new SuiGrpcClient({ baseUrl: RPC_URL, network: NETWORK })
     const { unregister } = registerEnokiWallets({
       apiKey: ENOKI_API_KEY,
       providers: {

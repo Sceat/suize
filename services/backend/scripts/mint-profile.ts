@@ -14,10 +14,10 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
-import { packageIds, resolveNetwork, fullnodeUrl, USDC_TYPES, PROFILE_FEE, type SuiNetwork } from "@suize/shared";
+import { packageIds, resolveNetwork, grpcUrl, USDC_TYPES, PROFILE_FEE, type SuiNetwork } from "@suize/shared";
 
 const network = resolveNetwork(process.env.SUI_NETWORK) as SuiNetwork;
 const DRY_RUN = process.env.DRY_RUN === "1";
@@ -50,7 +50,7 @@ async function main() {
   const { PROFILE } = packageIds(network);
   if (PROFILE.PACKAGE === "0x0") throw new Error(`profile not published on ${network}`);
   const usdcType = USDC_TYPES[network];
-  const client = new SuiJsonRpcClient({ url: fullnodeUrl(network), network });
+  const client = new SuiGrpcClient({ network, baseUrl: grpcUrl(network) });
   const signer = loadKeypair();
   const addr = signer.toSuiAddress();
 
@@ -83,17 +83,24 @@ async function main() {
   const res = await client.signAndExecuteTransaction({
     transaction: tx,
     signer,
-    options: { showEffects: true, showObjectChanges: true },
+    include: { effects: true },
   });
-  if (res.effects?.status?.status !== "success") {
-    throw new Error(`mint failed: ${res.effects?.status?.error}`);
+  // gRPC TransactionResult union → unwrap the inner Transaction (digest + status + effects).
+  const exec = res.Transaction ?? res.FailedTransaction;
+  if (!exec.status.success) {
+    throw new Error(`mint failed: ${exec.status.error?.message ?? "unknown"}`);
   }
-  const created = (res.objectChanges ?? []).find(
-    (c) => c.type === "created" && typeof c.objectType === "string" && c.objectType.endsWith("::profile::BusinessProfile"),
-  );
-  const profileId = created && "objectId" in created ? created.objectId : "(unknown)";
+  // Identify the minted BusinessProfile among the created objects by TYPE (reliable).
+  let profileId = "(unknown)";
+  for (const c of exec.effects?.changedObjects ?? []) {
+    if (c.idOperation !== "Created") continue;
+    try {
+      const t = (await client.getObject({ objectId: c.objectId })).object.type;
+      if (t.endsWith("::profile::BusinessProfile")) { profileId = c.objectId; break; }
+    } catch { /* skip unreadable */ }
+  }
   console.log(`\n✓ minted BusinessProfile ${profileId}`);
-  console.log(`  digest: ${res.digest}`);
+  console.log(`  digest: ${exec.digest}`);
 }
 
 main().catch((e) => {

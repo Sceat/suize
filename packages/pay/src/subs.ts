@@ -9,9 +9,12 @@
 //   const subs = suizeSubs({ merchant: "0x<your address>" });
 //   if (await subs.isActive(subscriptionId)) serve(); else upsell();
 //
-// Zero dependencies — raw JSON-RPC `fetch` against the public Sui fullnode (no
-// @mysten SDK, no @suize/shared). The merchant address IS the account; the only
-// state this helper holds is a tiny per-object TTL cache for `isActive`.
+// Zero dependencies — raw GraphQL `fetch` against the public Sui GraphQL RPC (no
+// @mysten SDK, no @suize/shared). Mysten retired the public JSON-RPC fullnode, and
+// the node's gRPC replacement exposes no event-query surface this merchant helper
+// needs, so the reads run over Sui's GraphQL RPC — still one plain `fetch` of JSON,
+// still zero deps. The merchant address IS the account; the only state this helper
+// holds is a tiny per-object TTL cache for `isActive`.
 //
 // ⚠️ SYNC REQUIREMENT (zero-dep mirror of @suize/shared): SUBS_PACKAGES below
 // mirrors @suize/shared PACKAGE_IDS.SUBS.PACKAGE. The `subs` module is published
@@ -69,7 +72,8 @@ export interface SuizeSubsConfig {
   graceMs?: number;
   /** `isActive` per-object cache TTL in ms (default 30 000). Reads are deduped. */
   cacheTtlMs?: number;
-  /** Override the JSON-RPC fullnode URL (default: the public per-network node). */
+  /** Override the Sui GraphQL RPC endpoint URL (default: the public per-network
+   * `https://graphql.<network>.sui.io/graphql`). */
   rpcUrl?: string;
   /** Override the `subs` package id (default: the SUBS_PACKAGES literal below). */
   subsPackage?: string;
@@ -84,9 +88,11 @@ const SUBS_PACKAGES: Record<"testnet" | "mainnet", string> = {
   mainnet: "0x0",
 };
 
-const RPC_URLS: Record<"testnet" | "mainnet", string> = {
-  testnet: "https://fullnode.testnet.sui.io:443",
-  mainnet: "https://fullnode.mainnet.sui.io:443",
+// The public Sui GraphQL RPC endpoint per network (JSON over HTTP POST — the
+// zero-dep read transport now that the public JSON-RPC fullnode is retired).
+const GRAPHQL_URLS: Record<"testnet" | "mainnet", string> = {
+  testnet: "https://graphql.testnet.sui.io/graphql",
+  mainnet: "https://graphql.mainnet.sui.io/graphql",
 };
 
 /** The fully-qualified event type for a given subs package + struct name. */
@@ -95,28 +101,38 @@ const eventType = (pkg: string, name: string): string => `${pkg}::subscription::
 /** Strip the type arg off a `Subscription<…>` type tag → the bare struct path. */
 const bareType = (t: string): string => t.replace(/<.*>$/, "");
 
-/** Coerce a JSON-RPC numeric-string field to a number (Move u64 comes as string). */
+/** Coerce a Move u64 field to a number (GraphQL renders u64 as a decimal string). */
 const num = (v: unknown): number => (typeof v === "number" ? v : Number(v ?? 0));
 
 /**
- * Normalize a Move `vector<u8>` `ref` to a lowercase BARE-hex string (no `0x`). The
- * Sui JSON-RPC renders a `vector<u8>` in `parsedJson` / object content as a NUMBER
- * ARRAY (`[116,101,…]`) — NOT a string — so a merchant's correlation id (e.g. a 32-byte
- * site id) must be hex-encoded back here to be comparable. We also accept a string ref
- * defensively: a hex string (`0x…` or bare) passes through (lowercased, `0x` stripped),
- * and any other string falls back to its UTF-8 bytes hex-encoded. Empty → "".
+ * Normalize a Move `vector<u8>` `ref` to a lowercase BARE-hex string (no `0x`), so a
+ * merchant's correlation id (e.g. a 32-byte site id) is comparable however it arrives.
+ * Sui GraphQL renders a `vector<u8>` in `MoveValue.json` as a BASE64 string, so that
+ * is the primary case; we also accept, in order: a `0x…`/bare-hex string (a caller's
+ * own ref in `findByRef`), a number array (defensive), a base64 string (the GraphQL
+ * rendering), else the UTF-8 bytes of an opaque string. Empty → "". Both the on-chain
+ * ref and the caller's ref pass through this, so they compare apples-to-apples.
  */
+const bytesToHex = (bytes: Iterable<number>): string =>
+  Array.from(bytes, (b) => (b & 0xff).toString(16).padStart(2, "0")).join("");
+
 const refHex = (v: unknown): string => {
-  if (Array.isArray(v) && v.every((b) => typeof b === "number")) {
-    return (v as number[]).map((b) => (b & 0xff).toString(16).padStart(2, "0")).join("");
-  }
+  if (Array.isArray(v) && v.every((b) => typeof b === "number")) return bytesToHex(v as number[]);
   if (typeof v === "string") {
-    const s = v.startsWith("0x") ? v.slice(2) : v;
-    if (/^[0-9a-fA-F]*$/.test(s) && s.length % 2 === 0) return s.toLowerCase();
-    // a non-hex opaque string ref — compare by its UTF-8 bytes' hex.
-    return Array.from(new TextEncoder().encode(v))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
+    if (v === "") return "";
+    // A pure-hex, even-length string is a caller-supplied hex ref (`0x…` or bare).
+    const body = v.startsWith("0x") ? v.slice(2) : v;
+    if (/^[0-9a-fA-F]+$/.test(body) && body.length % 2 === 0) return body.toLowerCase();
+    // Otherwise it is the GraphQL base64 rendering of the bytes — decode → hex.
+    try {
+      const bin = atob(v);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i) & 0xff;
+      return bytesToHex(bytes);
+    } catch {
+      // not base64 either — an opaque string ref; compare by its UTF-8 bytes' hex.
+      return bytesToHex(new TextEncoder().encode(v));
+    }
   }
   return "";
 };
@@ -126,54 +142,61 @@ export const suizeSubs = (config: SuizeSubsConfig) => {
   const merchant = config.merchant.toLowerCase();
   const graceMs = config.graceMs ?? 0;
   const cacheTtlMs = config.cacheTtlMs ?? 30_000;
-  const rpcUrl = config.rpcUrl ?? RPC_URLS[network];
+  const graphqlUrl = config.rpcUrl ?? GRAPHQL_URLS[network];
   const pkg = config.subsPackage ?? SUBS_PACKAGES[network];
   const SUBSCRIPTION_TYPE = `${pkg}::subscription::Subscription`;
 
   const cache = new Map<string, { status: SubStatus | null; at: number }>();
 
-  /** One JSON-RPC call. Throws on transport error or an RPC `error` body. */
-  const rpc = async <T>(method: string, params: unknown[]): Promise<T> => {
-    const res = await fetch(rpcUrl, {
+  /** One GraphQL query. Throws on transport error or a GraphQL `errors` body — every
+   * read here is a gate, so a failed read PROPAGATES (fail closed). */
+  const gql = async <T>(query: string, variables: Record<string, unknown>): Promise<T> => {
+    const res = await fetch(graphqlUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      body: JSON.stringify({ query, variables }),
     });
-    const body = (await res.json()) as { result?: T; error?: { message?: string } };
-    if (body.error) throw new Error(`${method}: ${body.error.message ?? "rpc error"}`);
-    return body.result as T;
+    const body = (await res.json()) as { data?: T; errors?: Array<{ message?: string }> };
+    if (body.errors?.length) throw new Error(`graphql: ${body.errors[0]?.message ?? "query error"}`);
+    return body.data as T;
   };
+
+  // GraphQL: the object's Move struct type (`contents.type.repr` — the full type incl.
+  // its `<coinType>`) plus its fields (`contents.json`). A missing / deleted / non-Move
+  // object resolves `object` or `asMoveObject` to null → inactive.
+  const OBJECT_QUERY = `query($id: SuiAddress!) {
+    object(address: $id) { address asMoveObject { contents { type { repr } json } } }
+  }`;
 
   /** Read a subscription object → its distilled status, or null if it is not a
    * Subscription of THIS merchant (wrong type, wrong merchant, or deleted). */
   const readObject = async (subscriptionId: string): Promise<SubStatus | null> => {
     type ObjResp = {
-      data?: {
-        objectId: string;
-        type?: string;
-        content?: { fields?: Record<string, unknown> };
-      };
-      error?: unknown;
+      object: {
+        address: string;
+        asMoveObject: {
+          contents: { type: { repr: string }; json: Record<string, unknown> } | null;
+        } | null;
+      } | null;
     };
-    const obj = await rpc<ObjResp>("sui_getObject", [
-      subscriptionId,
-      { showType: true, showContent: true },
-    ]);
-    const data = obj?.data;
-    if (!data || obj.error) return null; // deleted / not found → inactive
+    const data = await gql<ObjResp>(OBJECT_QUERY, { id: subscriptionId });
+    const obj = data.object;
+    const contents = obj?.asMoveObject?.contents;
+    if (!obj || !contents) return null; // deleted / not found / not a Move object → inactive
     // The type must be OUR Subscription struct (any coin type arg).
-    if (!data.type || bareType(data.type) !== SUBSCRIPTION_TYPE) return null;
-    const f = data.content?.fields ?? {};
+    const type = contents.type?.repr ?? "";
+    if (bareType(type) !== SUBSCRIPTION_TYPE) return null;
+    const f = contents.json ?? {};
     const objMerchant = String(f.merchant ?? "").toLowerCase();
     if (objMerchant !== merchant) return null; // a stranger's subscription — never honor
     const paidUntilMs = num(f.paid_until_ms);
     // The coin type is the `<T>` of `Subscription<T>` — the WHAT-was-paid that the bare
     // type match deliberately drops. A value-granting merchant binds this to USDC.
-    const lt = data.type.indexOf("<");
-    const gt = data.type.lastIndexOf(">");
-    const coinType = lt >= 0 && gt > lt ? data.type.slice(lt + 1, gt).trim().toLowerCase() : "";
+    const lt = type.indexOf("<");
+    const gt = type.lastIndexOf(">");
+    const coinType = lt >= 0 && gt > lt ? type.slice(lt + 1, gt).trim().toLowerCase() : "";
     return {
-      subscriptionId: data.objectId,
+      subscriptionId: obj.address,
       owner: String(f.owner ?? ""), // owner is not a field; filled by the event path
       merchant: objMerchant,
       amount: num(f.amount),
@@ -203,23 +226,30 @@ export const suizeSubs = (config: SuizeSubsConfig) => {
   /** The full status (uncached), or null if it is not an honorable subscription. */
   const status = (subscriptionId: string): Promise<SubStatus | null> => readObject(subscriptionId);
 
-  /** Normalize one `suix_queryEvents` node into a SubEvent (or null if irrelevant). */
-  const toEvent = (node: {
-    id?: { txDigest?: string };
-    type?: string;
-    parsedJson?: Record<string, unknown>;
-    timestampMs?: string | number;
-  }): SubEvent | null => {
-    const t = node.type ?? "";
-    const kind: SubEvent["kind"] | null = t.endsWith("::SubscriptionCreated")
-      ? "created"
-      : t.endsWith("::SubscriptionRenewed")
-        ? "renewed"
-        : t.endsWith("::SubscriptionCancelled")
-          ? "cancelled"
-          : null;
-    if (!kind) return null;
-    const j = node.parsedJson ?? {};
+  const EVENTS_QUERY = `query($type: String!, $last: Int!, $before: String) {
+    events(filter: { type: $type }, last: $last, before: $before) {
+      pageInfo { hasPreviousPage startCursor }
+      nodes { transaction { digest } timestamp contents { json } }
+    }
+  }`;
+
+  type EventNode = {
+    transaction: { digest: string } | null;
+    timestamp: string | null;
+    contents: { json: Record<string, unknown> } | null;
+  };
+
+  const EVENT_KIND: Record<string, SubEvent["kind"]> = {
+    SubscriptionCreated: "created",
+    SubscriptionRenewed: "renewed",
+    SubscriptionCancelled: "cancelled",
+  };
+
+  /** Normalize one GraphQL event node (of a KNOWN kind — we query one struct at a
+   * time) into a SubEvent, or null when it is not THIS merchant's (a Move event type
+   * filter carries no payer predicate, so merchant is matched client-side). */
+  const toEvent = (kind: SubEvent["kind"], node: EventNode): SubEvent | null => {
+    const j = node.contents?.json ?? {};
     if (String(j.merchant ?? "").toLowerCase() !== merchant) return null; // not ours
     return {
       kind,
@@ -228,35 +258,39 @@ export const suizeSubs = (config: SuizeSubsConfig) => {
       merchant,
       paidUntilMs: num(j.paid_until_ms),
       ref: refHex(j.ref),
-      txDigest: node.id?.txDigest ?? "",
-      timestampMs: num(node.timestampMs),
+      txDigest: node.transaction?.digest ?? "",
+      timestampMs: node.timestamp ? Date.parse(node.timestamp) : 0,
     };
   };
 
-  /** Page `suix_queryEvents` for ONE event struct of THIS subs package, newest
-   * first, merchant-filtered client-side (Move event MoveEventType has no payer
-   * predicate). Returns up to `limit` matching events. */
-  const queryByType = async (struct: string, limit = 50): Promise<SubEvent[]> => {
+  /** Page ONE event struct of THIS subs package, newest first, merchant-filtered
+   * client-side. GraphQL connections page oldest→newest, so we pull the newest slice
+   * with `last`/`before` and reverse each page. Returns up to `limit` matching events. */
+  const queryByType = async (struct: keyof typeof EVENT_KIND, limit = 50): Promise<SubEvent[]> => {
     type Page = {
-      data?: Array<Parameters<typeof toEvent>[0]>;
-      nextCursor?: unknown;
-      hasNextPage?: boolean;
+      events: {
+        pageInfo: { hasPreviousPage: boolean; startCursor: string | null };
+        nodes: EventNode[];
+      };
     };
+    const kind = EVENT_KIND[struct];
+    const type = eventType(pkg, struct);
     const out: SubEvent[] = [];
-    let cursor: unknown = null;
+    let before: string | null = null;
     while (out.length < limit) {
-      const page = await rpc<Page>("suix_queryEvents", [
-        { MoveEventType: eventType(pkg, struct) },
-        cursor,
-        Math.min(50, limit - out.length),
-        true, // descending — newest first
-      ]);
-      for (const node of page?.data ?? []) {
-        const e = toEvent(node);
+      const page: Page = await gql<Page>(EVENTS_QUERY, {
+        type,
+        last: Math.min(50, limit - out.length),
+        before,
+      });
+      const conn = page.events;
+      // A page arrives oldest→newest; reverse it so delivery stays newest-first.
+      for (const node of [...(conn?.nodes ?? [])].reverse()) {
+        const e = toEvent(kind, node);
         if (e) out.push(e);
       }
-      if (!page?.hasNextPage || page.nextCursor == null) break;
-      cursor = page.nextCursor;
+      if (!conn?.pageInfo?.hasPreviousPage || !conn.pageInfo.startCursor) break;
+      before = conn.pageInfo.startCursor;
     }
     return out;
   };

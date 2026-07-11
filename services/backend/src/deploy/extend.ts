@@ -97,13 +97,12 @@ const toNum = (v: unknown): number => {
  */
 const resolveWalrusPackage = async (): Promise<string | null> => {
   try {
-    const res = await deploySuiClient().getObject({
-      id: config.walrusSystemObject,
-      options: { showContent: true },
-    });
-    const content = res.data?.content;
-    if (!content || content.dataType !== "moveObject") return null;
-    const pkg = (content.fields as Record<string, unknown>).package_id;
+    const obj = (await deploySuiClient().getObject({
+      objectId: config.walrusSystemObject,
+      include: { json: true },
+    })).object;
+    if (!obj?.json) return null;
+    const pkg = (obj.json as Record<string, unknown>).package_id;
     return typeof pkg === "string" && pkg.startsWith("0x") ? pkg : null;
   } catch (err) {
     console.error("[deploy/extend] walrus system read failed:", (err as Error).message);
@@ -114,13 +113,14 @@ const resolveWalrusPackage = async (): Promise<string | null> => {
 /** A Blob object's storage end epoch (`storage.end_epoch`), or null if unreadable. */
 export const blobEndEpoch = async (blobObjectId: string): Promise<number | null> => {
   try {
-    const res = await deploySuiClient().getObject({
-      id: blobObjectId,
-      options: { showContent: true },
-    });
-    const content = res.data?.content;
-    if (!content || content.dataType !== "moveObject") return null;
-    const storage = (content.fields as Record<string, unknown>).storage as
+    const obj = (await deploySuiClient().getObject({
+      objectId: blobObjectId,
+      include: { json: true },
+    })).object;
+    if (!obj?.json) return null;
+    // gRPC `json` nests the Move `storage` struct directly (no `.fields` wrapper);
+    // the `.fields ?? storage` fallback below reads either shape.
+    const storage = (obj.json as Record<string, unknown>).storage as
       | { fields?: Record<string, unknown> }
       | Record<string, unknown>
       | undefined;
@@ -142,11 +142,9 @@ export const siteBlobObjects = async (
   siteId: string,
 ): Promise<{ quilt: string; manifest: string } | null> => {
   try {
-    const res = await deploySuiClient().getObject({ id: siteId, options: { showContent: true } });
-    const content = res.data?.content;
-    if (!content || content.dataType !== "moveObject") return null;
-    if (content.type !== `${PACKAGE_IDS.DEPLOY.PACKAGE}::site::Site`) return null;
-    const fields = content.fields as Record<string, unknown>;
+    const obj = (await deploySuiClient().getObject({ objectId: siteId, include: { json: true } })).object;
+    if (!obj?.json || obj.type !== `${PACKAGE_IDS.DEPLOY.PACKAGE}::site::Site`) return null;
+    const fields = obj.json as Record<string, unknown>;
     const quilt = fields.quilt_blob_object;
     const manifest = fields.manifest_blob_object;
     if (typeof quilt !== "string" || typeof manifest !== "string") return null;
@@ -165,11 +163,9 @@ export const siteBlobObjects = async (
  */
 export const siteOwner = async (siteId: string): Promise<string | null> => {
   try {
-    const res = await deploySuiClient().getObject({ id: siteId, options: { showContent: true } });
-    const content = res.data?.content;
-    if (!content || content.dataType !== "moveObject") return null;
-    if (content.type !== `${PACKAGE_IDS.DEPLOY.PACKAGE}::site::Site`) return null;
-    const owner = (content.fields as Record<string, unknown>).owner;
+    const obj = (await deploySuiClient().getObject({ objectId: siteId, include: { json: true } })).object;
+    if (!obj?.json || obj.type !== `${PACKAGE_IDS.DEPLOY.PACKAGE}::site::Site`) return null;
+    const owner = (obj.json as Record<string, unknown>).owner;
     return typeof owner === "string" && SUI_ADDRESS_RE.test(owner) ? owner.toLowerCase() : null;
   } catch {
     return null;
@@ -199,15 +195,15 @@ export const storageEndForSite = async (siteId: string): Promise<number | null> 
  * coin input reused for both extends). Null when the wallet holds none. */
 const largestWalCoin = async (): Promise<string | null> => {
   try {
-    const coins = await deploySuiClient().getCoins({
+    const coins = await deploySuiClient().listCoins({
       owner: deployServiceAddress(),
       coinType: config.walCoinType,
     });
     let best: { id: string; balance: bigint } | null = null;
-    for (const c of coins.data) {
+    for (const c of coins.objects) {
       const balance = BigInt(c.balance);
       if (balance > 0n && (!best || balance > best.balance)) {
-        best = { id: c.coinObjectId, balance };
+        best = { id: c.objectId, balance };
       }
     }
     return best?.id ?? null;
@@ -255,12 +251,13 @@ const executeExtend = async (tx: Transaction): Promise<{ ok: boolean; digest?: s
     const res = await deploySuiClient().signAndExecuteTransaction({
       transaction: tx,
       signer: deployWallet(),
-      options: { showEffects: true },
+      include: { effects: true },
     });
-    if (res.effects?.status?.status === "failure") {
-      return { ok: false, message: res.effects.status.error ?? "unknown failure" };
+    const exec = res.Transaction ?? res.FailedTransaction;
+    if (!exec.status.success) {
+      return { ok: false, message: exec.status.error?.message ?? "unknown failure" };
     }
-    return { ok: true, digest: res.digest };
+    return { ok: true, digest: exec.digest };
   } catch (err) {
     return { ok: false, message: (err as Error).message ?? "unknown error" };
   }
@@ -408,14 +405,16 @@ export const notifySettled = async (digest: string): Promise<void> => {
 
     const full = await deploySuiClient().waitForTransaction({
       digest,
-      options: { showEvents: true },
+      include: { events: true },
     });
-    const events = full.events ?? [];
+    const exec = full.Transaction ?? full.FailedTransaction;
+    const events = exec.events ?? [];
     // Collect the unique sub OWNERS — the unforgeable per-address binding (ref ignored).
+    // gRPC events expose `.eventType` + `.json` (JSON-RPC's `.type` + `.parsedJson`).
     const owners = new Set<string>();
     for (const ev of events) {
-      if (ev.type !== SUB_CREATED_TYPE && ev.type !== SUB_RENEWED_TYPE) continue;
-      const pj = ev.parsedJson as { merchant?: string; owner?: string } | undefined;
+      if (ev.eventType !== SUB_CREATED_TYPE && ev.eventType !== SUB_RENEWED_TYPE) continue;
+      const pj = ev.json as { merchant?: string; owner?: string } | undefined;
       if (!pj || String(pj.merchant ?? "").toLowerCase() !== merchantLc) continue;
       const owner = String(pj.owner ?? "").toLowerCase();
       if (SUI_ADDRESS_RE.test(owner)) owners.add(owner);

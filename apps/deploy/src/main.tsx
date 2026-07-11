@@ -10,7 +10,7 @@ import '@mysten/dapp-kit/dist/index.css'
 import { Analytics } from '@vercel/analytics/react'
 import { App } from './App'
 import './styles.css'
-import { fullnodeUrl } from '@suize/shared'
+import { grpcUrl } from '@suize/shared'
 import { RPC_URL, SUI_NETWORK } from './config'
 import { setup_enoki } from './enoki'
 
@@ -18,8 +18,8 @@ import { setup_enoki } from './enoki'
 // are declared; the env-selected one (SUI_NETWORK) is the default and carries the
 // env RPC override — the other keeps its public fullnode.
 const { networkConfig } = createNetworkConfig({
-  testnet: { network: 'testnet', url: SUI_NETWORK === 'testnet' ? RPC_URL : fullnodeUrl('testnet') },
-  mainnet: { network: 'mainnet', url: SUI_NETWORK === 'mainnet' ? RPC_URL : fullnodeUrl('mainnet') },
+  testnet: { network: 'testnet', url: SUI_NETWORK === 'testnet' ? RPC_URL : grpcUrl('testnet') },
+  mainnet: { network: 'mainnet', url: SUI_NETWORK === 'mainnet' ? RPC_URL : grpcUrl('mainnet') },
 })
 
 const queryClient = new QueryClient()

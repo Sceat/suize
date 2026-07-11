@@ -15,7 +15,7 @@
 //   SUIZE_API              → the unified backend (the x402 facilitator: /verify ·
 //                            /settle · /build · /terms);
 //                            default https://api.suize.io, dev http://localhost:8099
-//   SUI_RPC_URL            → optional fullnode override for the read tools
+//   SUI_RPC_URL            → optional gRPC fullnode base-URL override for the read tools
 //   SUIZE_SESSION_PATH     → where the session persists (default ~/.suize/session.json)
 //   SUIZE_CONFIRM          → the client-side confirm dial: "each" (default) |
 //                            "auto_under_<x>" (e.g. auto_under_1, auto_under_0.50) |
@@ -56,9 +56,16 @@ export const SESSION_PATH: string =
 //   ⚠️ SYNC: @suize/shared SuiNetwork (testnet | mainnet)
 export type SuiNetwork = 'testnet' | 'mainnet'
 
-/** ⚠️ SYNC: @suize/shared fullnodeUrl — the public per-network JSON-RPC node. */
-export const fullnodeUrl = (network: SuiNetwork): string =>
+/** ⚠️ SYNC: @suize/shared grpcUrl — the public per-network gRPC fullnode (base URL).
+ * Same `fullnode.<net>.sui.io:443` host that retired JSON-RPC; it now speaks gRPC,
+ * the SDK's recommended transport (SuiGrpcClient). */
+export const grpcUrl = (network: SuiNetwork): string =>
   `https://fullnode.${network}.sui.io:443`
+
+/** ⚠️ SYNC: @suize/shared graphqlUrl — the public per-network Sui GraphQL RPC, used
+ * for the indexer-style reads the node's gRPC does not serve (the agent's tx history). */
+export const graphqlUrl = (network: SuiNetwork): string =>
+  `https://graphql.${network}.sui.io/graphql`
 
 /** ⚠️ SYNC: @suize/shared caip2 — the CAIP-2 chain id x402 requirements carry. */
 export const CAIP2: Record<SuiNetwork, `sui:${SuiNetwork}`> = {

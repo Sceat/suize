@@ -39,11 +39,10 @@ const str = (v: unknown, fallback = ""): string =>
  * (missing / not a move object) so a single bad slot never sinks the whole list. */
 const readSlotFields = async (slotId: string): Promise<SlotFields | null> => {
   try {
-    const res = await suiClient().getObject({ id: slotId, options: { showContent: true } });
-    const content = res.data?.content;
-    if (!content || content.dataType !== "moveObject") return null;
-    // `fields` is the flattened struct map ({ [key]: value }) for a getObject read.
-    const fields = (content.fields ?? {}) as Record<string, unknown>;
+    const obj = (await suiClient().getObject({ objectId: slotId, include: { json: true } })).object;
+    if (!obj?.json) return null;
+    // gRPC `json` is the flattened Move struct map ({ [key]: value }).
+    const fields = (obj.json ?? {}) as Record<string, unknown>;
     return {
       name: fields.name,
       price: fields.price,

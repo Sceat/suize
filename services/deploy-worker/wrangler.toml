@@ -27,8 +27,9 @@ routes = [
 # "env" is these [vars] — the DEFAULT (top-level) deploy is TESTNET; the mainnet
 # flip is `wrangler deploy --env mainnet` (see [env.mainnet] below), no code change.
 [vars]
-# Sui TESTNET fullnode JSON-RPC (the default deploy serves testnet sites).
-SUI_RPC_URL = "https://fullnode.testnet.sui.io:443"
+# Sui TESTNET GraphQL RPC (the default deploy serves testnet sites). The public
+# JSON-RPC fullnode is retired; on-chain reads run over GraphQL (zero-dep fetch).
+SUI_GRAPHQL_URL = "https://graphql.testnet.sui.io/graphql"
 
 # Walrus testnet aggregator — serves blobs + quilt patches.
 WALRUS_AGGREGATOR = "https://aggregator.walrus-testnet.walrus.space"
@@ -69,7 +70,7 @@ bucket_name = "suize-deploy-blob-cache"
 [env.mainnet]
 
 [env.mainnet.vars]
-SUI_RPC_URL = "https://fullnode.mainnet.sui.io:443"
+SUI_GRAPHQL_URL = "https://graphql.mainnet.sui.io/graphql"
 WALRUS_AGGREGATOR = "https://aggregator.walrus-mainnet.walrus.space"
 BASE_DOMAIN = "suize.site"
 DEPLOY_PACKAGE_ID = "0x0"

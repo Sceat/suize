@@ -25,9 +25,23 @@ export type SuiNetwork = 'testnet' | 'mainnet';
 export const resolveNetwork = (raw: string | undefined | null): SuiNetwork =>
   raw === 'mainnet' ? 'mainnet' : 'testnet';
 
-/** Public JSON-RPC fullnode URL for a given Sui network (the default RPC; each runtime may override via its env). */
-export const fullnodeUrl = (network: SuiNetwork): string =>
+/**
+ * The public fullnode **gRPC** base URL for a Sui network (the default transport;
+ * each runtime may override via its env). Mysten retired the public JSON-RPC
+ * fullnode in mid-2026 — the SAME hosts now serve gRPC (and GraphQL, below). A
+ * `SuiGrpcClient({ baseUrl })` speaks to this; there is no JSON-RPC path anymore.
+ */
+export const grpcUrl = (network: SuiNetwork): string =>
   `https://fullnode.${network}.sui.io:443`;
+
+/**
+ * Mysten's official Sui **GraphQL** endpoint for a network — the indexer transport
+ * used ONLY where gRPC core cannot express a query (transaction-by-address listing,
+ * event-by-type queries). Verified live for both networks (testnet + mainnet return
+ * a valid `chainIdentifier`). A `SuiGraphQLClient({ url })` speaks to this.
+ */
+export const graphqlUrl = (network: SuiNetwork): string =>
+  `https://graphql.${network}.sui.io/graphql`;
 
 /**
  * The settlement coin type the rail charges in, PER NETWORK — Circle's USDC
@@ -305,8 +319,10 @@ export const TREASURY_SUINS_NAME = 'treasury@suize';
 /** `treasury@suize` as the dotted `.sui` name the SuiNS RPC actually resolves. */
 export const TREASURY_SUINS_DOTTED = 'treasury.suize.sui';
 
-/** The minimal SuiNS-resolving client both runtimes satisfy — dapp-kit's `SuiClient`
- *  (browser) and `SuiJsonRpcClient` (backend) each expose `resolveNameServiceAddress`. */
+/** The minimal SuiNS-resolving client this helper needs. The browser's dapp-kit
+ *  `SuiClient` exposes `resolveNameServiceAddress` natively; the backend's gRPC
+ *  client has no such method, so it passes a thin adapter over `NameService.lookupName`
+ *  (see `services/backend/src/sui.ts` → `treasuryResolver`). Either satisfies this. */
 export interface TreasuryResolver {
   resolveNameServiceAddress(input: { name: string }): Promise<string | null>;
 }

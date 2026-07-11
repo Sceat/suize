@@ -5,7 +5,7 @@
 // ============================================================================
 
 import {
-  fullnodeUrl,
+  grpcUrl,
   resolveNetwork,
   USDC_TYPES,
   SUI_ADDRESS_RE,
@@ -34,7 +34,7 @@ export const NETWORK: SuiNetwork = resolveNetwork(import.meta.env.VITE_SUI_NETWO
 
 // Sui fullnode RPC — env override (VITE_SUI_RPC_URL), else the public fullnode.
 export const RPC_URL: string =
-  import.meta.env.VITE_SUI_RPC_URL?.trim() || fullnodeUrl(NETWORK)
+  import.meta.env.VITE_SUI_RPC_URL?.trim() || grpcUrl(NETWORK)
 
 // The unified backend — the directory's read endpoints (/feed, /rankings,
 // /stats, /ads/slots) plus the single bid build read (/ads/slots/:key). Env

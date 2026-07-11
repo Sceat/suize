@@ -24,8 +24,10 @@
 // ---------------------------------------------------------------------------
 
 interface Env {
-  /** Sui fullnode JSON-RPC URL for the network this worker serves (wrangler [vars] / [env.mainnet.vars]). */
-  SUI_RPC_URL: string;
+  /** Sui GraphQL RPC URL for the network this worker serves (wrangler [vars] /
+   * [env.mainnet.vars]). Replaces the retired public JSON-RPC fullnode — reads
+   * run over GraphQL via raw `fetch`, mirroring packages/pay/src/subs.ts (zero-dep). */
+  SUI_GRAPHQL_URL: string;
   /** Walrus aggregator base for the same network. */
   WALRUS_AGGREGATOR: string;
   /** `deploy_sui` package id — recorded for the operator; not read at runtime. */
@@ -115,7 +117,9 @@ interface Manifest {
 interface SiteFields {
   quilt_id: string;
   manifest_blob_id: string;
-  /** sha256 of the manifest bytes. On-chain `vector<u8>` → JSON number[] via RPC. */
+  /** sha256 of the manifest bytes. On-chain `vector<u8>`, rendered by the live
+   * GraphQL read as a BASE64 string (legacy JSON-RPC gave number[]; an operator
+   * may store hex) — normalised by `manifestHashToHex`. */
   manifest_hash: number[] | string;
 }
 
@@ -138,15 +142,36 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return toHex(new Uint8Array(digest));
 }
 
+/** Decode a standard-base64 string to bytes, or null if it isn't valid base64.
+ * `atob` is a workerd global (WHATWG). Mirrors the decode in packages/pay/src/subs.ts. */
+function base64ToBytes(b64: string): Uint8Array | null {
+  try {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i) & 0xff;
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Normalise the on-chain `manifest_hash` to lowercase hex.
- * `sui_getObject` renders a Move `vector<u8>` as a JSON `number[]`; an operator
- * could also store it as a hex string. Accept both, reject anything else.
+ * Normalise the on-chain `manifest_hash` (a Move `vector<u8>`) to lowercase hex.
+ * The rendering depends on the transport, so accept all three, reject anything else:
+ *   • hex string    — an operator may store it that way (matches the hex regex).
+ *   • BASE64 string — how Sui GraphQL renders `vector<u8>` (the LIVE read path).
+ *   • number[]      — how the legacy JSON-RPC rendered it (kept for safety).
+ * Ordering is safe for a 32-byte sha256: its base64 is 44 chars ending in '=' (32
+ * isn't a multiple of 3), so it never matches the hex regex and falls to base64;
+ * a 64-char hex string carries no '='/'+'/'/' and stays hex — the two never collide.
  */
 function manifestHashToHex(raw: SiteFields['manifest_hash']): string | null {
   if (typeof raw === 'string') {
     const cleaned = raw.startsWith('0x') ? raw.slice(2) : raw;
-    return /^[0-9a-f]+$/i.test(cleaned) ? cleaned.toLowerCase() : null;
+    if (/^[0-9a-f]+$/i.test(cleaned)) return cleaned.toLowerCase();
+    // Not hex → the GraphQL base64 rendering of the vector<u8>; decode → hex.
+    const bytes = base64ToBytes(raw);
+    return bytes ? toHex(bytes) : null;
   }
   if (Array.isArray(raw)) {
     return toHex(Uint8Array.from(raw.map((n) => n & 0xff)));
@@ -192,28 +217,64 @@ function isBase36ObjectId(subdomain: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Sui RPC
+// Sui GraphQL RPC (zero-dep — the public JSON-RPC fullnode is retired). One plain
+// `fetch` of `{query,variables}`, mirroring packages/pay/src/subs.ts: throw on a
+// GraphQL `errors` body so a failed read FAILS CLOSED (never served as a hit).
 // ---------------------------------------------------------------------------
 
-async function suiRpc<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
-  const res = await fetch(rpcUrl, {
+async function suiGraphql<T>(
+  graphqlUrl: string,
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<T> {
+  const res = await fetch(graphqlUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    body: JSON.stringify({ query, variables }),
   });
-  if (!res.ok) throw new Error(`Sui RPC HTTP ${res.status}`);
-  const json = (await res.json()) as { result?: T; error?: { message: string } };
-  if (json.error) throw new Error(`Sui RPC error: ${json.error.message}`);
-  return json.result as T;
+  if (!res.ok) throw new Error(`Sui GraphQL HTTP ${res.status}`);
+  const body = (await res.json()) as { data?: T; errors?: Array<{ message?: string }> };
+  if (body.errors?.length) throw new Error(`Sui GraphQL error: ${body.errors[0]?.message ?? 'query error'}`);
+  return body.data as T;
 }
 
-/** Read the `Site` object's move fields. Throws if the object is missing/not a Site. */
-async function fetchSiteFields(rpcUrl: string, siteId: string): Promise<SiteFields> {
-  const result = await suiRpc<{
-    data?: { content?: { fields?: Record<string, unknown> } };
-  }>(rpcUrl, 'sui_getObject', [siteId, { showContent: true }]);
+/** ULEB128-encode a non-negative integer (the BCS length prefix). */
+function uleb128(n: number): number[] {
+  const out: number[] = [];
+  let v = n >>> 0;
+  do {
+    let b = v & 0x7f;
+    v >>>= 7;
+    if (v !== 0) b |= 0x80;
+    out.push(b);
+  } while (v !== 0);
+  return out;
+}
 
-  const fields = result?.data?.content?.fields;
+/**
+ * BCS-encode a Move `0x1::string::String` — identical to a `vector<u8>`: a ULEB128
+ * length prefix + the UTF-8 bytes — and base64 it, the form a GraphQL
+ * `DynamicFieldName.bcs` needs. Byte-identical to the backend's
+ * `bcs.string().serialize(host)` (verified across ascii/unicode/long inputs).
+ */
+function bcsStringBase64(s: string): string {
+  const utf8 = new TextEncoder().encode(s);
+  const bytes = new Uint8Array([...uleb128(utf8.length), ...utf8]);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+/** Read the `Site` object's move fields over GraphQL. Throws if missing/not a Site. */
+async function fetchSiteFields(graphqlUrl: string, siteId: string): Promise<SiteFields> {
+  const query = `query($id: SuiAddress!) {
+    object(address: $id) { asMoveObject { contents { json } } }
+  }`;
+  const result = await suiGraphql<{
+    object?: { asMoveObject?: { contents?: { json?: Record<string, unknown> } | null } | null } | null;
+  }>(graphqlUrl, query, { id: siteId });
+
+  const fields = result?.object?.asMoveObject?.contents?.json;
   if (!fields) throw new Error(`Site not found: ${siteId}`);
 
   const quilt_id = fields['quilt_id'];
@@ -230,22 +291,33 @@ async function fetchSiteFields(rpcUrl: string, siteId: string): Promise<SiteFiel
 }
 
 /**
- * Resolve a custom domain to a site id via the on-chain DomainRegistry.
- * The registry holds `domains: Table<String, ID>`; we read the dynamic field
- * keyed by the host string. Returns null when unmapped or the registry is unset.
+ * Resolve a custom domain to a site id via the on-chain DomainRegistry, over
+ * GraphQL. Mirrors the backend's `siteForDomain` transport 1:1 — the SAME parent
+ * (the registry object id) and the SAME key (the host BCS-encoded as a
+ * `0x1::string::String`). Returns null when unmapped or the registry is unset.
+ *
+ * KNOWN BUG (out of scope — owned by T-004): the registry maps
+ * `domains: Table<String, ID>`, whose entries live under the Table's INNER UID,
+ * not the registry object's id — so this parent is wrong and the field reads
+ * null. Ported faithfully to keep behaviour unchanged; the FIX is a separate ticket.
  */
 async function resolveCustomDomain(host: string, env: Env): Promise<string | null> {
   const registryId = env.DOMAIN_REGISTRY_ID;
   if (!registryId || registryId.includes('PLACEHOLDER')) return null;
 
-  const field = await suiRpc<{
-    data?: { content?: { fields?: { value?: unknown } } };
-  }>(env.SUI_RPC_URL, 'suix_getDynamicFieldObject', [
-    registryId,
-    { type: '0x1::string::String', value: host },
-  ]);
+  const query = `query($parent: SuiAddress!, $name: DynamicFieldName!) {
+    object(address: $parent) {
+      dynamicField(name: $name) { value { ... on MoveValue { json } } }
+    }
+  }`;
+  const result = await suiGraphql<{
+    object?: { dynamicField?: { value?: { json?: unknown } | null } | null } | null;
+  }>(env.SUI_GRAPHQL_URL, query, {
+    parent: registryId,
+    name: { type: '0x1::string::String', bcs: bcsStringBase64(host) },
+  });
 
-  const value = field?.data?.content?.fields?.value;
+  const value = result?.object?.dynamicField?.value?.json;
   // `Table<String, ID>` value renders as the ID string (or a wrapper carrying it).
   if (typeof value === 'string') return value;
   if (value && typeof value === 'object' && typeof (value as { id?: unknown }).id === 'string') {
@@ -265,7 +337,7 @@ async function getCachedSiteFields(env: Env, siteId: string): Promise<SiteFields
   const cached = await cache.match(cacheKey);
   if (cached) return (await cached.json()) as SiteFields;
 
-  const fields = await fetchSiteFields(env.SUI_RPC_URL, siteId);
+  const fields = await fetchSiteFields(env.SUI_GRAPHQL_URL, siteId);
   await cache.put(
     cacheKey,
     new Response(JSON.stringify(fields), {

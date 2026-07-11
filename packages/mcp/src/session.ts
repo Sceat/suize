@@ -28,7 +28,7 @@ import { publicKeyFromSuiBytes } from '@mysten/sui/verify'
 import type { ZkLoginSignatureInputs } from '@mysten/sui/zklogin'
 import { formAgentSubaccount } from '@suize/x402'
 import type { MultiSigPublicKey } from '@mysten/sui/multisig'
-import { rpcClient } from './chain'
+import { grpcClient } from './chain'
 import { SESSION_PATH, SUI_ADDRESS_RE, type SuiNetwork } from './config'
 
 /** The /agent-connect loopback payload (version 1) — what crosses to the cb and
@@ -237,7 +237,8 @@ export const subaccountFor = (
 export const assertEpochLive = async (session: SuizeSession): Promise<void> => {
   let currentEpoch: number
   try {
-    currentEpoch = Number((await rpcClient(session.network).getLatestSuiSystemState()).epoch)
+    const { systemState } = await grpcClient(session.network).core.getCurrentSystemState()
+    currentEpoch = Number(systemState.epoch)
   } catch {
     throw new Error('could not read the current Sui epoch — check your connection and retry')
   }

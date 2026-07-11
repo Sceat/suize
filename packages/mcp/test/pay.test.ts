@@ -29,7 +29,9 @@ mock.module('../src/session', () => ({
 
 mock.module('../src/chain', () => ({
   // epoch read used by assertEpochLive — keep the session live.
-  rpcClient: () => ({ getLatestSuiSystemState: async () => ({ epoch: '1' }) }),
+  grpcClient: () => ({ core: { getCurrentSystemState: async () => ({ systemState: { epoch: '1' } }) } }),
+  // tx-history helper (reads.ts) — unused here, present so the mocked module is complete.
+  graphqlQuery: async () => ({}),
 }))
 
 // Keep the real pure exports (pickRequirement/makeConfirmGate/ConfirmationRequired

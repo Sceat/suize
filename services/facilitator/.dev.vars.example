@@ -1,0 +1,18 @@
+# Local dev overrides for `wrangler dev` — copy to `.dev.vars` (gitignored).
+# These shadow wrangler.toml [vars] locally. There are NO secrets here (the
+# facilitator holds no key); this file only exists so you can point at your own
+# treasury and network without editing the committed wrangler.toml.
+
+SUI_NETWORK="testnet"
+FEE_BPS="200"
+FEE_FLOOR="10000"
+
+# Your treasury — a plain 0x… address (used as-is) OR a SuiNS name (resolved live).
+# A plain address needs no network to be "ready", which is handy for a local boot check.
+FEE_TREASURY="0x0000000000000000000000000000000000000000000000000000000000000abc"
+
+# Optional per-merchant overrides (JSON). Absent → the merchant pays FEE_BPS.
+# MERCHANT_RATES='{"0x1111111111111111111111111111111111111111111111111111111111111111":{"feeBps":100}}'
+
+# Optional gRPC base override.
+# SUI_GRPC_URL="https://fullnode.testnet.sui.io:443"

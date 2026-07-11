@@ -1,5 +1,5 @@
 // WS balance helper — the ONE real on-chain read the WS server performs on
-// connect. Reuses the sponsor module's SuiJsonRpcClient (one RPC client for the
+// connect. Reuses the sponsor module's SuiGrpcClient (one gRPC client for the
 // whole backend) to fetch the address's native SUI balance and shape it into the
 // shared `BalanceUpdate` push body.
 //
@@ -19,10 +19,13 @@ import { suiClient } from "../sponsor";
  */
 export const fetchMainBalanceUpdate = async (address: string): Promise<BalanceUpdate | null> => {
   try {
-    const balance = await suiClient.getBalance({ owner: address });
+    // gRPC GetBalance → { balance: { balance, coinType, ... } }; `.balance.balance`
+    // is the address's total SUI in MIST as a decimal string (the JSON-RPC
+    // `totalBalance` equivalent). Default coinType is 0x2::sui::SUI.
+    const { balance } = await suiClient.getBalance({ owner: address });
     return {
       account: "main",
-      balanceMist: balance.totalBalance, // already a decimal MIST string
+      balanceMist: balance.balance, // decimal MIST string
       updatedAt: Date.now(),
     };
   } catch (err) {

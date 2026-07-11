@@ -64,11 +64,9 @@ const CLOCK_ID = "0x6";
 
 const siteOwner = async (siteId: string): Promise<string | null> => {
   try {
-    const res = await deploySuiClient().getObject({ id: siteId, options: { showContent: true } });
-    const content = res.data?.content;
-    if (!content || content.dataType !== "moveObject") return null;
-    if (content.type !== `${PACKAGE_IDS.DEPLOY.PACKAGE}::site::Site`) return null;
-    const owner = (content.fields as Record<string, unknown>).owner;
+    const obj = (await deploySuiClient().getObject({ objectId: siteId, include: { json: true } })).object;
+    if (!obj?.json || obj.type !== `${PACKAGE_IDS.DEPLOY.PACKAGE}::site::Site`) return null;
+    const owner = (obj.json as Record<string, unknown>).owner;
     return typeof owner === "string" && SUI_ADDRESS_RE.test(owner) ? owner.toLowerCase() : null;
   } catch {
     return null;

@@ -9,7 +9,6 @@
 // SponsorError), the shared suiClient, and a readiness probe (`sponsorReady`)
 // used by the shared /ready endpoint.
 import { EnokiClient } from "@mysten/enoki";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import {
   CRASH_MOVE_TARGETS,
   SUBS_MOVE_TARGETS,
@@ -23,6 +22,7 @@ import {
 } from "@suize/shared";
 import type { SponsorRequest, SponsorResponse, ExecuteRequest, ExecuteResponse } from "@suize/shared";
 import { config } from "../config";
+import { grpcClient } from "../sui";
 import { sponsorDailyCeiling } from "../quota";
 
 const ENOKI_PRIVATE_API_KEY = config.enokiPrivateApiKey;
@@ -103,21 +103,21 @@ const MAX_TX_KIND_B64_LEN = Math.ceil((MAX_TX_KIND_BYTES * 4) / 3) + 4;
 // Enoki client + Sui RPC client. If the key is missing the app refuses to boot
 // (see src/index.ts), so by the time these run the key is present.
 const enokiClient = new EnokiClient({ apiKey: ENOKI_PRIVATE_API_KEY ?? "" });
-// Exported so the WS server (src/ws/balance) reuses the SAME RPC client for the
+// Exported so the WS server (src/ws/balance) reuses the SAME gRPC client for the
 // initial getBalance push — one client, one place, no second config.
-export const suiClient = new SuiJsonRpcClient({ url: config.suiRpcUrl, network: config.suiNetwork });
+export const suiClient = grpcClient();
 
 export const sponsorReady = async (): Promise<boolean> => {
   if (!ENOKI_PRIVATE_API_KEY) return false;
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1000);
-    try {
-      const seq = await suiClient.getLatestCheckpointSequenceNumber({ signal: controller.signal });
-      return typeof seq === "string" && seq.length > 0;
-    } finally {
-      clearTimeout(timer);
-    }
+    // Cheapest gRPC liveness read — LedgerService.GetServiceInfo returns the node's
+    // latest checkpoint height (the gRPC equivalent of getLatestCheckpointSequenceNumber),
+    // proving the endpoint answers. Keep the 1s abort budget.
+    const info = await Promise.race([
+      suiClient.ledgerService.getServiceInfo({}),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 1000)),
+    ]);
+    return typeof info.response.checkpointHeight === "bigint";
   } catch {
     return false;
   }

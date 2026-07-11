@@ -1,4 +1,4 @@
-import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+import { SuiGrpcClient } from '@mysten/sui/grpc'
 import { registerEnokiWallets } from '@mysten/enoki'
 import { CRASH_NETWORK, RPC_URL } from './config'
 
@@ -8,13 +8,13 @@ import { CRASH_NETWORK, RPC_URL } from './config'
 // API confirmed against the installed types (@mysten/enoki 1.0.8 /
 // @mysten/sui 2.17.0), the proven React/bun/Enoki pattern:
 //
-//   import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+//   import { SuiGrpcClient } from '@mysten/sui/grpc'
 //   registerEnokiWallets({ apiKey, client, network, providers:{ google:{...} } })
 //
-// @mysten/sui 2.x reorganized the client: the classic JSON-RPC client is
-// `SuiJsonRpcClient` from `@mysten/sui/jsonRpc` (the root `@mysten/sui/client`
-// now exposes only the transport-agnostic core/base). We construct it with the
-// verified testnet RPC_URL directly (no getFullnodeUrl helper needed).
+// Transport = gRPC-web (Mysten retired the public JSON-RPC endpoints). Enoki's
+// `client` param is typed `ClientWithCoreApi`, so any v2 client satisfies it;
+// SuiGrpcClient is a browser-native GrpcWebFetchTransport client. We build it
+// from RPC_URL (a gRPC base URL — `grpcUrl(net)` with the VITE_SUI_RPC_URL override).
 //
 // The registered Enoki wallet SPONSORS GAS automatically: its internal
 // signTransaction / signAndExecuteTransaction goes through Enoki's
@@ -46,7 +46,7 @@ export const setup_enoki = (): void => {
     return
   }
   try {
-    const client = new SuiJsonRpcClient({ url: RPC_URL, network: CRASH_NETWORK })
+    const client = new SuiGrpcClient({ baseUrl: RPC_URL, network: CRASH_NETWORK })
     const result = registerEnokiWallets({
       client,
       network: CRASH_NETWORK,

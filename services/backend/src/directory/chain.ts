@@ -18,7 +18,8 @@
 //     NO positive non-treasury leg (a deploy charge: the whole amount → treasury),
 //     merchant = treasury (the directory / Suize itself).
 //   • gross = sum of all positive USDC legs; fee = treasuryFee; feeBps = fee/gross.
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import type { SuiGrpcClient } from "@mysten/sui/grpc";
+import type { SuiGraphQLClient } from "@mysten/sui/graphql";
 import { parseSerializedSignature } from "@mysten/sui/cryptography";
 import { MultiSigPublicKey } from "@mysten/sui/multisig";
 import {
@@ -29,26 +30,18 @@ import {
   type SuiNetwork,
 } from "@suize/shared";
 import { config } from "../config";
+import { grpcClient, graphqlClient, reverseName, treasuryResolver } from "../sui";
 
-// ── ONE Sui JSON-RPC client (same construction as the facilitator/handle modules) ─
-let _client: SuiJsonRpcClient | null = null;
-export const suiClient = (): SuiJsonRpcClient =>
-  (_client ??= new SuiJsonRpcClient({ url: config.suiRpcUrl, network: config.suiNetwork }));
+// ── ONE gRPC client for object/owned/name reads (same construction as the other
+// modules) + ONE GraphQL client for the indexer-shaped transaction-by-address scan
+// the feed/rankings need (gRPC core has no queryTransactionBlocks). The old per-RPC
+// JSON-RPC fallback (some providers dropped the `ToAddress` filter) is gone — the
+// GraphQL indexer is the single, filter-complete source. ─────────────────────────
+let _client: SuiGrpcClient | null = null;
+export const suiClient = (): SuiGrpcClient => (_client ??= grpcClient());
 
-// Per-RPC client cache for the FEED FALLBACK. The `ToAddress` transaction filter that
-// /feed + /rankings depend on is supported by Sui full nodes but DROPPED by some
-// commercial RPC providers (→ the scan throws → the directory 502s). So readPayments
-// tries each RPC in config.suiRpcUrls in order and uses the first that answers. Display
-// sugar (handles/profiles) keeps using the primary suiClient() — a miss there is benign.
-const _fallbackClients = new Map<string, SuiJsonRpcClient>();
-const clientFor = (url: string): SuiJsonRpcClient => {
-  let c = _fallbackClients.get(url);
-  if (!c) {
-    c = new SuiJsonRpcClient({ url, network: config.suiNetwork });
-    _fallbackClients.set(url, c);
-  }
-  return c;
-};
+let _gql: SuiGraphQLClient | null = null;
+const gqlClient = (): SuiGraphQLClient => (_gql ??= graphqlClient());
 
 /** The native USDC type for the configured network — the only coin a payment leg
  * counts as. Matched case-insensitively on the `::usdc::usdc` suffix so a `0x0…2`
@@ -70,7 +63,7 @@ export const treasuryAddress = async (): Promise<string> => {
   const now = Date.now();
   if (_treasury && now - _treasury.at < TREASURY_TTL_MS) return _treasury.addr;
   try {
-    const addr = await resolveTreasury(suiClient());
+    const addr = await resolveTreasury(treasuryResolver(suiClient()));
     if (addr && SUI_ADDRESS_RE.test(addr)) {
       _treasury = { addr, at: now };
       return addr;
@@ -183,109 +176,107 @@ export const parsePayment = (
 /**
  * Read the most recent qualifying payments to the treasury, newest-first. `want` is
  * the number of QUALIFYING payments to return; we may scan more raw txs (treasury
- * spends / non-USDC are skipped) up to `maxScan` to fill the page. ONE
- * queryTransactionBlocks call per ~50-tx page (descending). Throws on an RPC outage
- * (the caller surfaces a 502); returns [] only when the chain genuinely has none.
+ * spends / non-USDC are skipped) up to `maxScan` to fill the page. Runs over the
+ * GraphQL indexer (gRPC core has no transaction-by-address query): ONE
+ * `transactions(filter:{affectedAddress})` page (~50 txs) per round, newest-first,
+ * with balance changes returned INLINE (the indexer retains effects the fullnode
+ * prunes — so no per-tx re-fetch). Throws on a GraphQL outage (the caller 502s);
+ * returns [] only when the chain genuinely has none.
  */
 export const readPayments = async (
   treasury: string,
   want: number,
   maxScan = 400,
-): Promise<DirectoryPayment[]> => {
-  // Try each configured RPC in order; the first that answers the ToAddress scan wins.
-  // (A provider that dropped the filter throws → we fall through to the next URL rather
-  // than 502 the whole directory. ALL failing still throws → the caller 502s, the
-  // honest signal to add a filter-supporting full node to SUI_RPC_URLS.)
-  const urls = config.suiRpcUrls?.length ? config.suiRpcUrls : [config.suiRpcUrl];
-  let lastErr: unknown;
-  for (const url of urls) {
-    try {
-      return await scanPaymentsVia(clientFor(url), treasury, want, maxScan);
-    } catch (e) {
-      lastErr = e;
-      console.error(
-        `[directory/readPayments] RPC ${url} unusable for the ToAddress scan:`,
-        (e as Error).message,
-      );
-    }
-  }
-  throw lastErr ?? new Error("no RPC configured for the directory scan");
-};
+): Promise<DirectoryPayment[]> => scanPaymentsGql(treasury, want, maxScan);
 
-// Phase-2 bounds. The public testnet fullnode prunes effects aggressively — most
-// treasury txs (even recent ones) can't yield balance changes — so a batch
-// `multiGetTransactionBlocks({showBalanceChanges})` fails for the WHOLE batch with
-// `InvalidParams: "...effect is empty"`. There is therefore no batch fast-path to be had;
-// we read PER-TX and skip the pruned ones. We bound that three ways so a growing /
-// pruned-heavy history can never blow past the ingress timeout (→ a 504): a per-call
-// timeout (a hung node never stalls the scan), bounded concurrency (no burst of N
-// parallel RPCs), and a global wall-clock deadline (return what we have so far).
-const PHASE2_CONCURRENCY = 12;
-const PER_CALL_TIMEOUT_MS = 4_000;
+// A global wall-clock deadline so a deep/near-empty history can never blow past the
+// ingress timeout (→ a 504): return what we have so far.
 const SCAN_DEADLINE_MS = 8_000;
 
-type TxChanges = { digest: string; timestampMs?: string | null; balanceChanges?: BalanceChange[] | null };
+// The indexer transaction scan. `affectedAddress: treasury` captures every tx whose
+// treasury balance changed (the fee-leg recipient) — a superset of the qualifying
+// payments (parsePayment discards treasury-spends / non-USDC). GraphQL returns the
+// `last: N` window oldest→newest, so we reverse each page for newest-first; `before`
+// pages further back. Balance changes ride inline (amount signed, coinType repr,
+// owner address) — adapted to parsePayment's `BalanceChange` shape.
+const TX_BY_AFFECTED = `query($addr: SuiAddress!, $before: String) {
+  transactions(last: 50, before: $before, filter: { affectedAddress: $addr }) {
+    pageInfo { hasPreviousPage startCursor }
+    nodes {
+      digest
+      effects { timestamp balanceChanges { nodes { amount coinType { repr } owner { address } } } }
+    }
+  }
+}`;
 
-/** ONE tx's balance changes, never throwing, bounded by a timeout — effect-pruned /
- *  slow / unreadable all resolve to null and the caller skips them. */
-const oneTxChanges = (client: SuiJsonRpcClient, digest: string): Promise<TxChanges | null> => {
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), PER_CALL_TIMEOUT_MS);
-  });
-  return Promise.race([
-    client.getTransactionBlock({ digest, options: { showBalanceChanges: true } }).catch(() => null),
-    timeout,
-  ]).finally(() => clearTimeout(timer));
+// The newest tx a given address SENT, with its signatures (base64) — for the
+// sub-account committee read (see subaccountCommittee).
+const TX_BY_SENT = `query($addr: SuiAddress!) {
+  transactions(last: 1, filter: { sentAddress: $addr }) {
+    nodes { signatures { signatureBytes } }
+  }
+}`;
+
+type GqlTxNode = {
+  digest: string;
+  effects?: {
+    timestamp?: string | null;
+    balanceChanges?: {
+      nodes?: { amount?: string | null; coinType?: { repr?: string | null } | null; owner?: { address?: string | null } | null }[];
+    } | null;
+  } | null;
 };
 
-/**
- * The actual descending ToAddress scan against ONE client (see readPayments).
- *
- * TWO-PHASE (the fix for the directory 502): (1) page DIGESTS ONLY — NO `showBalanceChanges`,
- * so the fullnode never derives effects and never hits the "effect is empty" page error that
- * took the directory down; (2) resolve balance changes PER-TX (bounded concurrency + per-call
- * timeout + a global deadline), skipping effect-pruned txs. Only a genuine page-listing failure
- * throws (caught by readPayments' per-URL fallback). Newest-first order is preserved.
- */
-const scanPaymentsVia = async (
-  client: SuiJsonRpcClient,
+const scanPaymentsGql = async (
   treasury: string,
   want: number,
   maxScan: number,
 ): Promise<DirectoryPayment[]> => {
-  // Phase 1 — collect candidate digests, newest-first, WITHOUT effects (pruning-safe).
-  const digests: string[] = [];
-  let cursor: string | null | undefined = undefined;
-  while (digests.length < maxScan) {
-    const page = await client.queryTransactionBlocks({
-      filter: { ToAddress: treasury },
-      options: {},
-      order: "descending",
-      cursor: cursor ?? undefined,
-      limit: 50,
-    });
-    for (const tx of page.data) digests.push(tx.digest);
-    if (!page.hasNextPage || !page.nextCursor) break;
-    cursor = page.nextCursor;
-  }
-
-  // Phase 2 — resolve per-tx (bounded), parse + qualify until `want` OR the scan deadline.
+  const gql = gqlClient();
   const out: DirectoryPayment[] = [];
   const deadline = Date.now() + SCAN_DEADLINE_MS;
-  for (let i = 0; i < digests.length && out.length < want && Date.now() < deadline; i += PHASE2_CONCURRENCY) {
-    const txs = await Promise.all(digests.slice(i, i + PHASE2_CONCURRENCY).map((d) => oneTxChanges(client, d)));
-    for (const tx of txs) {
-      if (!tx) continue; // effect-pruned / timed-out → skip, never fatal
-      // A malformed balance-change amount (a bad BigInt) also degrades gracefully.
+  let before: string | null = null;
+  let scanned = 0;
+
+  while (out.length < want && scanned < maxScan && Date.now() < deadline) {
+    const res = (await gql.query({
+      query: TX_BY_AFFECTED as never,
+      variables: { addr: treasury, before },
+    })) as {
+      errors?: { message: string }[];
+      data?: {
+        transactions?: {
+          pageInfo?: { hasPreviousPage?: boolean; startCursor?: string | null };
+          nodes?: GqlTxNode[];
+        } | null;
+      };
+    };
+    if (res.errors?.length) throw new Error(`graphql tx scan: ${res.errors[0].message}`);
+    const conn = res.data?.transactions;
+    const nodes = (conn?.nodes ?? []).slice().reverse(); // newest-first
+
+    for (const n of nodes) {
+      scanned++;
+      // Adapt GraphQL legs → the JSON-RPC BalanceChange shape parsePayment expects.
+      // A leg with no address owner (object/shared) maps to "Immutable" so it counts
+      // toward gross but is never picked as payer/merchant/treasury.
+      const changes: BalanceChange[] = (n.effects?.balanceChanges?.nodes ?? []).map((bc) => ({
+        amount: bc.amount ?? "0",
+        coinType: bc.coinType?.repr ?? "",
+        owner: bc.owner?.address ? { AddressOwner: bc.owner.address } : "Immutable",
+      }));
+      const tsMs = n.effects?.timestamp ? String(Date.parse(n.effects.timestamp)) : null;
       try {
-        const p = parsePayment(tx.digest, tx.timestampMs, tx.balanceChanges, treasury);
+        const p = parsePayment(n.digest, tsMs, changes, treasury);
         if (p) out.push(p);
       } catch (e) {
-        console.error(`[directory/parse] ${tx.digest}:`, (e as Error).message);
+        console.error(`[directory/parse] ${n.digest}:`, (e as Error).message);
       }
       if (out.length >= want) break;
     }
+
+    if (!conn?.pageInfo?.hasPreviousPage || !conn?.pageInfo?.startCursor) break;
+    before = conn.pageInfo.startCursor;
   }
   return out;
 };
@@ -312,8 +303,8 @@ export const resolveHandle = async (address: string): Promise<string | null> => 
   if (hit && Date.now() - hit.at < HANDLE_TTL_MS) return hit.handle;
   let handle: string | null = null;
   try {
-    const { data } = await suiClient().resolveNameServiceNames({ address: key, format: "dot" });
-    const name = data?.[0]?.trim();
+    // gRPC reverse resolution → the address's DEFAULT SuiNS name (dotted), or null.
+    const name = (await reverseName(suiClient(), key))?.trim();
     handle = name ? toDisplayHandle(name) : null;
   } catch (e) {
     // Display-only sugar — a reverse-resolve outage must NEVER throw the whole feed.
@@ -361,15 +352,18 @@ const subaccountCommittee = async (address: string): Promise<string[] | null> =>
   if (hit && Date.now() - hit.at < SUBACCT_TTL_MS) return hit.committee;
   let committee: string[] | null = null;
   try {
-    const page = await suiClient().queryTransactionBlocks({
-      filter: { FromAddress: key },
-      options: { showInput: true },
-      order: "descending",
-      limit: 1,
-    });
-    for (const tx of page.data) {
-      for (const sig of tx.transaction?.txSignatures ?? []) {
-        const parsed = parseSerializedSignature(sig);
+    // Indexer read (gRPC core has no by-sender tx query): the newest tx this address
+    // SENT, with its signatures (base64) — the multisig-signed gasless payment/bid
+    // embeds the committee.
+    const res = (await gqlClient().query({
+      query: TX_BY_SENT as never,
+      variables: { addr: key },
+    })) as { data?: { transactions?: { nodes?: { signatures?: { signatureBytes?: string | null }[] }[] } } };
+    const nodes = res.data?.transactions?.nodes ?? [];
+    for (const tx of nodes) {
+      for (const sig of tx.signatures ?? []) {
+        if (!sig.signatureBytes) continue;
+        const parsed = parseSerializedSignature(sig.signatureBytes);
         if (parsed.signatureScheme !== "MultiSig") continue;
         const mpk = new MultiSigPublicKey(parsed.multisig.multisig_pk);
         const members = mpk.getPublicKeys();
@@ -429,15 +423,15 @@ export const resolveProfile = async (address: string): Promise<ProfileView | nul
   if (hit && Date.now() - hit.at < PROFILE_TTL_MS) return hit.profile;
   let profile: ProfileView | null = null;
   try {
-    const owned = await suiClient().getOwnedObjects({
+    // gRPC owned-objects (type-filtered); `.json` is the Move struct's fields.
+    const owned = await suiClient().listOwnedObjects({
       owner: key,
-      filter: { StructType: PROFILE_STRUCT },
-      options: { showContent: true },
+      type: PROFILE_STRUCT,
+      include: { json: true },
       limit: 1,
     });
-    const content = owned.data[0]?.data?.content;
-    if (content && content.dataType === "moveObject") {
-      const f = (content.fields ?? {}) as Record<string, unknown>;
+    const f = owned.objects[0]?.json as Record<string, unknown> | null | undefined;
+    if (f) {
       const name = fieldStr(f.name);
       if (name) {
         profile = {

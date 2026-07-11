@@ -17,9 +17,9 @@
 // OPTIONS preflight is handled by the GLOBAL handler in index.ts (which returns the
 // shared CORS headers, incl. x-trace-*), so this route only handles POST.
 import { createHash } from "node:crypto";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { verifyPersonalMessageSignature } from "@mysten/sui/verify";
-import { config } from "../config";
+import { grpcClient } from "../sui";
 import { json, text } from "../http";
 import { storeBlob } from "../deploy/walrus";
 import { createDailyCeiling } from "../quota";
@@ -29,9 +29,9 @@ const MAX_TRACE_BYTES = 256 * 1024;
 /** Signature freshness window (tight — this is an upload nonce, not a deploy). */
 const TS_WINDOW_MS = 2 * 60 * 1000;
 
-let _client: SuiJsonRpcClient | null = null;
-const sui = (): SuiJsonRpcClient => {
-  if (!_client) _client = new SuiJsonRpcClient({ url: config.suiRpcUrl, network: config.suiNetwork });
+let _client: SuiGrpcClient | null = null;
+const sui = (): SuiGrpcClient => {
+  if (!_client) _client = grpcClient();
   return _client;
 };
 

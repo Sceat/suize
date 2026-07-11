@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
-import { fullnodeUrl } from "@suize/shared";
+import { grpcUrl } from "@suize/shared";
 
 /** The explicit opt-in. Anything but the literal "1" keeps e2e suites skipped. */
 export const E2E_ENABLED = process.env.SUIZE_E2E === "1";
@@ -24,9 +24,13 @@ export const E2E_ENABLED = process.env.SUIZE_E2E === "1";
  * funds. Env override for the RPC endpoint only. */
 export const E2E_NETWORK = "testnet" as const;
 
+// NOTE: the e2e suites (opt-in via SUIZE_E2E=1, funded keys) still use the
+// JSON-RPC client + shapes. The public JSON-RPC fullnode is retired, so they need a
+// transport migration to gRPC to run live again — DEFERRED per the "do not run them"
+// directive; the `grpcUrl` host string below is identical to the old fullnode host.
 export const e2eClient = (): SuiJsonRpcClient =>
   new SuiJsonRpcClient({
-    url: process.env.SUI_RPC_URL ?? fullnodeUrl(E2E_NETWORK),
+    url: process.env.SUI_RPC_URL ?? grpcUrl(E2E_NETWORK),
     network: E2E_NETWORK,
   });
 

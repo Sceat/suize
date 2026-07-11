@@ -10,7 +10,7 @@
 import {
   PACKAGE_IDS,
   WALRUS_DEFAULTS,
-  fullnodeUrl,
+  grpcUrl,
   resolveNetwork,
   type SuiNetwork,
 } from '@suize/shared'
@@ -22,7 +22,7 @@ export const SUI_NETWORK: SuiNetwork = resolveNetwork(import.meta.env.VITE_SUI_N
 // Sui fullnode RPC — env override (VITE_SUI_RPC_URL), defaulting to the public
 // fullnode for the selected network. Only needed for the optional zkLogin Enoki client.
 export const RPC_URL: string =
-  import.meta.env.VITE_SUI_RPC_URL?.trim() || fullnodeUrl(SUI_NETWORK)
+  import.meta.env.VITE_SUI_RPC_URL?.trim() || grpcUrl(SUI_NETWORK)
 
 // The unified backend's `deploy` module base URL. `vite dev` → the local backend;
 // `vite build` (prod) → https://api.suize.io. NEVER hardcode a localhost default that

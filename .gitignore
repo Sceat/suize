@@ -88,3 +88,6 @@ screenshots/
 
 # ── Vite ─────────────────────────────────────────────────────────────
 .vite/
+
+# ── Owner strategy docs — never in the public tree ───────────────────
+marketing/

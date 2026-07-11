@@ -1,5 +1,5 @@
-// Unit tests — NO network. Sui JSON-RPC (sui_getObject / suix_queryEvents) is
-// driven from recorded fixtures by stubbing globalThis.fetch on the method name.
+// Unit tests — NO network. Sui GraphQL RPC (the `object` + `events` queries) is
+// driven from recorded fixtures by stubbing globalThis.fetch on the query shape.
 import { afterEach, describe, expect, test } from "bun:test";
 import { suizeSubs } from "../src/subs";
 
@@ -15,101 +15,131 @@ const NOW = Date.now();
 const FAR_FUTURE = NOW + 30 * 24 * 3600 * 1000;
 const PAST = NOW - 60_000;
 
-// ─── JSON-RPC fixtures ─────────────────────────────────────────────────────────
+// Sui GraphQL renders a Move `vector<u8>` in `MoveValue.json` as a BASE64 string —
+// model that faithfully so the ref-normalization path is exercised as in production.
+const b64 = (hex: string): string => Buffer.from(hex.replace(/^0x/, ""), "hex").toString("base64");
+
+// ─── GraphQL fixtures ──────────────────────────────────────────────────────────
+// A `{ object }` query result: `object.asMoveObject.contents.{ type.repr, json }`.
 const subObject = (over: Partial<{ paidUntil: number; merchant: string; type: string }> = {}) => ({
-  data: {
-    objectId: SUB_ID,
-    type: over.type ?? SUBSCRIPTION_TYPE,
-    content: {
-      fields: {
-        merchant: over.merchant ?? MERCHANT,
-        amount: "500000",
-        period_ms: "2592000000",
-        paid_until_ms: String(over.paidUntil ?? FAR_FUTURE),
-        ref: "0xdeadbeef",
+  object: {
+    address: SUB_ID,
+    asMoveObject: {
+      contents: {
+        type: { repr: over.type ?? SUBSCRIPTION_TYPE },
+        json: {
+          merchant: over.merchant ?? MERCHANT,
+          amount: "500000",
+          period_ms: "2592000000",
+          paid_until_ms: String(over.paidUntil ?? FAR_FUTURE),
+          ref: b64("deadbeef"),
+        },
       },
     },
   },
 });
 
-const createdEvent = (over: Partial<{ owner: string; merchant: string; ref: string; subId: string }> = {}) => ({
-  id: { txDigest: "DIG_" + Math.random().toString(36).slice(2), eventSeq: "0" },
-  type: `${PKG}::subscription::SubscriptionCreated`,
-  parsedJson: {
-    subscription_id: over.subId ?? SUB_ID,
-    owner: over.owner ?? OWNER,
-    merchant: over.merchant ?? MERCHANT,
-    amount: "500000",
-    period_ms: "2592000000",
-    paid_until_ms: String(FAR_FUTURE),
-    fee: "10000",
-    ref: over.ref ?? "0xdeadbeef",
+// One `events` connection node: `{ transaction.digest, timestamp, contents.json }`.
+const createdEventNode = (
+  over: Partial<{ owner: string; merchant: string; ref: string; subId: string }> = {},
+) => ({
+  transaction: { digest: "DIG_" + Math.random().toString(36).slice(2) },
+  timestamp: new Date(NOW).toISOString(),
+  contents: {
+    json: {
+      subscription_id: over.subId ?? SUB_ID,
+      owner: over.owner ?? OWNER,
+      merchant: over.merchant ?? MERCHANT,
+      amount: "500000",
+      period_ms: "2592000000",
+      paid_until_ms: String(FAR_FUTURE),
+      fee: "10000",
+      ref: b64(over.ref ?? "deadbeef"),
+    },
   },
-  timestampMs: String(NOW),
 });
 
-// ─── fetch stub: route by the JSON-RPC `method` in the POST body ───────────────
+// A one-page `events` connection (no older pages) wrapping the given nodes.
+const eventsPage = (nodes: unknown[]) => ({
+  events: { pageInfo: { hasPreviousPage: false, startCursor: null }, nodes },
+});
+
+// ─── fetch stub: route by the GraphQL query shape (object vs events) ────────────
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
 });
-const stubRpc = (handlers: Record<string, (params: unknown[]) => unknown>) => {
+const stubGraphql = (handlers: {
+  object?: (vars: Record<string, unknown>) => unknown;
+  events?: (vars: Record<string, unknown>) => unknown;
+}) => {
   globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
-    const req = JSON.parse(String(init?.body ?? "{}")) as { method: string; params: unknown[] };
-    const h = handlers[req.method];
-    if (!h) throw new Error(`unstubbed rpc method: ${req.method}`);
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: h(req.params) }), { status: 200 });
+    const { query, variables } = JSON.parse(String(init?.body ?? "{}")) as {
+      query: string;
+      variables: Record<string, unknown>;
+    };
+    let data: unknown;
+    if (query.includes("object(address:")) {
+      if (!handlers.object) throw new Error("unstubbed object query");
+      data = handlers.object(variables);
+    } else if (query.includes("events(filter:")) {
+      if (!handlers.events) throw new Error("unstubbed events query");
+      data = handlers.events(variables);
+    } else {
+      throw new Error(`unstubbed graphql query: ${query.slice(0, 40)}`);
+    }
+    return new Response(JSON.stringify({ data }), { status: 200 });
   }) as typeof fetch;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe("suizeSubs.isActive", () => {
   test("a paid-up subscription of THIS merchant → true", async () => {
-    stubRpc({ sui_getObject: () => subObject({ paidUntil: FAR_FUTURE }) });
+    stubGraphql({ object: () => subObject({ paidUntil: FAR_FUTURE }) });
     const subs = suizeSubs({ merchant: MERCHANT, subsPackage: PKG });
     expect(await subs.isActive(SUB_ID)).toBe(true);
   });
 
   test("an EXPIRED subscription → false", async () => {
-    stubRpc({ sui_getObject: () => subObject({ paidUntil: PAST }) });
+    stubGraphql({ object: () => subObject({ paidUntil: PAST }) });
     const subs = suizeSubs({ merchant: MERCHANT, subsPackage: PKG });
     expect(await subs.isActive(SUB_ID)).toBe(false);
   });
 
   test("graceMs keeps a just-expired sub active", async () => {
-    stubRpc({ sui_getObject: () => subObject({ paidUntil: NOW - 1000 }) });
+    stubGraphql({ object: () => subObject({ paidUntil: NOW - 1000 }) });
     const subs = suizeSubs({ merchant: MERCHANT, subsPackage: PKG, graceMs: 5000 });
     expect(await subs.isActive(SUB_ID)).toBe(true);
   });
 
   test("a STRANGER-merchant subscription is never honored", async () => {
-    stubRpc({ sui_getObject: () => subObject({ merchant: STRANGER }) });
+    stubGraphql({ object: () => subObject({ merchant: STRANGER }) });
     const subs = suizeSubs({ merchant: MERCHANT, subsPackage: PKG });
     expect(await subs.isActive(SUB_ID)).toBe(false);
   });
 
   test("the wrong object TYPE → false", async () => {
-    stubRpc({ sui_getObject: () => subObject({ type: "0x2::coin::Coin<0x2::sui::SUI>" }) });
+    stubGraphql({ object: () => subObject({ type: "0x2::coin::Coin<0x2::sui::SUI>" }) });
     const subs = suizeSubs({ merchant: MERCHANT, subsPackage: PKG });
     expect(await subs.isActive(SUB_ID)).toBe(false);
   });
 
   test("a deleted / not-found object → false", async () => {
-    stubRpc({ sui_getObject: () => ({ data: null, error: { code: "notExists" } }) });
+    stubGraphql({ object: () => ({ object: null }) });
     const subs = suizeSubs({ merchant: MERCHANT, subsPackage: PKG });
     expect(await subs.isActive(SUB_ID)).toBe(false);
   });
 
   test("the 0x0 placeholder package FAILS CLOSED (no type can match)", async () => {
-    stubRpc({ sui_getObject: () => subObject() });
+    stubGraphql({ object: () => subObject() });
     const subs = suizeSubs({ merchant: MERCHANT }); // default subsPackage = 0x0
     expect(await subs.isActive(SUB_ID)).toBe(false);
   });
 
-  test("isActive caches within the TTL (one RPC read for two calls)", async () => {
+  test("isActive caches within the TTL (one read for two calls)", async () => {
     let hits = 0;
-    stubRpc({
-      sui_getObject: () => {
+    stubGraphql({
+      object: () => {
         hits++;
         return subObject({ paidUntil: FAR_FUTURE });
       },
@@ -123,16 +153,13 @@ describe("suizeSubs.isActive", () => {
 
 describe("suizeSubs.activeFor", () => {
   test("returns this owner's active subscriptions, filters out a stranger's", async () => {
-    stubRpc({
-      suix_queryEvents: () => ({
-        data: [
-          createdEvent({ owner: OWNER, subId: SUB_ID }),
-          createdEvent({ owner: STRANGER, subId: "0x" + "7".repeat(64) }),
-        ],
-        hasNextPage: false,
-        nextCursor: null,
-      }),
-      sui_getObject: () => subObject({ paidUntil: FAR_FUTURE }),
+    stubGraphql({
+      events: () =>
+        eventsPage([
+          createdEventNode({ owner: OWNER, subId: SUB_ID }),
+          createdEventNode({ owner: STRANGER, subId: "0x" + "7".repeat(64) }),
+        ]),
+      object: () => subObject({ paidUntil: FAR_FUTURE }),
     });
     const subs = suizeSubs({ merchant: MERCHANT, subsPackage: PKG });
     const active = await subs.activeFor(OWNER);
@@ -141,9 +168,9 @@ describe("suizeSubs.activeFor", () => {
   });
 
   test("an expired object is dropped from activeFor", async () => {
-    stubRpc({
-      suix_queryEvents: () => ({ data: [createdEvent({ owner: OWNER })], hasNextPage: false, nextCursor: null }),
-      sui_getObject: () => subObject({ paidUntil: PAST }),
+    stubGraphql({
+      events: () => eventsPage([createdEventNode({ owner: OWNER })]),
+      object: () => subObject({ paidUntil: PAST }),
     });
     const subs = suizeSubs({ merchant: MERCHANT, subsPackage: PKG });
     expect(await subs.activeFor(OWNER)).toHaveLength(0);
@@ -152,13 +179,13 @@ describe("suizeSubs.activeFor", () => {
 
 describe("suizeSubs.findByRef", () => {
   test("finds an active subscription by its on-chain ref", async () => {
-    stubRpc({
-      suix_queryEvents: () => ({
-        data: [createdEvent({ ref: "0xcafe" }), createdEvent({ ref: "0xdeadbeef", subId: SUB_ID })],
-        hasNextPage: false,
-        nextCursor: null,
-      }),
-      sui_getObject: () => subObject({ paidUntil: FAR_FUTURE }),
+    stubGraphql({
+      events: () =>
+        eventsPage([
+          createdEventNode({ ref: "cafe" }),
+          createdEventNode({ ref: "deadbeef", subId: SUB_ID }),
+        ]),
+      object: () => subObject({ paidUntil: FAR_FUTURE }),
     });
     const subs = suizeSubs({ merchant: MERCHANT, subsPackage: PKG });
     const found = await subs.findByRef("0xdeadbeef");
@@ -166,26 +193,24 @@ describe("suizeSubs.findByRef", () => {
   });
 
   test("no match → null", async () => {
-    stubRpc({
-      suix_queryEvents: () => ({ data: [createdEvent({ ref: "0xcafe" })], hasNextPage: false, nextCursor: null }),
-      sui_getObject: () => subObject(),
+    stubGraphql({
+      events: () => eventsPage([createdEventNode({ ref: "cafe" })]),
+      object: () => subObject(),
     });
     const subs = suizeSubs({ merchant: MERCHANT, subsPackage: PKG });
-    expect(await subs.findByRef("0xnotthere")).toBeNull();
+    expect(await subs.findByRef("0xabcdef")).toBeNull();
   });
 });
 
 describe("suizeSubs.watch", () => {
   test("delivers new merchant events once, advances past seen, stops cleanly", async () => {
-    const created = createdEvent({ owner: OWNER });
-    stubRpc({
-      suix_queryEvents: (params) => {
-        const filter = (params[0] as { MoveEventType: string }).MoveEventType;
+    const created = createdEventNode({ owner: OWNER });
+    stubGraphql({
+      events: (vars) => {
         // only the Created feed has an event; renewed/cancelled are empty
-        if (filter.endsWith("SubscriptionCreated")) {
-          return { data: [created], hasNextPage: false, nextCursor: null };
-        }
-        return { data: [], hasNextPage: false, nextCursor: null };
+        return String(vars.type).endsWith("SubscriptionCreated")
+          ? eventsPage([created])
+          : eventsPage([]);
       },
     });
     const subs = suizeSubs({ merchant: MERCHANT, subsPackage: PKG });
@@ -198,13 +223,11 @@ describe("suizeSubs.watch", () => {
   });
 
   test("a stranger's event is filtered out", async () => {
-    stubRpc({
-      suix_queryEvents: (params) => {
-        const filter = (params[0] as { MoveEventType: string }).MoveEventType;
-        if (filter.endsWith("SubscriptionCreated")) {
-          return { data: [createdEvent({ owner: STRANGER, merchant: STRANGER })], hasNextPage: false, nextCursor: null };
-        }
-        return { data: [], hasNextPage: false, nextCursor: null };
+    stubGraphql({
+      events: (vars) => {
+        return String(vars.type).endsWith("SubscriptionCreated")
+          ? eventsPage([createdEventNode({ owner: STRANGER, merchant: STRANGER })])
+          : eventsPage([]);
       },
     });
     const subs = suizeSubs({ merchant: MERCHANT, subsPackage: PKG });

@@ -20,11 +20,12 @@
 // issuance not configured" so the rest of the backend (sponsor) boots and runs
 // fine before the owner finishes the SuiNS setup.
 import { EnokiClient } from "@mysten/enoki";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
 import { SuinsClient, SuinsTransaction } from "@mysten/suins";
 import { config } from "../config";
+import { grpcClient, reverseName } from "../sui";
 import type {
   HandleAvailableResponse,
   HandleMeResponse,
@@ -95,13 +96,13 @@ const SUI_ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/;
 // ONE instance each, reused across requests.
 // ---------------------------------------------------------------------------
 
-let _suiClient: SuiJsonRpcClient | null = null;
+let _suiClient: SuiGrpcClient | null = null;
 let _suinsClient: SuinsClient | null = null;
 let _enokiClient: EnokiClient | null = null;
 let _issuer: Ed25519Keypair | null = null;
 
-const suiClient = (): SuiJsonRpcClient => {
-  if (!_suiClient) _suiClient = new SuiJsonRpcClient({ url: config.suiRpcUrl, network: config.suiNetwork });
+const suiClient = (): SuiGrpcClient => {
+  if (!_suiClient) _suiClient = grpcClient();
   return _suiClient;
 };
 
@@ -219,16 +220,14 @@ export const availableCore = async (rawName: string): Promise<HandleAvailableRes
 export const meCore = async (address: string): Promise<HandleMeResponse> => {
   if (!SUI_ADDRESS_RE.test(address)) throw new HandleError("invalid address", 400);
 
-  try {
-    const parentSuffix = `.${config.suinsParentDomain}`;
-    const { data } = await suiClient().resolveNameServiceNames({ address, format: "dot" });
-    const dotted = data.find((n) => n.endsWith(parentSuffix));
-    if (dotted) {
-      const label = dotted.slice(0, -parentSuffix.length);
-      return { handle: displayHandle(label) };
-    }
-  } catch (err) {
-    console.error("[handle/me/reverse]", (err as Error).message);
+  // gRPC reverse resolution returns the address's DEFAULT SuiNS name (dotted), which
+  // — after the claim's `set_reverse_lookup` — is exactly the user's `<label>.suize.sui`.
+  // Null on no reverse record or a transient miss (→ handle:null, same as before).
+  const parentSuffix = `.${config.suinsParentDomain}`;
+  const dotted = await reverseName(suiClient(), address);
+  if (dotted && dotted.endsWith(parentSuffix)) {
+    const label = dotted.slice(0, -parentSuffix.length);
+    return { handle: displayHandle(label) };
   }
 
   return { handle: null };

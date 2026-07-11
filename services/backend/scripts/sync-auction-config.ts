@@ -29,20 +29,22 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
+import type { SuiGraphQLClient } from "@mysten/sui/graphql";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
 import {
   packageIds,
   resolveNetwork,
   resolveTreasury,
-  fullnodeUrl,
+  grpcUrl,
   TREASURY_SUINS_DOTTED,
   SUI_ADDRESS_RE,
   USDC_TYPES,
   AD_SLOT_DEFS,
   AD_SLOT_START_PRICE,
 } from "@suize/shared";
+import { graphqlClient, treasuryResolver, queryEventPage } from "../src/sui";
 
 const network = resolveNetwork(process.env.SUI_NETWORK);
 const DRY_RUN = process.env.DRY_RUN === "1";
@@ -88,21 +90,18 @@ function extractCoinType(field: unknown): string | null {
 /** Discover the names of every AdSlot already created for this package by paging the
  *  `SlotCreated` events — authoritative regardless of whether @suize/shared's static
  *  slot-id list has been backfilled (so a re-run never double-creates a slot). */
-async function existingSlotNames(client: SuiJsonRpcClient, pkg: string): Promise<Set<string>> {
+async function existingSlotNames(gql: SuiGraphQLClient, pkg: string): Promise<Set<string>> {
   const names = new Set<string>();
-  let cursor: { txDigest: string; eventSeq: string } | null | undefined = undefined;
+  const type = `${pkg}::auction::SlotCreated`;
+  let before: string | null = null;
   for (let page = 0; page < 10; page++) {
-    const ev = await client.queryEvents({
-      query: { MoveEventType: `${pkg}::auction::SlotCreated` },
-      cursor: cursor ?? undefined,
-      limit: 50,
-    });
-    for (const e of ev.data) {
-      const name = (e.parsedJson as { name?: unknown })?.name;
+    const p = await queryEventPage(gql, type, before);
+    for (const e of p.events) {
+      const name = (e.json as { name?: unknown })?.name;
       if (typeof name === "string") names.add(name);
     }
-    if (!ev.hasNextPage || !ev.nextCursor) break;
-    cursor = ev.nextCursor;
+    if (!p.hasMore || !p.cursor) break;
+    before = p.cursor;
   }
   return names;
 }
@@ -111,22 +110,23 @@ async function main() {
   const { AUCTION } = packageIds(network);
   if (AUCTION.PACKAGE === "0x0") throw new Error(`auction not published on ${network} — nothing to sync`);
 
-  const client = new SuiJsonRpcClient({ url: fullnodeUrl(network), network });
+  const client = new SuiGrpcClient({ network, baseUrl: grpcUrl(network) });
+  const gql = graphqlClient();
 
-  // The canonical values to enforce.
-  const targetTreasury = await resolveTreasury(client);
+  // The canonical values to enforce. gRPC has no resolveNameServiceAddress, so adapt
+  // the client to the shared TreasuryResolver (name→address via NameService.lookupName).
+  const targetTreasury = await resolveTreasury(treasuryResolver(client));
   if (!targetTreasury || !SUI_ADDRESS_RE.test(targetTreasury)) {
     throw new Error(`${TREASURY_SUINS_DOTTED} did not resolve to a valid address on ${network} — aborting (won't guess)`);
   }
   const usdcType = USDC_TYPES[network];
 
   // The current on-chain AuctionConfig.
-  const cfg = await client.getObject({ id: AUCTION.CONFIG_OBJECT, options: { showContent: true } });
-  const content = cfg.data?.content;
-  if (!content || content.dataType !== "moveObject") {
+  const cfgObj = (await client.getObject({ objectId: AUCTION.CONFIG_OBJECT, include: { json: true } })).object;
+  if (!cfgObj?.json) {
     throw new Error(`could not read AuctionConfig from ${AUCTION.CONFIG_OBJECT}`);
   }
-  const fields = content.fields as Record<string, unknown>;
+  const fields = cfgObj.json as Record<string, unknown>;
   const curTreasury = (fields.treasury as string) ?? "";
   const curCoin = extractCoinType(fields.coin_type);
 
@@ -135,7 +135,7 @@ async function main() {
 
   // Which genesis slots already exist on-chain (by name)? Discover via SlotCreated events
   // — authoritative regardless of whether @suize/shared has been backfilled.
-  const existingNames = await existingSlotNames(client, AUCTION.PACKAGE);
+  const existingNames = await existingSlotNames(gql, AUCTION.PACKAGE);
   const missingSlots = AD_SLOT_DEFS.filter((d) => !existingNames.has(d.key));
 
   console.log(`network:   ${network}`);
@@ -157,12 +157,11 @@ async function main() {
   // Find the AuctionAdminCap the signer holds.
   const admin = loadAdminKeypair();
   const adminAddr = admin.toSuiAddress();
-  const caps = await client.getOwnedObjects({
+  const caps = await client.listOwnedObjects({
     owner: adminAddr,
-    filter: { StructType: `${AUCTION.PACKAGE}::auction::AuctionAdminCap` },
-    options: { showType: true },
+    type: `${AUCTION.PACKAGE}::auction::AuctionAdminCap`,
   });
-  const capId = caps.data[0]?.data?.objectId;
+  const capId = caps.objects[0]?.objectId;
   if (!capId) throw new Error(`signer ${adminAddr} holds no AuctionAdminCap — wrong wallet?`);
 
   console.log(`\nsigner: ${adminAddr}\n  cap:    ${capId}\n  config: ${AUCTION.CONFIG_OBJECT}`);
@@ -203,33 +202,31 @@ async function main() {
   const res = await client.signAndExecuteTransaction({
     transaction: tx,
     signer: admin,
-    options: { showEffects: true },
+    include: { effects: true },
   });
-  if (res.effects?.status?.status !== "success") {
-    throw new Error(`sync failed: ${res.effects?.status?.error}`);
+  const exec = res.Transaction ?? res.FailedTransaction;
+  if (!exec.status.success) {
+    throw new Error(`sync failed: ${exec.status.error?.message ?? "unknown"}`);
   }
   console.log(
     `\n✓ synced (treasury${treasuryOk ? "" : " set"}, coin_type${coinOk ? "" : " set"}` +
       (missingSlots.length ? `, created ${missingSlots.length} slot(s)` : "") +
-      `). digest: ${res.digest}`,
+      `). digest: ${exec.digest}`,
   );
 
   // Print the name -> AdSlot id map (from SlotCreated events) so @suize/shared's
   // AUCTION_SLOTS can be backfilled after a fresh publish.
   const slotIds: Record<string, string> = {};
-  let cursor: { txDigest: string; eventSeq: string } | null | undefined = undefined;
+  const slotType = `${AUCTION.PACKAGE}::auction::SlotCreated`;
+  let before: string | null = null;
   for (let page = 0; page < 10; page++) {
-    const ev = await client.queryEvents({
-      query: { MoveEventType: `${AUCTION.PACKAGE}::auction::SlotCreated` },
-      cursor: cursor ?? undefined,
-      limit: 50,
-    });
-    for (const e of ev.data) {
-      const pj = e.parsedJson as { name?: string; slot_id?: string };
+    const p = await queryEventPage(gql, slotType, before);
+    for (const e of p.events) {
+      const pj = e.json as { name?: string; slot_id?: string };
       if (pj?.name && pj?.slot_id) slotIds[pj.name] = pj.slot_id;
     }
-    if (!ev.hasNextPage || !ev.nextCursor) break;
-    cursor = ev.nextCursor;
+    if (!p.hasMore || !p.cursor) break;
+    before = p.cursor;
   }
   console.log(`\nAUCTION_SLOTS (copy into @suize/shared):\n${JSON.stringify(slotIds, null, 2)}`);
 }

@@ -54,7 +54,7 @@ asks before each payment; you approve, then the tool retries with `confirm: true
 | `WALLET_APP_URL` | `https://wallet.suize.io` | The Suize wallet origin the sign-in opens (`/agent-connect`). |
 | `SUIZE_API` | `https://api.suize.io` | The Suize x402 facilitator. |
 | `SUIZE_CONFIRM` | `each` | `each` \| `auto_under_<x>` (USDC) \| `auto`. Unknown values fail closed to `each`. |
-| `SUI_RPC_URL` | network fullnode | Optional read-RPC override. |
+| `SUI_RPC_URL` | network fullnode | Optional gRPC fullnode base-URL override for reads. |
 | `SUIZE_SESSION_PATH` | `~/.suize/session.json` | Session store override. |
 
 ## License

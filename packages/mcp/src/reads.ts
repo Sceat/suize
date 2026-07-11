@@ -1,11 +1,13 @@
 // ============================================================================
-// Read tools + the kill switch — direct-to-chain JSON-RPC against the session's
-// network. suize_balance / suize_receipts / suize_subscriptions never sign;
-// suize_kill is the ONE read-file tool that signs (a full-balance sweep home).
+// Read tools + the kill switch — direct-to-chain against the session's network.
+// Ledger reads (balance, owned objects) go over gRPC; the agent's tx history (an
+// indexer-style query gRPC does not serve) goes over Sui GraphQL RPC. suize_balance
+// / suize_receipts / suize_subscriptions never sign; suize_kill is the ONE
+// read-file tool that signs (a full-balance sweep home).
 // ============================================================================
 
 import { publicKeyFromSuiBytes } from '@mysten/sui/verify'
-import { rpcClient } from './chain'
+import { grpcClient, graphqlQuery } from './chain'
 import { formatUsdc, SUBS_PACKAGES, SUI_ADDRESS_RE, USDC_TYPES } from './config'
 import { clearSession, requireSession, subaccountFor } from './session'
 
@@ -21,10 +23,11 @@ export const suizeBalance = async (): Promise<string> => {
   const address = subaccount?.address ?? session.address
   let totalBalance: string
   try {
-    ;({ totalBalance } = await rpcClient(session.network).getBalance({
+    const { balance } = await grpcClient(session.network).getBalance({
       owner: address,
       coinType: USDC_TYPES[session.network],
-    }))
+    })
+    totalBalance = balance.balance // total spendable = coin objects + Address Balance
   } catch {
     throw new Error('could not read the balance — check your connection and retry')
   }
@@ -44,12 +47,13 @@ export const suizeBalance = async (): Promise<string> => {
 
 // ── suize_receipts — the agent's recent USDC SPENDS, from its own tx history ──
 // VANILLA x402: payments are plain `send_funds` transfers, NOT a rail `Paid` event
-// (account.move is dead). So we read the agent's OWN transaction blocks
-// (queryTransactionBlocks FromAddress) and keep the rows whose net USDC change is
+// (account.move is dead). So we read the agent's OWN transactions over GraphQL
+// (transactions filtered by `sentAddress`) and keep the rows whose net USDC change is
 // NEGATIVE (an outgoing payment). We report exactly how far we searched so the
 // assistant can never over-claim an empty history it never reached.
 
-type BalanceChange = { coinType: string; amount: string; owner?: { AddressOwner?: string } }
+// GraphQL BalanceChange: `{ amount, coinType { repr }, owner { address } }`.
+type BalanceChange = { amount: string; coinType?: { repr: string }; owner?: { address?: string } }
 
 const toBig = (v: unknown): bigint => {
   try {
@@ -62,52 +66,79 @@ const toBig = (v: unknown): bigint => {
 const RECEIPTS_PAGE = 50
 const RECEIPTS_MAX_PAGES = 5 // ≤ 250 tx scanned per call
 
+// The agent's own transaction history — an indexer-style read the node's gRPC does
+// not serve, so it runs over Sui GraphQL RPC. `sentAddress` = the FromAddress filter;
+// each tx carries its `effects.balanceChanges` (the signed USDC deltas we tally).
+const TX_HISTORY_QUERY = `query($addr: SuiAddress!, $last: Int!, $before: String) {
+  transactions(filter: { sentAddress: $addr }, last: $last, before: $before) {
+    pageInfo { hasPreviousPage startCursor }
+    nodes {
+      digest
+      effects {
+        timestamp
+        balanceChanges { nodes { amount coinType { repr } owner { address } } }
+      }
+    }
+  }
+}`
+
+type TxHistoryPage = {
+  transactions: {
+    pageInfo: { hasPreviousPage: boolean; startCursor: string | null }
+    nodes: Array<{
+      digest: string
+      effects: { timestamp: string | null; balanceChanges: { nodes: BalanceChange[] } } | null
+    }>
+  }
+}
+
 export const suizeReceipts = async (args: { limit?: unknown }): Promise<string> => {
   const session = requireSession()
   const wanted = Math.min(50, Math.max(1, Math.floor(Number(args.limit ?? 10)) || 10))
   const usdc = USDC_TYPES[session.network]
   const me = session.address.toLowerCase()
-  const client = rpcClient(session.network)
 
   const receipts: Array<{ digest: string; time: string | null; amount: string }> = []
-  let cursor: string | null = null
+  let before: string | null = null
   let scanned = 0
   let pages = 0
   let exhausted = false
 
   try {
     while (receipts.length < wanted && pages < RECEIPTS_MAX_PAGES) {
-      const page = await client.queryTransactionBlocks({
-        filter: { FromAddress: session.address },
-        options: { showBalanceChanges: true, showEffects: true },
-        cursor,
-        limit: RECEIPTS_PAGE,
-        order: 'descending',
+      const resp: TxHistoryPage = await graphqlQuery<TxHistoryPage>(session.network, TX_HISTORY_QUERY, {
+        addr: session.address,
+        last: RECEIPTS_PAGE,
+        before,
       })
+      const transactions = resp.transactions
+      const nodes = transactions?.nodes ?? []
       pages++
-      scanned += page.data.length
-      for (const tx of page.data) {
-        const changes = (tx.balanceChanges ?? []) as BalanceChange[]
+      scanned += nodes.length
+      // A GraphQL page arrives oldest→newest; reverse it so we report newest-first.
+      for (const tx of [...nodes].reverse()) {
+        const changes = tx.effects?.balanceChanges?.nodes ?? []
         // Net USDC change for THIS address on this tx (sum across coin entries).
         let net = 0n
         for (const c of changes) {
-          if (c.coinType !== usdc) continue
-          if ((c.owner?.AddressOwner ?? '').toLowerCase() !== me) continue
+          if (c.coinType?.repr !== usdc) continue
+          if ((c.owner?.address ?? '').toLowerCase() !== me) continue
           net += toBig(c.amount)
         }
         if (net >= 0n) continue // not an outgoing USDC payment — skip
         receipts.push({
           digest: tx.digest,
-          time: tx.timestampMs ? new Date(Number(tx.timestampMs)).toISOString() : null,
+          time: tx.effects?.timestamp ?? null, // GraphQL yields an ISO timestamp
           amount: formatUsdc(-net), // the USDC that left the wallet
         })
         if (receipts.length >= wanted) break
       }
-      if (!page.hasNextPage || !page.nextCursor) {
+      const pageInfo = transactions?.pageInfo
+      if (!pageInfo?.hasPreviousPage || !pageInfo.startCursor) {
         exhausted = true
         break
       }
-      cursor = page.nextCursor
+      before = pageInfo.startCursor
     }
   } catch {
     throw new Error('could not read the transaction history — check your connection and retry')
@@ -144,6 +175,15 @@ type SubFields = {
   ref?: string
 }
 
+// The subset of gRPC `listOwnedObjects` we read (`include: { json: true }` → the
+// Move struct fields on `json`). A local structural type both documents what we use
+// and keeps TSC from over-inferring through the SDK's deep conditional Object type.
+type OwnedObjectsPage = {
+  objects: Array<{ objectId: string; json?: Record<string, unknown> | null }>
+  hasNextPage: boolean
+  cursor: string | null
+}
+
 export const suizeSubscriptions = async (): Promise<string> => {
   const session = requireSession()
   const pkg = SUBS_PACKAGES[session.network]
@@ -152,7 +192,7 @@ export const suizeSubscriptions = async (): Promise<string> => {
   }
   const usdc = USDC_TYPES[session.network]
   const subType = `${pkg}::subscription::Subscription<${usdc}>`
-  const client = rpcClient(session.network)
+  const client = grpcClient(session.network)
 
   const now = Date.now()
   const subs: Array<{
@@ -168,20 +208,19 @@ export const suizeSubscriptions = async (): Promise<string> => {
   try {
     let cursor: string | null = null
     for (let page = 0; page < 5; page++) {
-      const owned = await client.getOwnedObjects({
+      const owned: OwnedObjectsPage = await client.listOwnedObjects({
         owner: session.address,
-        filter: { StructType: subType },
-        options: { showContent: true },
+        type: subType,
         cursor,
         limit: 50,
+        include: { json: true },
       })
-      for (const o of owned.data) {
-        const content = o.data?.content
-        if (!content || content.dataType !== 'moveObject') continue
-        const f = content.fields as SubFields
+      for (const o of owned.objects) {
+        const f = (o.json ?? undefined) as SubFields | undefined
+        if (!f) continue
         const paidUntil = Number(f.paid_until_ms ?? 0)
         subs.push({
-          subscriptionId: o.data!.objectId,
+          subscriptionId: o.objectId,
           merchant: f.merchant ?? '',
           amount: formatUsdc(toBig(f.amount)),
           periodMs: Number(f.period_ms ?? 0),
@@ -190,8 +229,8 @@ export const suizeSubscriptions = async (): Promise<string> => {
           ref: typeof f.ref === 'string' ? f.ref : '',
         })
       }
-      if (!owned.hasNextPage || !owned.nextCursor) break
-      cursor = owned.nextCursor
+      if (!owned.hasNextPage || !owned.cursor) break
+      cursor = owned.cursor
     }
   } catch {
     throw new Error('could not read the subscriptions — check your connection and retry')
@@ -255,11 +294,11 @@ export const suizeKill = async (args: KillArgs): Promise<string> => {
   // Read the full sub-account USDC balance.
   let balanceUnits: bigint
   try {
-    const { totalBalance } = await rpcClient(session.network).getBalance({
+    const { balance } = await grpcClient(session.network).getBalance({
       owner: source,
       coinType: USDC_TYPES[session.network],
     })
-    balanceUnits = BigInt(totalBalance)
+    balanceUnits = BigInt(balance.balance)
   } catch {
     throw new Error('could not read the balance to sweep — check your connection and retry')
   }

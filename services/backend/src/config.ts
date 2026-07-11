@@ -2,7 +2,7 @@
 // here instead of touching process.env directly, so the env contract lives in
 // one place (mirrored by .env.example).
 
-import { fullnodeUrl, resolveNetwork, WALRUS_DEFAULTS, DEPLOY_SUB_PERIOD_MS, DEPLOY_SUB_PRICE_USDC, DEPLOY_STORAGE_EPOCHS } from "@suize/shared";
+import { grpcUrl, resolveNetwork, WALRUS_DEFAULTS, DEPLOY_SUB_PERIOD_MS, DEPLOY_SUB_PRICE_USDC, DEPLOY_STORAGE_EPOCHS } from "@suize/shared";
 
 const csv = (v: string | undefined): string[] =>
   (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -10,14 +10,16 @@ const csv = (v: string | undefined): string[] =>
 // --- network (ENV-ONLY — owner directive 2026-06-10) ---
 // SUI_NETWORK selects the network ('mainnet' opts in; anything else = testnet —
 // a fresh checkout with zero env vars behaves exactly as before). RPC endpoints
-// come from SUI_RPC_URLS (comma-separated; FIRST entry is the primary), falling
-// back to the legacy single SUI_RPC_URL, then the public fullnode for the
-// configured network. Never hardcoded here.
+// are now gRPC BASE URLS (JSON-RPC is retired): they come from SUI_RPC_URLS
+// (comma-separated; FIRST entry is the primary), falling back to the legacy single
+// SUI_RPC_URL, then the public fullnode gRPC base for the configured network. The
+// k8s-injected SUI_RPC_URL[S] keep their names but now mean gRPC bases. Never
+// hardcoded here.
 const suiNetwork = resolveNetwork(process.env.SUI_NETWORK);
 const suiRpcUrls: string[] = (() => {
   const list = csv(process.env.SUI_RPC_URLS);
   if (list.length > 0) return list;
-  return [process.env.SUI_RPC_URL ?? fullnodeUrl(suiNetwork)];
+  return [process.env.SUI_RPC_URL ?? grpcUrl(suiNetwork)];
 })();
 
 // CORS origins for the whole unified backend. ALSO gates the /ws upgrade (the
@@ -52,9 +54,9 @@ export const config = {
 
   // --- Sui network + RPC (env-only; see the block above) ---
   suiNetwork,
-  /** Full RPC list (SUI_RPC_URLS). First entry is the primary every module uses today. */
+  /** Full gRPC-base list (SUI_RPC_URLS). First entry is the primary every module uses today. */
   suiRpcUrls,
-  /** Primary RPC endpoint — suiRpcUrls[0]. */
+  /** Primary gRPC base URL — suiRpcUrls[0]. */
   suiRpcUrl: suiRpcUrls[0],
   enokiPrivateApiKey: process.env.ENOKI_PRIVATE_API_KEY, // secret — env only, never hardcoded
 

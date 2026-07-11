@@ -17,9 +17,9 @@ import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SuiClientProvider, WalletProvider, createNetworkConfig } from '@mysten/dapp-kit';
-import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
+import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { registerEnokiWallets, isEnokiNetwork } from '@mysten/enoki';
-import { fullnodeUrl } from '@suize/shared';
+import { grpcUrl } from '@suize/shared';
 import { ENOKI_API_KEY, GOOGLE_CLIENT_ID, NETWORK, RPC_URL } from '../lib/env';
 import { ThemeProvider } from '../system';
 
@@ -29,8 +29,8 @@ import '@mysten/dapp-kit/dist/index.css';
 // env-selected network (NETWORK) carries the env RPC override (RPC_URL); the
 // other keeps its public fullnode.
 const { networkConfig } = createNetworkConfig({
-  mainnet: { url: NETWORK === 'mainnet' ? RPC_URL : fullnodeUrl('mainnet'), network: 'mainnet' },
-  testnet: { url: NETWORK === 'testnet' ? RPC_URL : fullnodeUrl('testnet'), network: 'testnet' },
+  mainnet: { url: NETWORK === 'mainnet' ? RPC_URL : grpcUrl('mainnet'), network: 'mainnet' },
+  testnet: { url: NETWORK === 'testnet' ? RPC_URL : grpcUrl('testnet'), network: 'testnet' },
 });
 
 const queryClient = new QueryClient();
@@ -47,8 +47,8 @@ function RegisterEnoki() {
     if (!ENOKI_API_KEY || !GOOGLE_CLIENT_ID) return;
     if (!isEnokiNetwork(NETWORK)) return;
 
-    const client = new SuiJsonRpcClient({
-      url: RPC_URL,
+    const client = new SuiGrpcClient({
+      baseUrl: RPC_URL,
       network: NETWORK,
     });
     const { unregister } = registerEnokiWallets({

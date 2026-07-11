@@ -1,0 +1,6 @@
+# Local dev secrets/overrides — never commit (use .dev.vars.example as the template).
+.dev.vars
+
+# Wrangler local state.
+.wrangler/
+dist/

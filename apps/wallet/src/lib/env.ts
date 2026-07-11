@@ -10,7 +10,7 @@
  * and App.tsx redirects to suize.io (see useAuth.ts).
  */
 
-import { fullnodeUrl, resolveNetwork, type SuiNetwork } from '@suize/shared';
+import { grpcUrl, resolveNetwork, type SuiNetwork } from '@suize/shared';
 
 /** The network this build targets — from env ONLY (default testnet). */
 export const NETWORK: SuiNetwork = resolveNetwork(import.meta.env.VITE_SUI_NETWORK);
@@ -18,7 +18,7 @@ export type { SuiNetwork };
 
 /** Fullnode RPC — env override (VITE_SUI_RPC_URL), else the public fullnode for NETWORK. */
 export const RPC_URL: string =
-  (import.meta.env.VITE_SUI_RPC_URL ?? '').trim() || fullnodeUrl(NETWORK);
+  (import.meta.env.VITE_SUI_RPC_URL ?? '').trim() || grpcUrl(NETWORK);
 
 /** Enoki API key (publishable). Empty -> Enoki registration is skipped, so sign-in throws and App.tsx redirects to suize.io (no fallback session). */
 export const ENOKI_API_KEY: string = import.meta.env.VITE_ENOKI_API_KEY ?? '';

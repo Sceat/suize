@@ -1,0 +1,36 @@
+{
+  "name": "@suize/facilitator",
+  "version": "0.1.0",
+  "description": "An open, free-to-run x402 V2 'exact' payment facilitator for Sui — a stateless Cloudflare Worker. Fork it, set your treasury, wrangler deploy. Verify and settle gasless USDC Address-Balance payments; the fee split is operator-owned and enforced at verify.",
+  "private": false,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mysten/sui": "^2.20.2",
+    "@suize/shared": "workspace:*",
+    "@suize/x402": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260710.1",
+    "@types/bun": "latest",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.110.0"
+  },
+  "keywords": [
+    "x402",
+    "402",
+    "facilitator",
+    "payments",
+    "sui",
+    "usdc",
+    "gasless",
+    "agents",
+    "cloudflare-worker"
+  ]
+}

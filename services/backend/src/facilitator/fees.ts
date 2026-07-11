@@ -29,8 +29,8 @@ import {
   SUI_ADDRESS_RE,
   caip2,
 } from "@suize/shared";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import { config } from "../config";
+import { grpcClient, treasuryResolver } from "../sui";
 
 // ── fee math (mirrors subs::subscription on-chain: 2% with a $0.01 floor) ──────
 // The on-chain subscription module carves min(max(amount*bps/10_000, floor), amount).
@@ -93,9 +93,10 @@ export const isFeeTierMerchant = (payTo: string): boolean =>
 // The single source of truth is the SuiNS handle. We resolve it at most once per TTL
 // (not per payment), keep the last good value across a transient miss, and return ""
 // when it has never resolved — fail-closed for the fee-tier + deploy-gate paths.
-let _suiClient: SuiJsonRpcClient | null = null;
-const suiClient = (): SuiJsonRpcClient =>
-  (_suiClient ??= new SuiJsonRpcClient({ url: config.suiRpcUrl, network: config.suiNetwork }));
+// The gRPC client, adapted to the shared TreasuryResolver (name→address via
+// NameService.lookupName). Built lazily, once.
+let _resolver: ReturnType<typeof treasuryResolver> | null = null;
+const resolver = () => (_resolver ??= treasuryResolver(grpcClient()));
 
 const TREASURY_TTL_MS = 60 * 60_000; // re-resolve at most hourly
 let _treasury: { addr: string; at: number } | null = null;
@@ -108,7 +109,7 @@ export const treasuryAddress = async (): Promise<string> => {
   const now = Date.now();
   if (_treasury && now - _treasury.at < TREASURY_TTL_MS) return _treasury.addr;
   try {
-    const addr = await resolveTreasury(suiClient());
+    const addr = await resolveTreasury(resolver());
     if (addr && SUI_ADDRESS_RE.test(addr)) {
       _treasury = { addr, at: now };
       return addr;
