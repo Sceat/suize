@@ -1,11 +1,11 @@
 // ============================================================================
-// @suize/mcp — the LOCAL stdio MCP server. Gives an external assistant (Claude
-// Code / Claude Desktop) a Suize agent wallet: pay HTTP 402 merchants, send USDC,
-// read balances + receipts, and one-tap kill — all from the user's own zkLogin
-// wallet. Auth is the zkLogin popup ONLY (the wallet's /agent-connect page); ALL
-// signing is the Enoki zkLogin session, locally — keys never leave the user's
-// machine, there is NO raw-keypair signer and NO dev fallback of any kind, and
-// the backend never signs the payer leg.
+// @suize/mcp — the LOCAL stdio MCP server. Gives a coding assistant (Claude Code
+// / Cursor / Codex) the ability to DEPLOY a static site to Walrus through Suize:
+// deploy_site · list_sites · extend_site · site_status. It signs a gasless x402
+// payment with a LOCAL key (SUIZE_KEY) and pays the live charge door
+// (api.suize.site); the key never leaves the machine, so it is non-custodial by
+// construction, and the deployed site's on-chain owner is the local key's address
+// (whoever pays, owns). No account, no browser sign-in, no lock-in.
 //
 // (The source runs under Bun for local dev — `bun run src/index.ts`. The PUBLISHED
 // bin is bundled by tsup and runs under node via `#!/usr/bin/env node`.)
@@ -23,14 +23,20 @@
 // ============================================================================
 
 import { createInterface } from 'node:readline'
-import { authenticate } from './authenticate'
-import { suizePay, type PayArgs } from './pay'
-import { suizeBalance, suizeReceipts, suizeSubscriptions, suizeKill, type KillArgs } from './reads'
+import {
+  deploySite,
+  extendSite,
+  listSites,
+  siteStatus,
+  type DeployArgs,
+  type ExtendArgs,
+  type SiteIdArgs,
+} from './deploy'
 
 // ── Protocol constants (kept in lockstep with the backend MCP module) ────────
 const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] as const
 const DEFAULT_PROTOCOL_VERSION = '2025-06-18'
-const SERVER_INFO = { name: '@suize/mcp', version: '0.2.1' } as const
+const SERVER_INFO = { name: '@suize/mcp', version: '0.3.0' } as const
 
 // ── JSON-RPC 2.0 wire types ──────────────────────────────────────────────────
 interface JsonRpcRequest {
@@ -57,74 +63,55 @@ const INVALID_PARAMS = -32602
 
 const TOOLS = [
   {
-    name: 'authenticate',
+    name: 'deploy_site',
     description:
-      'Connect your Suize wallet to this assistant — opens your browser for a one-time Google sign-in. ' +
-      'Run this first; run it again only if a tool reports the session expired.',
-    inputSchema: { type: 'object' as const, properties: {}, additionalProperties: false },
-  },
-  {
-    name: 'suize_pay',
-    description:
-      'Pay USDC from your Suize wallet, gas-free. (A) Pay an HTTP 402 resource: pass { url } (optional ' +
-      'method/body); returns the served body + the settlement digest. (B) Send USDC: pass { payTo, amount }. ' +
-      'If this returns "CONFIRMATION REQUIRED", show it to the user, then call again with the same ' +
-      'arguments plus confirm:true.',
+      'Deploy a built static site to Walrus through Suize and get a live URL. Point { dir } at your ' +
+      'built output folder (e.g. "./dist"). Pays a flat $0.10 per month of hosting from your local ' +
+      'Suize key (gasless, non-custodial); { months } buys more up front (default 1; up to what Walrus ' +
+      'can fund in one store, about two years on mainnet). ' +
+      'Set { private: true } for a Seal-encrypted site only wallets you allow can open (2x the rate). ' +
+      'You own the site (the payer is the on-chain owner). Returns the URL + Site ID.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        url: { type: 'string' as const, description: 'Shape A: the http(s) URL of the 402 resource to pay + fetch.' },
-        method: { type: 'string' as const, description: 'Shape A: HTTP method (default GET).' },
-        body: { description: 'Shape A: optional request body (string or JSON) for non-GET methods.' },
-        payTo: { type: 'string' as const, description: 'Shape B: the recipient Sui address (0x…64 hex).' },
-        amount: {
-          type: 'string' as const,
-          description: 'Shape B: decimal USDC string, ≤ 6 dp, > 0 — e.g. "0.50".',
-        },
-        confirm: {
-          type: 'boolean' as const,
-          description: 'Set true ONLY after the user explicitly approved the exact payment this tool asked to confirm.',
-        },
+        dir: { type: 'string' as const, description: 'Path to the built static site folder to publish (e.g. "./dist").' },
+        name: { type: 'string' as const, description: 'Optional label for the site (defaults to the folder name).' },
+        months: { type: 'number' as const, description: 'Months of hosting to prepay (default 1, $0.10/month; up to about two years per payment on mainnet).' },
+        private: { type: 'boolean' as const, description: 'Deploy as a private Seal-encrypted site (2x rate). Default false.' },
       },
       additionalProperties: false,
     },
   },
   {
-    name: 'suize_balance',
+    name: 'list_sites',
     description:
-      "Read your Suize wallet's USDC balance and address. Returns { address, network, usdc }.",
+      'List every site you have deployed (found on-chain by your Suize key\'s address), newest first — ' +
+      'each with its name, Site ID, and URL.',
     inputSchema: { type: 'object' as const, properties: {}, additionalProperties: false },
   },
   {
-    name: 'suize_receipts',
+    name: 'extend_site',
     description:
-      "List your Suize wallet's recent USDC payments, newest first — each row { digest, time, amount }.",
+      'Buy more hosting time for a site you deployed. Pass { siteId } (from deploy_site or list_sites) ' +
+      'and { months }. Pays $0.10/month (2x for private sites) from your local key.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        limit: { type: 'number' as const, description: 'Max rows to return (1..50, default 10).' },
+        siteId: { type: 'string' as const, description: 'The 0x… Site ID to extend.' },
+        months: { type: 'number' as const, description: 'Months to add (default 1).' },
       },
       additionalProperties: false,
     },
   },
   {
-    name: 'suize_subscriptions',
+    name: 'site_status',
     description:
-      "List your Suize wallet's subscriptions — each { subscriptionId, merchant, amount, periodMs, paidUntil, isActive }.",
-    inputSchema: { type: 'object' as const, properties: {}, additionalProperties: false },
-  },
-  {
-    name: 'suize_kill',
-    description:
-      "Sweep your wallet's entire USDC balance back to your main wallet and disarm it (clears the local " +
-      'session). Returns { swept, digest, destination }. Pass { to } only if no main wallet was set when connecting.',
+      'Show a deployed site\'s current state: URL, owner, size, and how long its hosting is paid through ' +
+      '(active or lapsed). Pass { siteId }.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        to: {
-          type: 'string' as const,
-          description: "The sweep destination (the user's main 0x…64-hex wallet). Required only when no main address was connected.",
-        },
+        siteId: { type: 'string' as const, description: 'The 0x… Site ID to inspect.' },
       },
       additionalProperties: false,
     },
@@ -133,12 +120,10 @@ const TOOLS = [
 
 type ToolArgs = Record<string, unknown>
 const TOOL_HANDLERS: Record<string, (args: ToolArgs) => Promise<string>> = {
-  authenticate: () => authenticate(),
-  suize_pay: args => suizePay(args as PayArgs),
-  suize_balance: () => suizeBalance(),
-  suize_receipts: args => suizeReceipts(args),
-  suize_subscriptions: () => suizeSubscriptions(),
-  suize_kill: args => suizeKill(args as KillArgs),
+  deploy_site: args => deploySite(args as DeployArgs),
+  list_sites: () => listSites(),
+  extend_site: args => extendSite(args as ExtendArgs),
+  site_status: args => siteStatus(args as SiteIdArgs),
 }
 
 // ── Dispatch (same switch shape as the backend MCP module) ───────────────────
@@ -205,9 +190,9 @@ const dispatch = async (rpc: JsonRpcRequest): Promise<object | null> => {
 
 // ── The stdio loop ───────────────────────────────────────────────────────────
 // One JSON-RPC message per line. Responses may interleave out of order across
-// long-running calls (authenticate blocks on the browser) — JSON-RPC ids keep
+// long-running calls (a deploy blocks on the Walrus upload) — JSON-RPC ids keep
 // the client matched up, so each line is handled WITHOUT awaiting the previous
-// one (a ping must answer while a sign-in is pending).
+// one (a ping must answer while a deploy is in flight).
 
 const writeMessage = (msg: object): void => {
   process.stdout.write(JSON.stringify(msg) + '\n')

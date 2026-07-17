@@ -1,6 +1,0 @@
-{
-  "name": "@suize/move-trace",
-  "version": "0.0.1",
-  "private": true,
-  "description": "trace::trace — the on-chain commitment for the wallet's encrypted, user-owned conversation + action history (event-only Move module)"
-}

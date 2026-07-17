@@ -8,11 +8,6 @@
   ],
   "scripts": {
     "build": "bun run --filter '*' build",
-    "dev": "bun run --filter '*' dev",
-    "deploy": "bash scripts/deploy.sh",
-    "deploy:wallet": "bash scripts/deploy.sh wallet",
-    "deploy:crash": "bash scripts/deploy.sh crash",
-    "deploy:landing": "bash scripts/deploy.sh landing",
-    "deploy:deploy": "bash scripts/deploy.sh deploy"
+    "dev": "bun run --filter '*' dev"
   }
 }

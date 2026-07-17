@@ -9,27 +9,40 @@
 ///
 /// IDENTITY = the object id. There is deliberately no `{owner, name}`
 /// determinism and no `update_site`: deploys are immutable (a "re-deploy" is a
-/// brand-new `Site` at a new id → new URL). This is what makes the open,
-/// no-auth deploy route safe — nobody can clobber an existing site. `owner` is
-/// best-effort ATTRIBUTION only (the deployer's address, or the service wallet
-/// if none was passed); it is NOT Sui ownership and grants no authority.
+/// brand-new `Site` at a new id → new URL). This is what makes the deploy route
+/// safe — nobody can clobber an existing site. `owner` is the cryptographically
+/// recovered payer (whoever pays, owns): it is NOT Sui *object* ownership (the
+/// Site is shared), but it IS the authorization identity for custom-domain
+/// link/unlink — the off-chain worker requires the domain payer / signer to
+/// equal this address. So `owner` grants no authority over the object's bytes,
+/// but it is the site's account for domain ops.
+///
+/// The ONE mutable field is `paid_until_ms` (prepaid-months billing,
+/// 2026-07-12): `extend_site` — cap-gated, one payment digest per call through
+/// the same `SiteDigestRegistry` as `create_site` — pushes it forward. Every
+/// SERVING field (quilt/manifest ids + hash) stays immutable, so serve-side
+/// caches remain valid forever.
 module deploy_sui::site;
 
 use deploy_sui::version::Version;
 use std::string::String;
+use sui::clock::Clock;
 use sui::event;
 use sui::table::{Self, Table};
 
 // === Errors ===
 // Abort codes are part of this package's public contract: tests pattern-match on
-// the exact code. Codes are scoped PER MODULE — this is the first (and only) code
-// in `site`, so it is 0. Do NOT renumber.
+// the exact code. Codes are scoped PER MODULE. Do NOT renumber.
 
-/// The payment digest was already consumed by a prior `create_site`. ONE site per
-/// payment: the `SiteDigestRegistry` is the atomic on-chain consume guard, so a
-/// retry that lands on a different backend replica — or any double-submit of the
-/// same settled payment — aborts here instead of minting a second `Site`.
+/// The payment digest was already consumed by a prior `create_site` OR
+/// `extend_site`. ONE mint/extend per payment: the `SiteDigestRegistry` is the
+/// atomic on-chain consume guard, so a retry that lands on a different replica —
+/// or any double-submit (replay) of the same settled payment — aborts here
+/// instead of minting a second `Site` / granting a second free extension.
 const EDigestUsed: u64 = 0;
+
+/// `extend_site` must buy a POSITIVE duration.
+const EZeroDuration: u64 = 1;
 
 // === Structs ===
 
@@ -67,6 +80,16 @@ public struct Site has key {
     size_bytes: u64,
     /// Number of files in the deployed bundle.
     file_count: u64,
+    /// The wall-clock ms this site's hosting is PAID THROUGH (prepaid months at
+    /// $0.10/mo; sealed 2×). The one mutable field — `extend_site` pushes it
+    /// forward. The worker cron keeps Walrus storage extended toward it when a
+    /// prepay exceeds the Walrus max-epochs-ahead write ceiling.
+    paid_until_ms: u64,
+    /// True for a Seal-encrypted PRIVATE site (blobs encrypted at rest; viewers
+    /// decrypt client-side after the on-chain allowlist's `seal_approve`).
+    /// Public metadata on purpose — an encrypted site is visibly encrypted —
+    /// and the billing bit: extends of a sealed site price at 2×.
+    sealed: bool,
 }
 
 /// Authority over a `Site`'s off-chain operations (domain linkage). Held by the
@@ -106,14 +129,23 @@ public struct SiteDigestRegistry has key {
 
 // === Events ===
 
-/// Emitted on every successful `create_site`. The backend reads these (filtered
-/// by `owner`) to list a deployer's sites — no separate indexer needed.
+/// Emitted on every successful `create_site`. The worker/MCP/gallery read these
+/// (filtered by `owner`) to list a deployer's sites — no separate indexer needed.
 public struct SiteCreated has copy, drop {
     site_id: ID,
     owner: address,
     name: String,
     size_bytes: u64,
     file_count: u64,
+    paid_until_ms: u64,
+    sealed: bool,
+}
+
+/// Emitted on every successful `extend_site` — the cron + dashboards fold these
+/// over `SiteCreated` to track a site's current paid-through time from events.
+public struct SiteExtended has copy, drop {
+    site_id: ID,
+    paid_until_ms: u64,
 }
 
 // === Init ===
@@ -162,6 +194,8 @@ public fun create_site(
     manifest_blob_object: ID,
     size_bytes: u64,
     file_count: u64,
+    paid_until_ms: u64,
+    sealed: bool,
     ctx: &mut TxContext,
 ): SiteAdminCap {
     v.assert_version();
@@ -184,6 +218,8 @@ public fun create_site(
         version: 1,
         size_bytes,
         file_count,
+        paid_until_ms,
+        sealed,
     };
     let site_id = object::id(&site);
 
@@ -192,11 +228,72 @@ public fun create_site(
     // is the atomic per-payment lock.
     reg.used.add(payment_digest, site_id);
 
-    event::emit(SiteCreated { site_id, owner, name: site.name, size_bytes, file_count });
+    event::emit(SiteCreated {
+        site_id,
+        owner,
+        name: site.name,
+        size_bytes,
+        file_count,
+        paid_until_ms,
+        sealed,
+    });
 
     transfer::share_object(site);
 
     SiteAdminCap { id: object::new(ctx), site_id }
+}
+
+// === Extend ===
+
+/// Buy `add_ms` more milliseconds of paid hosting after a settled extend payment.
+///
+/// GATED by `&DeployerCap` (only the paid worker calls this, so the new
+/// paid-through is service-attested against a real settlement), and gated by the
+/// SAME `SiteDigestRegistry` as `create_site`: each settled payment digest
+/// extends exactly ONCE — a replayed X-PAYMENT (the settle is idempotent by
+/// digest) aborts `EDigestUsed` here instead of granting a second free extension.
+///
+/// RELATIVE, NOT ABSOLUTE (money-hat fix 2026-07-12): the duration is ADDED to
+/// `max(now, paid_until_ms)`, computed ON-CHAIN. So (a) a lapsed site gets the
+/// FULL purchased time (never extends from a past instant), and (b) two honest
+/// concurrent extenders each stack their own duration — there is no shared
+/// "target" that a second settled payment could find stale (the old absolute
+/// form aborted the loser AFTER it had paid, stranding its funds).
+///
+/// EXTEND IS OPEN-PAYER by design: ANY payer may fund a site's extension — it
+/// only ever ADDS paid time. The Walrus storage itself is extended off-chain by
+/// the worker (service-wallet `system::extend_blob`), steered by this record.
+public fun extend_site(
+    _deployer: &DeployerCap,
+    v: &Version,
+    reg: &mut SiteDigestRegistry,
+    payment_digest: vector<u8>,
+    site: &mut Site,
+    clock: &Clock,
+    add_ms: u64,
+) {
+    v.assert_version();
+    assert!(!reg.used.contains(payment_digest), EDigestUsed);
+    assert!(add_ms > 0, EZeroDuration);
+
+    let now = clock.timestamp_ms();
+    let base = if (site.paid_until_ms > now) site.paid_until_ms else now;
+    let new_paid_until = base + add_ms;
+
+    let site_id = object::id(site);
+    reg.used.add(payment_digest, site_id);
+    site.paid_until_ms = new_paid_until;
+
+    event::emit(SiteExtended { site_id, paid_until_ms: new_paid_until });
+}
+
+/// The site id a settled payment digest minted/extended, if any — the on-chain
+/// digest→site audit trail. The worker's recovery path reads this to return the
+/// already-created site when a retry of an already-consumed payment aborts
+/// `EDigestUsed` (a death AFTER the on-chain effect but before the response).
+public fun site_for_digest(reg: &SiteDigestRegistry, payment_digest: vector<u8>): Option<ID> {
+    if (reg.used.contains(payment_digest)) option::some(*reg.used.borrow(payment_digest))
+    else option::none()
 }
 
 // === Read accessors ===
@@ -253,6 +350,14 @@ public fun file_count(site: &Site): u64 {
     site.file_count
 }
 
+public fun paid_until_ms(site: &Site): u64 {
+    site.paid_until_ms
+}
+
+public fun sealed(site: &Site): bool {
+    site.sealed
+}
+
 // === Tests ===
 
 #[test_only]
@@ -298,6 +403,8 @@ fun test_create_site_happy_path_shares_site_and_emits_event() {
             object::id_from_address(@0xB2),
             1024,
             7,
+            1_752_000_000_000,
+            false,
             scenario.ctx(),
         );
         // The digest is now consumed.
@@ -329,6 +436,8 @@ fun test_create_site_happy_path_shares_site_and_emits_event() {
         assert!(site.file_count() == 7, 9);
         assert!(site.quilt_blob_object() == object::id_from_address(@0xB1), 10);
         assert!(site.manifest_blob_object() == object::id_from_address(@0xB2), 11);
+        assert!(site.paid_until_ms() == 1_752_000_000_000, 13);
+        assert!(!site.sealed(), 14);
 
         scenario.return_to_sender(cap);
         test_scenario::return_shared(site);
@@ -368,6 +477,8 @@ fun test_create_site_aborts_when_frozen() {
             object::id_from_address(@0xB2),
             1024,
             7,
+            0,
+            false,
             scenario.ctx(),
         );
         transfer::public_transfer(cap, deployer);
@@ -409,6 +520,8 @@ fun test_create_site_aborts_on_duplicate_digest() {
             object::id_from_address(@0xB2),
             1024,
             7,
+            0,
+            false,
             scenario.ctx(),
         );
 
@@ -428,6 +541,8 @@ fun test_create_site_aborts_on_duplicate_digest() {
             object::id_from_address(@0xB4),
             2048,
             3,
+            0,
+            false,
             scenario.ctx(),
         );
 
@@ -436,6 +551,175 @@ fun test_create_site_aborts_on_duplicate_digest() {
         scenario.return_to_sender(deployer_cap);
         test_scenario::return_shared(reg);
         test_scenario::return_shared(v);
+    };
+    scenario.end();
+}
+
+// ── extend_site ──────────────────────────────────────────────────────────────
+
+#[test_only]
+/// Shared boilerplate for the extend tests: init the version gate + registry,
+/// then mint ONE site (digest 0xA1, paid through 1_000ms) owned by `deployer`.
+fun setup_with_site(scenario: &mut test_scenario::Scenario, deployer: address) {
+    { version::init_for_testing(scenario.ctx()); };
+    scenario.next_tx(deployer);
+    { init(scenario.ctx()); };
+    scenario.next_tx(deployer);
+    {
+        let v = scenario.take_shared<Version>();
+        let mut reg = scenario.take_shared<SiteDigestRegistry>();
+        let deployer_cap = scenario.take_from_sender<DeployerCap>();
+        let cap = create_site(
+            &deployer_cap,
+            &v,
+            &mut reg,
+            b"\xA1",
+            string::utf8(b"site"),
+            deployer,
+            string::utf8(b"q"),
+            string::utf8(b"m"),
+            b"\x01",
+            object::id_from_address(@0xB1),
+            object::id_from_address(@0xB2),
+            10,
+            1,
+            1_000,
+            false,
+            scenario.ctx(),
+        );
+        transfer::public_transfer(cap, deployer);
+        scenario.return_to_sender(deployer_cap);
+        test_scenario::return_shared(reg);
+        test_scenario::return_shared(v);
+    };
+    scenario.next_tx(deployer);
+}
+
+#[test]
+fun test_extend_site_adds_duration_and_consumes_digest() {
+    let deployer = @0xD;
+    let mut scenario = test_scenario::begin(deployer);
+    setup_with_site(&mut scenario, deployer);
+    {
+        let v = scenario.take_shared<Version>();
+        let mut reg = scenario.take_shared<SiteDigestRegistry>();
+        let deployer_cap = scenario.take_from_sender<DeployerCap>();
+        let mut site = scenario.take_shared<Site>();
+        // Clock at 500ms; site paid through 1_000ms (from setup) — base = the
+        // later (1_000), +2_000 → 3_000.
+        let mut clock = sui::clock::create_for_testing(scenario.ctx());
+        clock.set_for_testing(500);
+
+        extend_site(&deployer_cap, &v, &mut reg, b"\xE1", &mut site, &clock, 2_000);
+
+        assert!(site.paid_until_ms() == 3_000, 0);
+        assert!(reg.digest_used(b"\xE1"), 1);
+
+        clock.destroy_for_testing();
+        scenario.return_to_sender(deployer_cap);
+        test_scenario::return_shared(site);
+        test_scenario::return_shared(reg);
+        test_scenario::return_shared(v);
+    };
+    let effects = scenario.next_tx(deployer);
+    assert!(effects.num_user_events() == 1, 2);
+    scenario.end();
+}
+
+#[test]
+fun test_extend_site_lapsed_site_extends_from_now_not_the_past() {
+    let deployer = @0xD;
+    let mut scenario = test_scenario::begin(deployer);
+    setup_with_site(&mut scenario, deployer);
+    {
+        let v = scenario.take_shared<Version>();
+        let mut reg = scenario.take_shared<SiteDigestRegistry>();
+        let deployer_cap = scenario.take_from_sender<DeployerCap>();
+        let mut site = scenario.take_shared<Site>();
+        // Site LAPSED: paid through 1_000, clock now 10_000. A 2_000 extend must
+        // yield 12_000 (now + duration), NOT 3_000 (paid_until + duration) — the
+        // payer gets the full purchased time.
+        let mut clock = sui::clock::create_for_testing(scenario.ctx());
+        clock.set_for_testing(10_000);
+
+        extend_site(&deployer_cap, &v, &mut reg, b"\xE9", &mut site, &clock, 2_000);
+        assert!(site.paid_until_ms() == 12_000, 0);
+
+        clock.destroy_for_testing();
+        scenario.return_to_sender(deployer_cap);
+        test_scenario::return_shared(site);
+        test_scenario::return_shared(reg);
+        test_scenario::return_shared(v);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = EDigestUsed)]
+fun test_extend_site_aborts_on_replayed_digest() {
+    let deployer = @0xD;
+    let mut scenario = test_scenario::begin(deployer);
+    setup_with_site(&mut scenario, deployer);
+    {
+        let v = scenario.take_shared<Version>();
+        let mut reg = scenario.take_shared<SiteDigestRegistry>();
+        let deployer_cap = scenario.take_from_sender<DeployerCap>();
+        let mut site = scenario.take_shared<Site>();
+        let clock = sui::clock::create_for_testing(scenario.ctx());
+
+        // First extend consumes the digest; the REPLAY of the same settled
+        // payment must abort instead of granting a second free extension.
+        extend_site(&deployer_cap, &v, &mut reg, b"\xE1", &mut site, &clock, 2_000);
+        extend_site(&deployer_cap, &v, &mut reg, b"\xE1", &mut site, &clock, 3_000);
+
+        clock.destroy_for_testing();
+        scenario.return_to_sender(deployer_cap);
+        test_scenario::return_shared(site);
+        test_scenario::return_shared(reg);
+        test_scenario::return_shared(v);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = EZeroDuration)]
+fun test_extend_site_aborts_on_zero_duration() {
+    let deployer = @0xD;
+    let mut scenario = test_scenario::begin(deployer);
+    setup_with_site(&mut scenario, deployer);
+    {
+        let v = scenario.take_shared<Version>();
+        let mut reg = scenario.take_shared<SiteDigestRegistry>();
+        let deployer_cap = scenario.take_from_sender<DeployerCap>();
+        let mut site = scenario.take_shared<Site>();
+        let clock = sui::clock::create_for_testing(scenario.ctx());
+
+        extend_site(&deployer_cap, &v, &mut reg, b"\xE2", &mut site, &clock, 0);
+
+        clock.destroy_for_testing();
+        scenario.return_to_sender(deployer_cap);
+        test_scenario::return_shared(site);
+        test_scenario::return_shared(reg);
+        test_scenario::return_shared(v);
+    };
+    scenario.end();
+}
+
+#[test]
+fun test_site_for_digest_returns_the_minted_site() {
+    let deployer = @0xD;
+    let mut scenario = test_scenario::begin(deployer);
+    setup_with_site(&mut scenario, deployer);
+    {
+        let reg = scenario.take_shared<SiteDigestRegistry>();
+        let site = scenario.take_shared<Site>();
+        // setup_with_site minted under digest 0xA1.
+        let found = site_for_digest(&reg, b"\xA1");
+        assert!(found.is_some(), 0);
+        assert!(found.destroy_some() == object::id(&site), 1);
+        assert!(site_for_digest(&reg, b"\xFF").is_none(), 2);
+        test_scenario::return_shared(site);
+        test_scenario::return_shared(reg);
     };
     scenario.end();
 }

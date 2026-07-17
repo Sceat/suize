@@ -1,115 +1,59 @@
-# Suize — Monorepo (CLAUDE.md)
+# Suize (CLAUDE.md)
 
-> Loaded every session. Owns the **global picture + the one payment-rail standard**. Per-piece detail lives in each piece's `SPEC.md` — **reference, never redeclare; state each fact once.** Calibrated honesty is law: every reassurance here is true today; roadmap is marked ROADMAP.
+> Loaded every session. This file owns the global picture, the payment-rail facts, and the locked decisions. Per-piece detail lives in each piece's README: reference, never redeclare, state each fact once. Every claim here is true today; a thing is described as it works or it is absent.
 
-**Suize = Stripe for AI agents:** charge payments or subscriptions to any agent. Two faces of one rail:
-
-- **CHARGE** — the open rail. Any agent that can pay USDC on Sui pays a Suize merchant (one-off or subscription), no KYB, live in minutes. The payer needs nothing Suize-specific.
-- **PAY** — a self-contained conversational consumer AI wallet: it remembers the user, acts across services, and pays non-custodially from a capped sub-account. The best way to *be* a payer on the rail, but optional.
-
-If it isn't CHARGE, PAY, or a clean derivative — it's not Suize.
-
-**Target:** Sui Overflow 2026, Agentic Web track, deadline **June 21 2026** (owner-confirmed). Flagship demo: a real agent deploys a site to Walrus *through* Deploy, having paid via Suize — working, testnet-proven, mainnet-ready.
-
----
-
-## The one payment rail
-
-Every product (Wallet, Deploy, Crash, external merchants) consumes this one rail.
-
-**One-off = x402.** Vanilla **x402 V2 'exact'** over Sui's protocol-level **gasless** Address-Balance transfers. **No custom Move verbs:** the payer signs a `send_funds` PTB with its own key (`gasPayment=[]`, `gasPrice=0`), and the Suize facilitator settles it **keyless** over gRPC. *"Your address is your account"* — no on-chain Account, no fee object.
-
-- **Fee = 2% (min $0.01), merchant-absorbed,** carved as a second declared output (`extra.outputs`) in the SAME atomic tx, **enforced by the facilitator at verify** (it recomputes the split; payer-declared outputs are ignored). The on-chain balance-change set IS the receipt. **Never waived** — every payment carries it; the `SUIZE_MERCHANTS` registry only customizes the rate. The payer always pays exactly the listed price. The fee lands at the treasury resolved live from the `treasury@suize` SuiNS name (never hardcoded).
-- **Idempotency** rides the x402 `payment-identifier` extension — never an ad-hoc field; a retry is never a double charge.
-- **Facilitator (`api.suize.io`, `facilitator.suize.io` alias) is STATELESS** — the chain is the database. Endpoints: `/verify` `/settle` `/supported` `/build` `/terms` `/tx`. No payment stores, no server-minted ids.
-- **Three agent-paid doors, one wire** — the agent self-signs `X-PAYMENT`; there is **no human / pay-link / checkout path** (deleted): (1) **Sui-aware** — own Sui key + USDC; (2) **Suize** — its zkLogin session via `@suize/mcp` (`suize_pay`); (3) **hosted charge door** `api.suize.io/charge/<token>` — a stateless Suize-signed token `{merchant, price, webhook, payTo}`; GET mints the 402, POST settles on the same rail and fires a *signed order* to the merchant's own https webhook (a delivery callback, not a settlement webhook).
-- **Merchant integration = `@suize/pay`** (~60 lines): answer the 402, verify the retry against the merchant's OWN terms, serve. The merchant is the verifier; Suize is plumbing. (Platform gateway plugins are ROADMAP — no platform-name claims until one ships.)
-
-**Recurring = `subs::subscription`** (standalone Party-object Move module — the ONLY Suize Move code in the payment path). The user creates a soulbound `Subscription<T>` ONCE (fixed merchant + amount + period), paying period one inline. **Every renewal is user-signed and PUSHES exactly one period** — nothing reaches into the user's funds (the object holds no balance; the caller pushes one period's coin, the module asserts `value == amount`, carves 2%/$0.01 to treasury, sends the rest to the merchant). **Cancel = delete the object on-chain.** Merchants self-index from chain events. The off-chain relayer only sponsors gas (never holds a key); the chain is the double-charge guard (`ETooEarly`).
-
-**Spending control = funding physics + client dials.** The agent's funded address balance IS the hard cap (kill = stop funding + sweep); a detached agent = a second Google sign-in's address. Client-side dials: confirm-each (default), auto-under-$X, full-auto, confirm-new-subscription. Subscriptions, once approved, renew silently. Marketing framing: *"autonomy you switch on."*
-
-**Custody: fully non-custodial by construction** — the PAY app (or, dev-side, the local MCP) runs Google/Enoki zkLogin and signs locally; keys never leave the user's machine; Suize never signs owner txs. v1 is **delegated-spend risk, not custody risk** (no payee allow-list yet — bounded by what you fund + a verifiable log + stop-and-sweep). Custody phrasing is exactly *"fully non-custodial — your keys never leave your machine"* (never "never holds funds").
-
----
+**Suize is the publish button for the agentic web.** An agent (via `@suize/mcp` or raw x402) or a human (the suize.io dashboard, wallet-connect) pays one gasless x402 USDC payment on Sui and a static site goes live on Walrus, content-addressed and integrity-verified at serve time. Hosting is $0.10 per month, prepaid up to what Walrus can fund in one store (about two years per payment on mainnet); sealed (Seal-encrypted private) sites pay 2x; extend anytime at the same rate; custom domains are $19.99/year. Fully non-custodial: whoever pays owns the site (on-chain `Site.owner`); the MCP signs through the user's own Sui CLI by default. No account, no API key, no signup.
 
 ## Repo map
 
-```
-apps/        wallet/        @suize/wallet       React 19 + Vite — the PAY face (fund/dials/kill/trace)        → apps/wallet/SPEC.md
-             deploy/        @suize/deploy       React 19 + Vite — Deploy merchant (folds move-deploy + worker) → apps/deploy/SPEC.md
-             crash/         @suize/crash        React 19 + Vite — BTC up/down, TESTNET (folds move-crash)      → apps/crash/SPEC.md
-             landing/       @suize/landing      React 19 + Vite — consumer home + /for-business               → apps/landing/SPEC.md
-             agents/        @suize/agents-app   React 19 + Vite — agents.suize.io: live x402 feed + ad auction → apps/agents/SPEC.md
-packages/    shared/        @suize/shared       network + PACKAGE_IDS + wire types — SINGLE SOURCE OF TRUTH (self-documenting)
-             x402/          @suize/x402         the x402 V2 'exact' Sui scheme: wire types + build/verify (self-documenting)
-             pay/           @suize/pay          the ~60-line merchant middleware (x402 challenge + verify)     → services/backend/SPEC.md
-             mcp/           @suize/mcp          the dev/power-user door: 6 generic tools, npm-ready            → services/backend/SPEC.md
-             move-subs/     @suize/move-subs    subs::subscription — standalone Party-object subscription      → packages/move-subs/SPEC.md
-             move-deploy/   @suize/move-deploy  deploy_sui (version · site · domain_registry)                 → apps/deploy/SPEC.md
-             move-crash/    @suize/move-crash   crash_sui::router — Crash's own 3% skim                        → apps/crash/SPEC.md
-             move-auction/  @suize/move-auction auction::auction — the directory's on-chain ad-slot auction    → packages/move-auction/SPEC.md
-             move-profile/  @suize/move-profile profile::profile — on-chain BusinessProfile, $0.10 create/edit (self-documenting)
-             move-wallet/   @suize/move-wallet  RETIRED-IN-PLACE archive: account.move (old rail) + legacy cage — NOT in any live path
-services/    backend/       @suize/backend      ONE Bun service: facilitator + mcp + deploy + sponsor + handle + relayer + directory → services/backend/SPEC.md
-             deploy-worker/ @suize/deploy-worker CF Worker serving Walrus sites w/ on-chain manifest + 2× hash → apps/deploy/SPEC.md
-```
+Bun workspace monorepo: `apps/* packages/* services/*`.
 
-Network split: **Wallet + Deploy go mainnet; Crash stays testnet** (DeepBook Predict is testnet-only) on a network-pinned path so the mainnet flip never drags it along.
+| Path                     | Package                | What it is                                                                                                                                                                            |
+| ------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/suize`             | `@suize/suize`         | The product frontend (suize.io): landing + live gallery, `#/sites` dashboard, sealed-site viewer. React 19 + Vite.                                                                    |
+| `services/deploy-worker` | `@suize/deploy-worker` | CF Worker, both faces: serves `*.suize.site` from Walrus with serve-time integrity, and the paid publish API on api.suize.site (`/deploy` `/extend` `/domains` `/preview` `/health`). |
+| `services/facilitator`   | `@suize/facilitator`   | CF Worker: the open-source x402 facilitator for Sui (`/supported` `/verify` `/settle` `/build` `/health`). Keyless, stateless. Live at facilitator.suize.io.                          |
+| `packages/shared`        | `@suize/shared`        | THE source of truth: network resolution, on-chain ids, prices, Walrus/Seal constants, wire types. Pure, no runtime deps.                                                              |
+| `packages/x402`          | `@suize/x402`          | The x402 V2 `exact` Sui scheme: wire types, the gasless tx builder, the fee-split math, the verify enforcement.                                                                       |
+| `packages/pay`           | `@suize/pay`           | Zero-dep merchant middleware (challenge + verify + settle), published on npm.                                                                                                         |
+| `packages/mcp`           | `@suize/mcp`           | The local stdio MCP deploy client (`deploy_site` and friends). Signs via the user's Sui CLI, key file, or env key.                                                                   |
+| `packages/move-deploy`   | `deploy_sui`           | The on-chain Move package: `site` (Site object, digest registry), `domain_registry`, `allowlist` (Seal access control), `version`.                                                    |
 
----
+## The payment rail
+
+- **x402 V2 `exact`, protocol-gasless.** No custom payment Move code: the payer signs a `0x2::balance::send_funds` PTB drawing from its USDC Address Balance, with `gasPayment: []` and the deterministic budget-0 election (`setGasBudget(0n)` forces the SDK's gasless branch; empirics in `packages/x402/src/build.ts`). No SUI needed, only USDC.
+- **The facilitator recomputes and enforces the fee split at verify.** It simulates the signed tx (never broadcasts at verify), recomputes the canonical split from its own operator policy (`FEE_BPS`, `FEE_FLOOR`, `FEE_TREASURY`, optional `MERCHANT_RATES`, all env vars), and rejects any mismatched credit, undeclared recipient, or wrong payer debit. Declared outputs are never trusted. Settle broadcasts the payer-signed bytes keyless: the facilitator holds no key, the chain is the database.
+- **Idempotency is an on-chain digest registry; replays recover.** The tx digest is the payment identity: `/settle` dedups by digest, and `create_site` / `extend_site` consume the settled digest in the shared `SiteDigestRegistry` (abort `EDigestUsed` on reuse). A retried `X-PAYMENT` after a mid-flight death re-drives the idempotent effect (the `alreadySettled` path) so paid funds always produce the paid work; it can never double-charge or double-mint.
+- **Prices and caps live ONLY in `@suize/shared`:** `DEPLOY_PRICE_PER_MONTH_USDC = 100000` ($0.10), `DEPLOY_SEALED_MULTIPLIER = 2`, `DOMAIN_PRICE_PER_YEAR_USDC = 19990000` ($19.99). The prepay ceiling is DERIVED per network by `maxDeployMonths(net)` from `WALRUS_MAX_EPOCHS_AHEAD = 53` (Walrus funds storage in one shot at deploy/extend, no cron): about 24 months on mainnet, 1 on testnet. Quote and enforcement use the same helpers; a drifted copy is a billing bug.
 
 ## Locked decisions (do not relitigate)
 
-1. **Two primitives: CHARGE + PAY.** Everything is a derivative of one.
-2. **Rail = x402, no custom verbs** (see above). The fee is never waived. `account.move` is RETIRED.
-3. **No Account object, no RailConfig.** *"Your address is your account"* is literal — no on-chain Account, fee object, or agent field. The cap = what you fund the agent address with; kill = stop funding + sweep. Subscriptions are the standalone Party-object module (user-signed push, cancel = delete, merchants self-index). The fee split lives in the declared outputs, not an on-chain config.
-4. **Fully non-custodial** (see above). v1 = delegated-spend risk, not custody risk.
-5. **Backend = deterministic core + a FENCED inference module (the wallet "brain").** The brain runs **Claude (Haiku only)** to power the PAY conversation but is walled off from money: it returns ONLY narration + *proposed* tool calls, never imports the signer/settle/sponsor/relayer path, and emits no on-chain amount/address/signature/digest (CI-fenced on the response shape). **The NUMBER WALL is load-bearing:** every on-chain amount/fee/size originates from the user's explicit input (re-shown on the confirm card), a merchant's OWN 402 terms, or a `@suize/shared` constant — **never from an LLM tool argument**. The wallet client is the SOLE signer (local zkLogin). The brain rides the authenticated WS (identity = `ws.data.address`) with a strict per-user daily token cap. The relayer + sponsor + facilitator stay fully deterministic — no LLM ever touches settlement.
-6. **Distribution = a self-contained consumer AI wallet app.** Onboarding: open the app → sign in with Google (zkLogin, signs locally) → talk to your AI wallet. The local-MCP-into-an-external-agent survives ONLY as an optional dev/CHARGE-side integration, never as the consumer path. The remote zero-install connector is dead.
-7. **Payment standard = x402 V2 'exact' for Sui + a stateless facilitator.** The `@x402/sui` mechanism + the gasless spec amendment are submitted upstream as **OPEN PRs** on `x402-foundation/x402` (#2615 spec + #2616 mechanism) — open, not merged. Copy is governed by the **claim ladder** (below). Sui Payment Kit is lower-level infra we build alongside (no subs, no fee-split): *"Payment Kit verifies; Suize bills."*
-8. **Spending control = funding physics + client dials** (see above). Subscriptions are exempt — approved once, they renew silently.
-9. **Revenue = 2% (min $0.01) on CHARGE + Deploy** — merchant-absorbed, facilitator-enforced, lands at the treasury. A merchant cannot zero it. Crash's **3%** is Crash's own product rake — never conflate.
-10. **Deploy billing:** each deploy = a direct one-off x402 charge of **$0.50** (site live on Walrus immediately). The subscription (**$19.99/mo placeholder — may lower**) unlocks ONLY (a) custom domains and (b) auto-renewed Walrus storage (via `subs`). One product proves both one-off and recurring on the same rail. Deploy goes mainnet. → `apps/deploy/SPEC.md`.
-11. **Crash stays testnet.** The Crash→Suize 2% leg is designed, NOT wired (a mainnet payer can't settle a testnet bet in one PTB). Position Crash as a PoC of the router/rake/sponsor stack.
-12. **Mainnet is UNGATED for payments** — the treasury, mainnet native USDC, and gasless transfers all exist with zero publishes (there is no payment Move package). The only mainnet publishes are the `subs` module and a `deploy_sui` republish. **The mainnet flip is DEFERRED past the June 21 submission** (owner 2026-06-18): the demo is testnet-proven, mainnet-ready; the flip is a post-submission republish, not a v1 gate. Mainnet native USDC = `0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC` (a Circle RegulatedCoin — note in copy, not a blocker).
-13. **Bun workspaces, one toolchain.** Root globs `apps/* packages/* services/*`; `bun install` at root; dev/build fan out via `--filter '*'`. No pnpm, no turbo.
-14. **One backend, two transports, one auth primitive.** The **WS** is the wallet's sole transport for `sponsor` + `handle` (sign-once personal-message nonce at connect; `ws.data.address` is the session identity). The **HTTP** surface carries deploy/402 (per-request signed-nonce auth). Both verify through the same primitive. Reads go direct-to-chain. The backend never signs owner txs. The CF deploy-worker is a separate edge runtime, not "the backend."
-15. **`@suize/*` naming. Network, on-chain ids, and version pins live ONLY in `@suize/shared`** — nothing else hardcodes an id, target, or network.
-16. **Per-piece SPEC; this file owns the global picture + the rail standard.** State each fact once; reference, never redeclare.
-17. **No `git add` / `commit` / `push` without explicit owner approval.**
-
----
+1. **Non-custodial by construction; whoever pays, owns.** The payer signs locally (own key, key file, or the Sui CLI); no service ever holds a payer key or signs owner txs. The recovered payer becomes `Site.owner`: the payment IS the authentication, there is no second auth primitive for publishing.
+2. **Network selection is ENV-ONLY.** `SUI_NETWORK` (workers), `VITE_SUI_NETWORK` (apps); only the exact string `mainnet` opts in, everything else is testnet (fail-safe). On-chain ids, endpoints, and constants live ONLY in `@suize/shared`; nothing else hardcodes an id, target, or network.
+3. **Suize's own instances are LIVE ON MAINNET (2026-07-15 full cutover).** `facilitator.suize.io` and `api.suize.site` both run `SUI_NETWORK=mainnet`. `deploy_sui` is published on mainnet at `0xec2dcd65271127019351678ddd05287176a0b9b7fc59ef6ceef34fdbc36e87db`; `treasury@suize` resolves to `0x9036f4be5ca0d0c2b890f12b398c032a00952aa41c2776507db0d018002373a7` (also the Deploy merchant address, so Deploy's own 402 quotes collapse to a single output). Mainnet USDC is Circle's native `0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC`. A fresh self-hosted clone still DEFAULTS to testnet (`wrangler deploy --env mainnet` opts in, never a code change); testnet stays available for dev via an explicit env override.
+4. **NEVER `git add` / `commit` / `push` without explicit owner approval.**
+5. **The lead session never edits code directly** (owner law 2026-07-12): every code change goes through a briefed subagent; the lead briefs, reviews, and verifies.
 
 ## Conventions
 
-- **JS/TS:** ESM everywhere (`"type": "module"`). Bun = runtime + workspace manager; apps build with Vite, the backend runs on Bun, the deploy-worker runs on CF Workers.
-- **Move:** `edition = "2024"` (`2024.beta` in move-deploy); a `Version` upgrade gate per package; owner-**address** auth (zkLogin gives a stable address). **Abort codes are a public contract — never renumber**, scoped per module. `subs`: `0 ETooEarly · 1 EWrongAmount · 2 EBadTerms · 3 EInvalidRate`. `auction`: `0 EBidTooLow · 1 EWrongCoin · 2 EInvalidRate · 3 EBadSlot · 4 ECoinUnpinned · 5 EBadCreative · 6 ENotHolder · 7 EUpdateTooSoon`. Admin fns need no abort code — cap possession IS the auth.
-- **Secrets are env-only, never committed, never in a frontend bundle.** Separate key per module (sponsor Enoki ≠ SuiNS issuer ≠ deploy wallet — never reuse). The Google `client_id` is load-bearing forever (zkLogin `aud`) — pin one, never rotate. Var names live in `services/backend/.env.example`; the only values safe to commit are publishable `VITE_` frontend keys (Enoki public key, OAuth client ids, public addresses).
-- **Docs = this file + ONE `SPEC.md` per piece.** No other markdown except the root `README.md` (the public front door), vendored `deps/**`, and `marketing/` (owner strategy). Fold stray facts into the owning SPEC.
-- **`llms.txt`:** one per product, final-production framing (no internals, no testnet, no status talk); the landing's is a short navigation version.
+- **Bun workspaces, one toolchain.** `bun install` at root; per-package `bun run dev|build|test|typecheck`. No pnpm, no turbo.
+- **ESM everywhere** (`"type": "module"`). Apps are React 19 + Vite; both services run on Cloudflare Workers (wrangler).
+- **Move edition 2024.** Abort codes are a public contract, scoped per module, never renumbered. Cap possession IS the auth for admin fns.
+- **Secrets are env-only, never committed, never in a frontend bundle.** Worker secrets via `wrangler secret put` (the deploy worker's only secret is `DEPLOY_WALLET_KEY`, plus optional `CF_API_TOKEN`); local dev via gitignored `.dev.vars` / `.env.local`. The facilitator holds no secrets at all.
 
-### Copy laws (every user-facing surface)
+## Copy laws (every public surface, docs included)
 
-- The agent's funded balance is a **"sub-account"** in consumer copy — never "leash"/"pot" (those stay internal concept terms).
-- **No tech jargon user-facing:** MemWal → *"it remembers you"*; the model → *"a smarter AI"* (Haiku is internal; no paid tier); zkLogin → *"sign in with Google"*; MCP/Walrus stay internal.
-- **No pricing outside the Pricing page** (an illustrative receipt fee is trust proof, not a tier).
-- The landing is **mainnet-ready sales copy:** no testnet labels AND no false "live on mainnet"; "Built on Sui" (true) is fine; on-page figures read as illustrative mockups.
-- **Claim ladder (binding).** ALLOWED now: *"gasless"*, *"x402-compatible by design"*, *"implements the merged x402 Sui exact scheme"*, *"we run a live x402 facilitator for Sui"*, *"opened the spec + mechanism PRs upstream (#2615 + #2616)"*. FORBIDDEN until the mechanism PR **merges**: *"on x402"*, *"official/default Sui facilitator"*, *"listed by x402"*, *"merged upstream"* (as fact, not ambition). **Zero status-talk on any public surface** — no "coming soon / soon / roadmap / not yet / pending"; a feature is described as it works today or it is absent.
+- **No em-dashes anywhere.** Commas, colons, periods.
+- **Claim ladder (binding).** ALLOWED: "gasless", "x402-compatible by design", "open-source x402 facilitator for Sui", "spec + mechanism PRs opened upstream (#2615 #2616)". FORBIDDEN until the mechanism PR merges: "on x402", "official facilitator", "listed by x402", "merged upstream" as fact.
+- **Zero status-talk.** No "coming soon", "roadmap", "not yet", "pending" on any public surface: a feature is described as it works today or it is absent.
+- No invented numbers: every price, cap, or on-chain id quoted in copy comes from `@suize/shared`.
 
----
+## Mainnet wallet operations
 
-## Status & pointers
+- Operational wallet management (keys, funding, WAL duties) lives in the private ops runbook outside the public tree.
 
-Live on-chain ids, network, and version pins live ONLY in `@suize/shared`; per-piece build status lives in each SPEC. In short: the **x402 rail** (`packages/x402` + the backend facilitator) and the **`subs` / `auction` / `deploy_sui`** Move modules are **built and testnet-proven**; mainnet is a deferred republish (#12). The wallet conversational brain is built (answers "not configured" until the backend has `ANTHROPIC_API_KEY`); cross-service provider integrations and the Walrus action-log are ROADMAP.
 
-- x402 wire scheme → `packages/x402` (self-documenting)
-- subscription module → `packages/move-subs/SPEC.md`
-- ad-slot auction → `packages/move-auction/SPEC.md`
-- agent-commerce directory (`agents.suize.io`) → `apps/agents/SPEC.md`
-- off-chain rail (facilitator / mcp / deploy / sponsor / handle / relayer / directory) → `services/backend/SPEC.md`
-- consumer Wallet (PAY) → `apps/wallet/SPEC.md`
-- Deploy merchant → `apps/deploy/SPEC.md`
-- Crash merchant → `apps/crash/SPEC.md`
-- Landing → `apps/landing/SPEC.md`
-- `packages/shared` is self-documenting (no SPEC)
+## Pointers
+
+- Per-piece READMEs: `services/facilitator/README.md`, `services/deploy-worker/README.md`, `apps/suize/README.md`, `packages/{pay,mcp,x402}/README.md`. Root `README.md` is the public front door.
+- `BACKLOG.md`: the ticket ledger. `DECISIONS.md`: the decision log. Fold stray facts into the owning README, never a new doc file.

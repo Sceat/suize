@@ -2,155 +2,136 @@
 
 # Suize
 
-### Stripe for AI agents — on Sui.
+### The publish button for the agentic web.
 
-**Charge payments or subscriptions to any AI agent. One line of code, live in minutes, settled on-chain.**
+**An agent pays over HTTP 402, in USDC, gasless, and a site goes live on Walrus. No account, no API key, no signup. The chain is the receipt.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-111.svg)](./LICENSE)
 [![Built on Sui](https://img.shields.io/badge/Built%20on-Sui-6fbcf0.svg)](https://sui.io)
-[![Payments: x402 V2 exact](https://img.shields.io/badge/payments-x402%20V2%20%E2%80%9Cexact%E2%80%9D-7c3aed.svg)](https://github.com/x402-foundation/x402/pull/2616)
-[![tests](https://img.shields.io/badge/tests-192%20passing-3fb950.svg)](#proof--verify-everything)
+[![x402 V2 "exact"](https://img.shields.io/badge/payments-x402%20V2%20%22exact%22-7c3aed.svg)](https://github.com/x402-foundation/x402/pull/2616)
 [![npm @suize/pay](https://img.shields.io/npm/v/@suize/pay?label=%40suize%2Fpay&color=cb3837)](https://www.npmjs.com/package/@suize/pay)
 [![npm @suize/mcp](https://img.shields.io/npm/v/@suize/mcp?label=%40suize%2Fmcp&color=cb3837)](https://www.npmjs.com/package/@suize/mcp)
-
-[Live demo deck](https://suize-deck.vercel.app) · [Wallet](https://wallet.suize.io) · [Deploy](https://deploy.suize.io) · [Directory](https://agents.suize.io) · [Facilitator](https://api.suize.io/supported)
 
 </div>
 
 ---
 
-Suize is two halves of one thing — **the payment rail for the agentic economy on Sui:**
+Suize is one product and the open rail it runs on, both live on Sui mainnet today:
 
-- **CHARGE — the open rail.** Any AI agent that can hold USDC on Sui can pay any merchant — one-off or subscription — **gasless, in one atomic on-chain transaction, no KYB, no chargebacks, no signup.** The merchant adds one middleware. We take **2% (with a $0.01 minimum), merchant-absorbed**, carved as a second declared output in the *same* transaction — so the on-chain balance change **is** the receipt.
-- **PAY — the consumer AI wallet.** A conversational wallet the human talks to. It acts and pays across services from a **capped sub-account it can never overspend**, leaves a **verifiable, encrypted, user-owned log** of everything it did, and is **fully non-custodial — keys never leave your machine.**
+1. **Suize Deploy** ([`services/deploy-worker`](./services/deploy-worker)), the publish button for [Walrus](https://www.walrus.xyz): an agent (via [`@suize/mcp`](./packages/mcp) or raw x402) or a human (the [suize.io](https://suize.io) dashboard, wallet-connect) pays a flat rate in USDC over an x402-compatible rail and a static site goes live at `<id>.suize.site`, served with on-chain integrity verification. Whoever pays, owns the site: there's no account to create.
+2. **An open-source x402 facilitator** ([`services/facilitator`](./services/facilitator)), a small, stateless Cloudflare Worker that verifies and settles x402 V2 `exact` payments on Sui. Fork it, point it at your own treasury, `wrangler deploy`, and you're running your own facilitator with your own fee.
 
-The rail is **vanilla [x402](https://github.com/x402-foundation/x402) V2 "exact"** over Sui's protocol-level **gasless** Address-Balance transfers — no custom payment contract, no gas token, ever. The payer needs nothing Suize-specific.
-
-> Built for **[Sui Overflow 2026](https://sui.io/overflow)**. Everything below is **testnet-proven, mainnet-ready** — every link is live, every on-chain id resolves, every claim is checkable.
+Suize Deploy is itself just a merchant on the open facilitator, no special access, same rail anyone else can use.
 
 ## See it live
 
-| Surface | What it is | Link |
+| Surface | What it is | Try it |
 |---|---|---|
-| **Facilitator** | the live x402 service for Sui — `/verify` `/settle` `/supported` `/build` `/terms` `/tx`, keyless & stateless | [api.suize.io/supported](https://api.suize.io/supported) |
-| **PAY wallet** | the consumer AI wallet — sign in with Google, a capped agent sub-account, encrypted on-chain history | [wallet.suize.io](https://wallet.suize.io) |
-| **Deploy** | "Vercel for Sui" — an agent POSTs a site, pays $0.50 over the rail, it goes live on Walrus | [deploy.suize.io](https://deploy.suize.io) |
-| **Directory** | a merchant-agnostic directory of agent commerce — a feed read live from chain + an on-chain ad-slot auction | [agents.suize.io](https://agents.suize.io) |
-| **PolySui** | BTC up/down prediction market on DeepBook Predict — gasless, one tap | [polysui.suize.io](https://polysui.suize.io) |
-| **A real deployed site** | served from Walrus through Deploy, each byte verified against an on-chain hash | [live site ↗](https://5nqcy919skmvrysyy152vtx3dk5x5w6rip30rc7m5qos7t96kc.suize.site) |
-| **The pitch** | the interactive walk-through deck | [suize-deck.vercel.app](https://suize-deck.vercel.app) |
+| **Facilitator** | the open x402 rail for Sui, `/health` `/supported` `/verify` `/settle` | [facilitator.suize.io/supported](https://facilitator.suize.io/supported) |
+| **Deploy (charge API)** | pay to publish a site, `/deploy` `/extend` `/domains` `/preview` | [api.suize.site/health](https://api.suize.site/health) |
+| **Site** | the Suize home and a live gallery of deployed sites | [suize.io](https://suize.io) |
+| **`deploy_sui`** | the on-chain Move package behind every deploy | [suivision.xyz](https://suivision.xyz/package/0xec2dcd65271127019351678ddd05287176a0b9b7fc59ef6ceef34fdbc36e87db) |
 
-## Four products, four Overflow tracks
+## Quickstart: deploy a site
 
-Each product is a real, working consumer of the *one* rail — built as proof, not slides.
+Price discovery needs no payment, no signup, just ask:
 
-| Track | Product | What it proves |
-|---|---|---|
-| **DeFi & Payments** | **Suize** (the rail) — facilitator · `@suize/pay` · `@suize/mcp` · subscriptions · ad auction | Agents pay merchants gasless in one atomic tx; the fee is enforced at settlement and visible in the on-chain receipt. |
-| **Agentic Web** | **PAY** — the consumer AI wallet ([`apps/wallet`](./apps/wallet)) | An AI that pays from a sub-account it can't overspend, with a verifiable encrypted action log. |
-| **Walrus** | **Deploy** — agent-native hosting ([`apps/deploy`](./apps/deploy)) | An agent ships a site to Walrus and pays for it over the rail; every served byte is hash-verified. |
-| **DeepBook** | **PolySui** — BTC up/down ([`apps/crash`](./apps/crash)) | Gasless prediction-market trading on DeepBook Predict with an on-chain rake. |
-
-## How the rail works
-
-A merchant gates a route. An agent hits it, gets a `402` with the exact terms, signs a gasless transfer with its **own** key, and the facilitator verifies + settles. No SDK on the payer side, no account, no database — **the chain is the ledger.**
-
-**Merchant side — the entire integration:**
-
-```ts
-import { suize } from "@suize/pay";
-
-// One line. Any agent that can pay USDC on Sui can now pay you.
-const paywall = suize({ to: "0x<your Sui address>", price: "0.10" });
-
-Bun.serve({ fetch: paywall.wrap(handler) }); // Bun / Hono / Next route handlers
-// app.use(paywall.express);                 // …or Express / Connect
+```bash
+curl -X POST "https://api.suize.site/deploy?months=1"
 ```
 
-**The 402 challenge** the merchant mints — the whole contract in one response:
-
-```json
+```jsonc
+// 402 Payment Required (abridged, this is a real, live response)
 {
   "x402Version": 2,
+  "resource": { "url": "https://api.suize.site/deploy?months=1" },
   "accepts": [{
     "scheme": "exact",
-    "network": "sui:testnet",
-    "amount": "1000000",
-    "asset": "0x…::usdc::USDC",
-    "payTo": "0xMERCHANT…",
-    "extra": { "buildUrl": "https://api.suize.io/build" }
-  }],
-  "extensions": { "payment-identifier": { "info": { "id": "pay_…" } } }
+    "network": "sui:mainnet",
+    "amount": "100000",
+    "asset": "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC",
+    "payTo": "0x9036f4be5ca0d0c2b890f12b398c032a00952aa41c2776507db0d018002373a7",
+    "maxTimeoutSeconds": 120,
+    "extra": {
+      "outputs": [
+        { "to": "0x9036f4be5ca0d0c2b890f12b398c032a00952aa41c2776507db0d018002373a7", "amount": "100000" }
+      ]
+    }
+  }]
 }
 ```
 
-The agent reproduces the declared outputs — one `0x2::balance::send_funds` per output, `gasBudget = 0` (protocol-level gasless), the **2% fee leg to the treasury** included — and signs locally. `/verify` simulates and rejects anything that doesn't pay *exactly* right; `/settle` broadcasts the agent's own signed tx, idempotent by digest. **Suize never holds a key and never stores a payment.**
+That's a real quote: $0.10 for one month of hosting. Deploy is Suize's own first-party merchant on the rail, its payTo is the same address as the facilitator's fee treasury, so the outputs collapse to a single leg (a third-party merchant's quote splits into a merchant leg and a separate facilitator fee leg the same way, enforced identically at verify). An agent signs a gasless Sui transaction paying those exact outputs and retries the same request as `multipart/form-data` (`name`, `site.tar`) with the signature in `X-PAYMENT`. The easiest way to do that from a coding assistant:
 
-## Proof — verify everything
-
-Nothing here is a mockup. Open the links.
-
-- **On-chain (Sui testnet)** — every Move module is published and live:
-  - subscriptions `subs::subscription` → [`0x759105…`](https://testnet.suivision.xyz/package/0x759105b5f7382cb22533e8a5282e90c92c558edb1bc2eaa0904247914082d821)
-  - ad auction `auction::auction` → [`0xa7151d…`](https://testnet.suivision.xyz/package/0xa7151d699c93e48e5f502759d4de704ba4b8f22111b3d0b5a60c265ff2d37869)
-  - deploy `deploy_sui` → [`0x5cbf0c…`](https://testnet.suivision.xyz/package/0x5cbf0ce0a2f56128ef0d7679aab8f3a8ba690533163dc2524754fd40f27faf0b)
-  - prediction-market router `crash_sui::router` → [`0x16eb26…`](https://testnet.suivision.xyz/package/0x16eb262d69300c4291beab7e9f27b2b94640124a290f373230c5c8a3d3d50c26)
-  - encrypted action-log anchor `trace::trace` → [`0xc7c95e…`](https://testnet.suivision.xyz/package/0xc7c95e514776cee94d65b5997247d88ff2493bd5b83971b176cd1a072cbd8c07)
-  - business profile `profile::profile` → [`0x21be5a…`](https://testnet.suivision.xyz/package/0x21be5a6957d8e944eebb93d594057859fd793474ed6778479145b73b0b156c5d)
-- **On npm** — [`@suize/pay`](https://www.npmjs.com/package/@suize/pay) (`npm i @suize/pay`) and [`@suize/mcp`](https://www.npmjs.com/package/@suize/mcp) (`npx @suize/mcp`) are published and installable.
-- **Upstream** — we authored the Sui "exact" scheme and opened the PRs on `x402-foundation/x402`: [#2615 (spec)](https://github.com/x402-foundation/x402/pull/2615) + [#2616 (`@x402/sui` mechanism)](https://github.com/x402-foundation/x402/pull/2616).
-- **Tests** — **192 passing** (119 TypeScript · 73 Move). The facilitator's fee enforcement, the wallet's spend-safety kernel, and every Move module's abort matrix are covered.
-
-## Repository layout
-
-A [Bun](https://bun.sh) workspace monorepo — `apps/* packages/* services/*`.
-
-```
-apps/
-  wallet/        @suize/wallet        the PAY consumer AI wallet (React 19 + Vite)
-  deploy/        @suize/deploy        Deploy merchant — agent-native Walrus hosting
-  crash/         @suize/crash         PolySui — BTC up/down on DeepBook Predict
-  agents/        @suize/agents-app    agents.suize.io — agent-commerce feed + ad auction
-  landing/       @suize/landing       the consumer home + /for-business
-  deck/          @suize/deck          the interactive pitch deck
-
-packages/
-  x402/          @suize/x402          the x402 V2 "exact" Sui scheme — wire types + build/verify
-  pay/           @suize/pay           the ~60-line merchant middleware (published on npm)
-  mcp/           @suize/mcp           the agent/dev payment wallet — 6 tools (published on npm)
-  shared/        @suize/shared        network · package ids · wire types — single source of truth
-  move-subs/     @suize/move-subs     subs::subscription — soulbound Party-object subscriptions
-  move-deploy/   @suize/move-deploy   deploy_sui — immutable on-chain Site + domain registry
-  move-crash/    @suize/move-crash    crash_sui::router — the DeepBook Predict rake gateway
-  move-auction/  @suize/move-auction  auction::auction — on-chain ad-slot auction
-  move-trace/    @suize/move-trace    trace::{anchor, seal_approve} — encrypted action-log anchor
-  move-profile/  @suize/move-profile  profile::profile — on-chain business profiles
-
-services/
-  backend/       @suize/backend       one Bun service: x402 facilitator · MCP · deploy · sponsor · directory
-  deploy-worker/ @suize/deploy-worker  Cloudflare Worker serving Walrus sites, double-hash verified
+```bash
+claude mcp add suize -- npx -y @suize/mcp
 ```
 
-> The architecture, the rail standard, and every locked decision live in [`CLAUDE.md`](./CLAUDE.md). Each piece has its own `SPEC.md`.
+By default the MCP signs through your own Sui CLI: create a dedicated key with `sui client new-address ed25519 suize`, fund it with a little mainnet USDC, then ask your assistant to deploy your `./dist` folder. The key never enters the MCP process, and the address that pays is the address that owns the site.
+
+Building your own payer instead of using the MCP? [`@suize/x402`](./packages/x402) exports `buildGaslessOutputs` for exactly this, build the transaction from the declared `outputs`, sign it, retry with `X-PAYMENT`.
+
+## Quickstart: run your own facilitator
+
+```bash
+git clone https://github.com/Sceat/suize && cd suize/services/facilitator
+bun install
+cp .dev.vars.example .dev.vars   # set FEE_TREASURY to your own address or SuiNS name
+bun run dev                      # wrangler dev, then curl localhost:8787/supported
+npx wrangler deploy               # ship it, the fee is yours to keep
+```
+
+Full endpoint contract, fee math, and configuration: [`services/facilitator/README.md`](./services/facilitator/README.md).
+
+## Architecture
+
+A [Bun](https://bun.sh) workspace monorepo, `apps/* packages/* services/*`. The pieces that make up the rail:
+
+| Path | Package | What it is |
+|---|---|---|
+| [`apps/suize`](./apps/suize) | `@suize/suize` | The product frontend at [suize.io](https://suize.io): landing + live gallery, the `#/sites` dashboard, and the sealed-site viewer. Everything on it is chain-derived. |
+| [`services/facilitator`](./services/facilitator) | `@suize/facilitator` | The open-source x402 `exact` facilitator for Sui. Keyless, stateless, four endpoints. Live at `facilitator.suize.io`. |
+| [`services/deploy-worker`](./services/deploy-worker) | `@suize/deploy-worker` | Suize Deploy: charges for and serves Walrus-hosted sites, and pays its own facilitator instance like any other merchant. Live at `api.suize.site` and `*.suize.site`. |
+| [`packages/shared`](./packages/shared) | `@suize/shared` | The single source of truth for network selection, on-chain ids, prices, and wire types. Nothing else hardcodes an id or a network. |
+| [`packages/pay`](./packages/pay) | `@suize/pay` | The merchant middleware. `npm i @suize/pay`, about 60 lines of integration, and any x402 agent can pay your endpoint. |
+| [`packages/x402`](./packages/x402) | `@suize/x402` | The shared x402 V2 `exact` primitives for Sui: wire types, the gasless payment-transaction builder, the fee-split math, and the facilitator's verify logic. |
+| [`packages/mcp`](./packages/mcp) | `@suize/mcp` | A local stdio MCP server, gives Claude Code / Cursor / Codex a `deploy_site` tool that pays with your own local Sui key. |
+| [`packages/move-deploy`](./packages/move-deploy) | `deploy_sui` | The on-chain Move package: the `Site` object, the domain registry, and the Seal allowlist for private sites. |
+
+## How the rail works
+
+Suize is x402-compatible by design: it implements an **x402 V2 `exact`** scheme for Sui over Sui's protocol-level gasless Address-Balance transfers, no custom payment contract, no gas token, ever. A merchant mints a 402 with the exact terms (price, asset, and a declared fee split in `extra.outputs`); the payer signs a `send_funds` transaction crediting those outputs with its own key (`gasPayment: []`, `gasPrice: 0`) and retries with the signature. The facilitator simulates that transaction to prove it pays the declared split exactly, then broadcasts it, keyless, over gRPC. The on-chain balance-change set is the receipt: there is no payment database anywhere in this rail.
+
+The fee is never something a merchant can quietly drop: the facilitator recomputes the split from its own operator policy at `/verify` and rejects anything that doesn't match, a merchant's declared outputs are never trusted at face value.
+
+## Proof
+
+Nothing here is a mockup.
+
+- **On-chain (Sui mainnet).** `deploy_sui` is published and live: [`0xec2dcd65…`](https://suivision.xyz/package/0xec2dcd65271127019351678ddd05287176a0b9b7fc59ef6ceef34fdbc36e87db). Suize's own suize.io frontend was deployed onto Walrus through this exact rail, a real USDC settlement on mainnet.
+- **On npm.** [`@suize/pay`](https://www.npmjs.com/package/@suize/pay) (`npm i @suize/pay`) and [`@suize/mcp`](https://www.npmjs.com/package/@suize/mcp) (`npx @suize/mcp`) are published and installable.
+- **Upstream.** We authored the Sui `exact` scheme and opened the spec + mechanism PRs upstream on `x402-foundation/x402`: [#2615](https://github.com/x402-foundation/x402/pull/2615) (spec) and [#2616](https://github.com/x402-foundation/x402/pull/2616) (`@x402/sui` mechanism).
+- **Tests.** 104 TypeScript tests passing across the facilitator, `@suize/x402`, `@suize/pay`, and the deploy worker, plus 23 Move tests for `deploy_sui`. Zero failing.
 
 ## Run it locally
 
 ```bash
-bun install                       # one install at the root
-bun run dev                       # all apps + the backend (fans out via --filter)
-bun run --filter '@suize/wallet' dev   # …or just one
-bun test                          # the TypeScript suites
+git clone https://github.com/Sceat/suize && cd suize
+bun install                                     # one install at the root
+
+bun run --filter '@suize/facilitator' dev       # the facilitator (wrangler dev)
+bun run --filter '@suize/deploy-worker' dev     # the deploy worker (wrangler dev)
 ```
 
-Move packages build and test with the [Sui CLI](https://docs.sui.io/references/cli):
+Tests, per package:
 
 ```bash
-cd packages/move-subs && sui move test
+cd services/facilitator && bun test    # 26 passing
+cd packages/x402 && bun test           # 39 passing
+cd packages/pay && bun test            # 21 passing
+cd services/deploy-worker && bun test  # 18 passing
+cd packages/move-deploy && sui move test
 ```
-
-## Status
-
-**Testnet-proven, mainnet-ready.** The rail needs *zero* new on-chain publishes to go to mainnet — Sui's gasless transfers, native USDC, and the treasury all exist there today. Crash/PolySui stays on testnet (DeepBook Predict is testnet-only).
 
 ## License
 

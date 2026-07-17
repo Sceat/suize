@@ -1,21 +1,28 @@
 # @suize/x402
 
 x402 V2 `exact`-scheme primitives for Sui. The shared layer for charging and
-paying over HTTP 402 — gasless USDC payments built on Sui Address Balances, the
+paying over HTTP 402: gasless USDC payments built on Sui Address Balances, the
 exact wire types, and the facilitator's exact-fee enforcement.
 
 Your Sui address is your account. No accounts to create, no keys to hand over:
-the payer signs locally, a facilitator builds, sponsors, submits, and verifies.
+the payer signs locally; a facilitator verifies and settles, keyless.
 
 ## Install
 
+`@suize/x402` ships from source in the [Suize monorepo](https://github.com/Sceat/suize).
+Consume it as a workspace dependency or vendor `packages/x402` into your project. Its one
+runtime dependency is `@mysten/sui` (the Sui TypeScript SDK).
+
 ```sh
-npm install @suize/x402 @mysten/sui
+git clone https://github.com/Sceat/suize
+# then reference it from your workspace manifest:
+#   "@suize/x402": "workspace:*"
+#   "@mysten/sui": "^2"
 ```
 
 ## The three roles
 
-**Merchant** — answer a 402 with a challenge, then verify the retry. The fee
+**Merchant**: answer a 402 with a challenge, then verify the retry. The fee
 split lives in `extra.outputs`; the payer's transaction must match it exactly.
 
 ```ts
@@ -45,7 +52,7 @@ const challenge: PaymentRequired = {
 return new Response(null, { status: 402, headers: { [PAYMENT_REQUIRED_HEADER]: b64json(challenge) } })
 ```
 
-**Payer** — build the gasless payment from the declared outputs, sign it, retry.
+**Payer**: build the gasless payment from the declared outputs, sign it, retry.
 
 ```ts
 import { grpcClient, buildGaslessOutputs, b64json, PAYMENT_SIG_HEADERS } from '@suize/x402'
@@ -62,7 +69,7 @@ const payload = { x402Version: 2, accepted: req, payload: { signature, transacti
 await fetch(resource, { headers: { [PAYMENT_SIG_HEADERS[0]]: b64json(payload) } })
 ```
 
-**Facilitator** — recover the signer, simulate, and enforce the exact fee split
+**Facilitator**: recover the signer, simulate, and enforce the exact fee split
 (no broadcast). The declared `outputs` are the source of truth: every recipient
 is credited exactly, the payer is debited exactly the sum, and no undeclared
 address may receive the asset.

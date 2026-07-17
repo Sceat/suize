@@ -1,0 +1,284 @@
+/* =============================================================================
+   Sealed-site viewer + viewer-list manager. Reuses the Dispatch tokens from
+   styles.css (--fg, --hair, --blue, --sans/mono/serif). Chrome stays minimal:
+   a hairline masthead bar over a full-bleed site frame; the state panels borrow
+   the editorial card + kicker language of the front page.
+   ============================================================================= */
+
+.vshell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(140% 90% at 50% -8%, var(--blue-wash), transparent 52%),
+    var(--ink-base);
+}
+
+/* ---------- MASTHEAD BAR ---------- */
+.vbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 46px;
+  padding: 0 clamp(14px, 3vw, 28px);
+  border-bottom: 1px solid var(--hair);
+  background: rgba(251, 252, 254, 0.82);
+  backdrop-filter: blur(8px);
+}
+.vbar__mark {
+  font-family: var(--sans);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-size: 17px;
+  color: var(--fg);
+  flex: 0 0 auto;
+}
+.vbar__mark:hover {
+  color: var(--blue-deep);
+}
+.vbar__status {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vbar__status--muted {
+  color: var(--fg-3);
+}
+.vbar__status--work {
+  color: var(--blue-deep);
+}
+.vbar__status--ok {
+  color: var(--fg-2);
+}
+.vbar__status--deny {
+  color: var(--bear);
+}
+.vbar__right {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.vbar__link {
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.vbar__link:hover {
+  color: var(--blue);
+}
+
+/* ---------- THE DECRYPTED SITE FRAME ---------- */
+.vsite {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  background: #fff;
+  display: block;
+}
+
+/* ---------- STATE PANELS (reading / ready / denied / error) ---------- */
+.vpanel {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  padding: clamp(24px, 6vw, 72px) 20px;
+}
+.vpanel__card {
+  width: 100%;
+  max-width: 468px;
+  background: var(--ink-raised);
+  border: 1px solid var(--hair);
+  border-radius: 5px;
+  padding: clamp(24px, 4vw, 36px);
+  box-shadow: 0 1px 2px rgba(10, 27, 46, 0.04);
+  position: relative;
+}
+.vpanel__card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: var(--rule-fade);
+}
+.vpanel__card--wide {
+  max-width: 560px;
+}
+.vpanel__title {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(24px, 3.4vw, 32px);
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  margin: 14px 0 0;
+}
+.vpanel__body {
+  margin-top: 14px;
+  font-family: var(--serif);
+  font-size: 15.5px;
+  line-height: 1.6;
+  color: var(--fg-2);
+}
+.vpanel__body p {
+  margin: 0;
+}
+.vpanel__actions {
+  margin-top: 22px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* the working line under a title */
+.vspin {
+  margin: 14px 0 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--fg-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.vspin::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--blue-glow);
+  border-top-color: var(--blue);
+  animation: vspin 0.7s linear infinite;
+}
+@keyframes vspin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* ---------- VIEWER-LIST MANAGER ---------- */
+.vlist {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--hair);
+}
+.vlist__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hair-2);
+}
+.vlist__empty {
+  padding: 14px 0;
+  font-family: var(--serif);
+  font-style: italic;
+  color: var(--fg-3);
+  border-bottom: 1px solid var(--hair-2);
+}
+.vlist__addr {
+  font-size: 12.5px;
+  color: var(--fg);
+}
+.vlist__you {
+  font-family: var(--sans);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--blue-deep);
+  border: 1px solid var(--hair);
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+.vlist__rm {
+  margin-left: auto;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  background: transparent;
+  border: 1px solid var(--hair-strong);
+  border-radius: 3px;
+  padding: 6px 11px;
+  cursor: pointer;
+  transition: 0.16s var(--ease);
+}
+.vlist__rm:hover:not(:disabled) {
+  color: var(--bear);
+  border-color: var(--bear);
+}
+.vlist__rm:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.vadd {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+.vadd__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--fg);
+  background: var(--ink-surface);
+  border: 1px solid var(--hair-strong);
+  border-radius: 4px;
+  padding: 11px 12px;
+  outline: none;
+  transition: border-color 0.16s;
+}
+.vadd__input:focus {
+  border-color: var(--blue);
+}
+
+.vmsg {
+  margin: 12px 0 0;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg-3);
+}
+.vmsg--err {
+  color: var(--bear);
+}
+
+/* dapp-kit connect button theming inside the viewer, matching styles.css */
+.vbar__right mysten-dapp-kit-connect-button,
+.vpanel__actions mysten-dapp-kit-connect-button {
+  --primary: var(--fg);
+  --primary-foreground: #fff;
+  --background: var(--ink-raised);
+  --foreground: var(--fg);
+  --secondary: var(--ink-surface);
+  --secondary-foreground: var(--fg);
+  --border: var(--hair-strong);
+  --muted: var(--ink-surface);
+  --muted-foreground: var(--fg-3);
+  --popover: var(--ink-raised);
+  --popover-foreground: var(--fg);
+  --radius: 4px;
+  --font-sans: var(--sans);
+  --font-weight-medium: 600;
+  --font-weight-semibold: 600;
+  --cursor-button: pointer;
+  --cursor-menu-item: pointer;
+  --ring: var(--blue);
+}
+.vpanel__actions mysten-dapp-kit-connect-button::part(trigger) {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 11px 18px;
+}

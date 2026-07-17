@@ -39,11 +39,43 @@ FEE_TREASURY = "treasury@example"
 #   SUI_GRPC_URL = "https://fullnode.testnet.sui.io:443"
 
 # ---------------------------------------------------------------------------
-# MAINNET — `wrangler deploy --env mainnet`. Named envs do NOT inherit [vars],
-# so every var is restated. Point FEE_TREASURY at your mainnet treasury.
+# MAINNET (generic open-source TEMPLATE — NOT Suize's live instance).
+# `wrangler deploy --env mainnet` deploys the worker `x402-sui-facilitator`
+# with NO route; it exists so an outside operator can settle on mainnet by
+# copying this file and pointing FEE_TREASURY at THEIR OWN treasury. The
+# `treasury@example` value below is the unresolvable placeholder ON PURPOSE — it
+# fails closed (no payment settles) so a forgotten edit never mis-routes fees;
+# do NOT set it to a live treasury here.
+# Suize's OWN mainnet facilitator is [env.suize] below (it owns the
+# facilitator.suize.io route + treasury@suize). This env is UNUSED by Suize and
+# left as the public template.
 # ---------------------------------------------------------------------------
 [env.mainnet.vars]
 SUI_NETWORK = "mainnet"
 FEE_BPS = "200"
 FEE_FLOOR = "10000"
 FEE_TREASURY = "treasury@example"
+
+# ---------------------------------------------------------------------------
+# SUIZE'S OWN INSTANCE (`wrangler deploy --env suize`) — the same open worker,
+# configured: this is exactly the operator story above, dogfooded. It owns the
+# facilitator.suize.io route. The fee is deliberately NONZERO (2% / $0.01 floor)
+# and the treasury is the live SuiNS name `treasury@suize`, resolved on-chain
+# hourly, fail-closed. This is Suize's LIVE production facilitator and now
+# settles on MAINNET (2026-07 full mainnet cutover). Keyless + stateless — it
+# holds no key and needs NO mainnet-specific secret; the only network knob is
+# SUI_NETWORK below (USDC type, gRPC fullnode, and CAIP-2 id all derive from it).
+# ---------------------------------------------------------------------------
+[env.suize]
+name = "x402-sui-facilitator-suize"
+routes = [
+  { pattern = "facilitator.suize.io", custom_domain = true },
+]
+
+[env.suize.vars]
+# MAINNET cutover: was "testnet". Flipping this to "mainnet" is the whole flip —
+# same route, same treasury@suize, same FEE_BPS all stay intact.
+SUI_NETWORK = "mainnet"
+FEE_BPS = "200"
+FEE_FLOOR = "10000"
+FEE_TREASURY = "treasury@suize"

@@ -1,82 +1,136 @@
-# Suize Deploy — serving worker.
-# Resolves *.suize.site (and linked custom domains) to an on-chain `Site`
-# object, then streams the site's files from the Walrus aggregator with serve-time
-# integrity verification (manifest hash + per-blob re-hash). See ./README.md.
+# Suize — the deploy worker, BOTH faces of the product in one worker:
+#   • SERVING — resolves *.suize.site (and linked custom domains) to an on-chain
+#     `Site`, then streams the site's files from Walrus with serve-time integrity
+#     verification (manifest hash + per-blob re-hash).
+#   • CHARGE — the x402-paid publish path on API_HOST: POST /deploy, /extend,
+#     /domains. Payments settle through the external open facilitator; the
+#     service wallet only signs create_site/extend/link (it holds the DeployerCap)
+#     and pays SUI gas + the WAL that funds each site's storage inline at deploy/extend.
+#
+# SECRETS (never in this file):
+#   wrangler secret put DEPLOY_WALLET_KEY   # suiprivkey1… — the service wallet
+#   wrangler secret put CF_API_TOKEN        # optional — CF-for-SaaS auto-SSL
+#   # MAINNET ONLY — the self-hosted Walrus publisher gates stores with native
+#   # JWT auth; the worker mints a fresh single-use HS256 token per store PUT:
+#   wrangler secret put WALRUS_PUBLISHER_JWT_SECRET --env mainnet   # 0x<hex>
+# Local dev: .dev.vars (gitignored) — see .dev.vars.example.
 
 name = "suize-deploy-worker"
 main = "src/index.ts"
-compatibility_date = "2024-09-23"
-# Sceat Cloudflare account — same account as the api.suize.io tunnel + the suize.io zone.
+compatibility_date = "2025-05-05"
+# The @mysten/sui gRPC client uses Node built-ins (Buffer, etc.); nodejs_compat provides them.
+compatibility_flags = ["nodejs_compat"]
+# Sceat Cloudflare account — same account as the suize.io / suize.site zones.
 account_id = "88b50dc737d080644ddd4cf3193dd3c2"
 
-# Wildcard subdomain route. The zone `suize.site` must exist on the Cloudflare
-# account and have a wildcard DNS record (`*.suize.site`) pointing at the worker
-# (proxied / orange-cloud). Linked custom domains are added as additional routes
-# (or via Cloudflare for SaaS custom hostnames) by the operator — the same worker
-# code resolves them via the on-chain DomainRegistry.
-# `*/*` (not just `*.suize.site/*`) so the worker also serves Cloudflare-for-SaaS
-# CUSTOM HOSTNAMES (a user's example.com) — those don't match `*.suize.site`. The
-# worker reads the Host header → on-chain domain_registry → serves. base36
-# subdomains still resolve the same way; the apex + plumbing hosts 404 cleanly.
-routes = [
-  { pattern = "*/*", zone_name = "suize.site" },
-]
+# Wildcard subdomain route. `*/*` (not just `*.suize.site/*`) so the worker also
+# serves Cloudflare-for-SaaS CUSTOM HOSTNAMES (a user's example.com). The charge
+# API answers on api.suize.site (already inside this wildcard — zero extra DNS)
+# and on the suize.site APEX paths (/deploy /extend /domains /health).
+# OPTIONAL ALIAS: to also answer on deploy.suize.io, point that hostname at this
+# worker on the suize.io zone and add the route here:
+#   { pattern = "deploy.suize.io", custom_domain = true }
+# MAINNET CUTOVER 2026-07-15: the top-level (testnet) worker RELEASED this route so
+# the mainnet worker ([env.mainnet]) can claim it. The testnet worker stays deployed
+# (unrouted) for rollback. To roll back: restore this route + `wrangler deploy`.
+routes = []
 
-# Plaintext, non-secret operator config. These are PUBLIC on-chain ids + public
-# endpoints — safe to commit. Network selection is ENV-ONLY repo-wide: the worker's
-# "env" is these [vars] — the DEFAULT (top-level) deploy is TESTNET; the mainnet
-# flip is `wrangler deploy --env mainnet` (see [env.mainnet] below), no code change.
+# Plaintext, non-secret operator config — PUBLIC on-chain ids + public endpoints.
+# Network selection is ENV-ONLY repo-wide: the DEFAULT (top-level) deploy is
+# TESTNET; the mainnet flip is `wrangler deploy --env mainnet`, no code change.
 [vars]
-# Sui TESTNET GraphQL RPC (the default deploy serves testnet sites). The public
-# JSON-RPC fullnode is retired; on-chain reads run over GraphQL (zero-dep fetch).
+SUI_NETWORK = "testnet"
+
+# Sui testnet transports (Mysten hosts; public JSON-RPC is retired).
 SUI_GRAPHQL_URL = "https://graphql.testnet.sui.io/graphql"
+SUI_GRPC_URL = "https://fullnode.testnet.sui.io:443"
 
-# Walrus testnet aggregator — serves blobs + quilt patches.
+# Walrus testnet endpoints — aggregator reads, publisher stores (the publisher
+# encodes + pays the WAL for the store).
 WALRUS_AGGREGATOR = "https://aggregator.walrus-testnet.walrus.space"
+WALRUS_PUBLISHER = "https://publisher.walrus-testnet.walrus.space"
 
-# The base zone sites are served under: <base36(siteId)>.<BASE_DOMAIN>. The code
-# falls back to "suize.site" when unset, so the existing deploy is unchanged.
+# The base zone sites are served under: <base36(siteId)>.<BASE_DOMAIN>.
 BASE_DOMAIN = "suize.site"
 
-# The `deploy_sui` Move package id (testnet republish 2026-06-14 `6kAxGVLn…` — adds
-# the DeployerCap mint gate; prior publishes are abandoned, their sites/domains
-# orphaned). MUST match @suize/shared `DEPLOY_PACKAGE`. Currently unused at runtime
-# by the worker (it reads the shared `Site`/`DomainRegistry` objects by id), but kept
-# here so the operator records the published id and a future type-checked resolve can use it.
-DEPLOY_PACKAGE_ID = "0x5cbf0ce0a2f56128ef0d7679aab8f3a8ba690533163dc2524754fd40f27faf0b"
+# The charge API answers on this hostname (localhost always works in dev).
+API_HOST = "api.suize.site"
 
-# The shared `DomainRegistry` object id (created at the publish init). MUST match
-# @suize/shared `DEPLOY_DOMAIN_REGISTRY_OBJECT` — a fresh publish mints a NEW registry,
-# so this is repinned at every republish. Required for custom-domain resolution;
-# subdomain serving works without it.
-DOMAIN_REGISTRY_ID = "0xec0565e9c27ab340595a26b8b823ed681e36616f32ebf4aba20a0193574d4c08"
+# The suize.io app origin — sealed (private) site URLs bootstrap into its viewer.
+VIEWER_URL = "https://suize.io"
 
-# Durable global blob cache (edge cache → R2 → aggregator; see src/index.ts).
-# Keys are content sha256 (verified on every fill) so the bucket can never serve
-# stale or wrong bytes — and ONE bucket is safely shared across testnet/mainnet.
+# The x402 facilitator this merchant settles through (the open-source worker,
+# services/facilitator — deploy IT first; until it answers, paid routes 503).
+FACILITATOR_URL = "https://facilitator.suize.io"
+
+# Where deploy revenue lands (the merchant payTo). Testnet: the dev merchant
+# wallet (`suize-deploy-merchant-dev` CLI alias).
+SUIZE_MERCHANT = "0x6a67f019b9bd6c0aded782c356d8f80d135ea3f3244a6a770a4619ba7c3a8f6e"
+
+# NOTE: the deploy_sui package + DomainRegistry ids are NOT vars — BOTH faces read
+# them from @suize/shared `packageIds(SUI_NETWORK).DEPLOY` (CLAUDE.md #15: on-chain
+# ids live ONLY there). Bumping SUI_NETWORK is all it takes to switch networks.
+
+# The suize.site zone id — pairs with the CF_API_TOKEN secret for CF-for-SaaS
+# auto-SSL on custom domains; without the secret, domains link with sslStatus
+# "manual". (A zone id is not a secret.)
+CF_ZONE_ID = "6c2dc349020a8e235085cfe39c501e01"
+
+# Durable global blob cache (edge cache → R2 → aggregator). Keys are content
+# sha256 (verified on every fill) — ONE bucket safely serves both networks.
 [[r2_buckets]]
 binding = "BLOB_CACHE"
 bucket_name = "suize-deploy-blob-cache"
 
 # ---------------------------------------------------------------------------
-# MAINNET — `wrangler deploy --env mainnet` is the ONLY flip (LOCKED #12: Deploy
-# goes mainnet; the testnet default above stays untouched). Named envs do NOT
-# inherit top-level [vars], so every var is restated. The two `…_ID` values are
-# '0x0' PLACEHOLDERS until `deploy_sui` is REPUBLISHED on mainnet — write the real
-# ids here at publish time. NOTE: `routes` is also not inherited; the operator
-# assigns the production routes to this env at cut-over (two workers cannot share
-# the same route pattern — move the `*/*` route on the suize.site zone here then).
+# MAINNET — `wrangler deploy --env mainnet` is the ONLY flip. It deploys a
+# SECOND, SEPARATELY-NAMED worker: `suize-deploy-worker-mainnet` (wrangler
+# appends the env name). Named envs inherit NOTHING from the top level — not
+# [vars], not `routes`, not bindings — so EVERYTHING is restated below.
+#
+# ROUTE HANDOVER (a single route can belong to only ONE worker). Both the
+# testnet default worker and this mainnet worker claim `*/*` on the suize.site
+# zone, so the deploy of `--env mainnet` will FAIL to bind the route until the
+# live testnet worker releases it first. Ordered handover the operator runs:
+#     cd services/deploy-worker
+#     # 1. Unroute the testnet worker IN PLACE (keep it deployed, drop its route):
+#     #    comment out / empty the top-level `routes = [...]`, then:
+#     bunx wrangler deploy                 # redeploys suize-deploy-worker, no route
+#     # 2. Bind the route to the mainnet worker:
+#     bunx wrangler deploy --env mainnet   # suize-deploy-worker-mainnet claims `*/*`
+# SAFEST = the redeploy-unrouted path above (reversible: re-add the route + redeploy
+# to roll back). `wrangler delete --name suize-deploy-worker` also frees the route
+# but DESTROYS the worker + its logs/analytics/secrets — avoid it. Note: this
+# worker exports only `fetch` (no `scheduled` handler), so there is NO [triggers]
+# cron section on either env — storage funding is inline at deploy/extend, by design.
 # ---------------------------------------------------------------------------
 [env.mainnet]
+# Serving route — restated verbatim (named envs inherit no routes).
+routes = [
+  { pattern = "*/*", zone_name = "suize.site" },
+]
 
 [env.mainnet.vars]
+SUI_NETWORK = "mainnet"
 SUI_GRAPHQL_URL = "https://graphql.mainnet.sui.io/graphql"
+SUI_GRPC_URL = "https://fullnode.mainnet.sui.io:443"
 WALRUS_AGGREGATOR = "https://aggregator.walrus-mainnet.walrus.space"
+# Self-hosted mainnet Walrus publisher (native JWT auth: the worker mints a
+# fresh single-use HS256 token per store PUT from WALRUS_PUBLISHER_JWT_SECRET).
+# The free public mainnet publisher is unauthenticated + rate-limited — not for
+# production; testnet's default [vars] still uses the free public one.
+WALRUS_PUBLISHER = "https://walrus-publisher.suize.io"
 BASE_DOMAIN = "suize.site"
-DEPLOY_PACKAGE_ID = "0x0"
-DOMAIN_REGISTRY_ID = "0x0"
+API_HOST = "api.suize.site"
+VIEWER_URL = "https://suize.io"
+FACILITATOR_URL = "https://facilitator.suize.io"
+# The mainnet merchant = treasury wallet (deploy revenue payTo). A REAL address
+# is what unblocks the charge face: chargeConfigured() requires SUIZE_MERCHANT
+# to be set AND !== "0x0" (a premature deploy quoting 402s against "0x0" would
+# burn the fee leg), so this must never regress to the placeholder.
+SUIZE_MERCHANT = "0x9036f4be5ca0d0c2b890f12b398c032a00952aa41c2776507db0d018002373a7"
+CF_ZONE_ID = "6c2dc349020a8e235085cfe39c501e01"
 
-# Same content-addressed bucket as the default env (sha256 keys — network-agnostic).
 [[env.mainnet.r2_buckets]]
 binding = "BLOB_CACHE"
 bucket_name = "suize-deploy-blob-cache"

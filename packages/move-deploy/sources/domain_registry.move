@@ -157,6 +157,8 @@ fun setup(scenario: &mut test_scenario::Scenario, deployer: address) {
             object::id_from_address(@0xB2),
             1024,
             7,
+            0,
+            false,
             scenario.ctx(),
         );
         transfer::public_transfer(cap, deployer);
@@ -274,6 +276,8 @@ fun test_link_domain_aborts_with_wrong_cap() {
             object::id_from_address(@0xB4),
             1024,
             7,
+            0,
+            false,
             scenario.ctx(),
         );
 

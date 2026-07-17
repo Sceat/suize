@@ -20,27 +20,24 @@
 //   state per deploy. The manifest entry carries {patch, sha256, ct, size}.
 
 // ---------------------------------------------------------------------------
-// Env (from wrangler.toml [vars]). All PUBLIC config — no secrets in the worker.
+// Env lives in ./env (ONE interface for both faces: this serving face + the
+// charge face under ./api). The charge API answers on API_HOST; every other
+// host resolves to a site.
 // ---------------------------------------------------------------------------
 
-interface Env {
-  /** Sui GraphQL RPC URL for the network this worker serves (wrangler [vars] /
-   * [env.mainnet.vars]). Replaces the retired public JSON-RPC fullnode — reads
-   * run over GraphQL via raw `fetch`, mirroring packages/pay/src/subs.ts (zero-dep). */
-  SUI_GRAPHQL_URL: string;
-  /** Walrus aggregator base for the same network. */
-  WALRUS_AGGREGATOR: string;
-  /** `deploy_sui` package id — recorded for the operator; not read at runtime. */
-  DEPLOY_PACKAGE_ID: string;
-  /** Shared `DomainRegistry` object id — required for custom-domain resolution. */
-  DOMAIN_REGISTRY_ID: string;
-  /** The base zone we serve subdomains under. Optional — falls back to 'suize.site'. */
-  BASE_DOMAIN?: string;
-  /** R2 durable global blob cache, content-addressed by sha256 (can never be
-   * stale; no invalidation path exists). Optional — without the binding the
-   * worker serves from the edge cache + aggregator only. */
-  BLOB_CACHE?: R2Bucket;
-}
+import { packageIds, resolveNetwork } from '@suize/shared';
+import type { Env } from './env';
+import { handleApi, isApiHost, isApiPath } from './api';
+import { siteForDomain } from './domains';
+import {
+  base64ToBytes,
+  decodeBase36ToObjectId,
+  isBase36ObjectId,
+  sha256Hex,
+  suiGraphql,
+  toHex,
+} from './util';
+import type { Manifest, ManifestEntry } from './manifest';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -53,14 +50,29 @@ const DEFAULT_BASE_DOMAIN = 'suize.site';
 const baseDomain = (env: Env): string =>
   (env.BASE_DOMAIN || DEFAULT_BASE_DOMAIN).toLowerCase();
 
+/** The deploy_sui id block for this worker's network — the SINGLE source of truth
+ * is @suize/shared (CLAUDE.md #15: ids live ONLY there). The serving face resolves
+ * the DomainRegistry id from here, exactly as the charge face (chain.ts) does — no
+ * duplicated wrangler var to drift. */
+const deployPkg = (env: Env) => packageIds(resolveNetwork(env.SUI_NETWORK)).DEPLOY;
+
 /** Subdomains that never map to a site (dashboard / infra surfaces). */
 const RESERVED_SUBDOMAINS = new Set(['www', 'api', 'app', 'dashboard', 'admin']);
 
-/** Site-fields + manifest cache TTL. Both are IMMUTABLE by construction — every
- * deploy mints a FRESH `Site` (no `&mut Site` entry point exists in `deploy_sui`)
- * and Walrus blob ids are content-derived — so cache them for a year. Only the
- * custom-domain mapping below is mutable and keeps a short TTL. */
+/** Manifest cache TTL. The manifest blob is IMMUTABLE — every deploy mints a
+ * FRESH `Site` referencing a fresh, content-derived manifest blob id — so cache
+ * it for a year. */
 const IMMUTABLE_CACHE_SECONDS = 31536000;
+
+/** Site-fields cache TTL — SHORT, because a `Site` carries ONE mutable field,
+ * `paid_until_ms` (a paid /extend moves it). The blob refs on a Site never change,
+ * but the billing field does, so this entry must expire fast enough that a renewal
+ * un-lapses a site within the minute (never the 1-year immutable tier). */
+const SITE_FIELDS_CACHE_SECONDS = 60;
+
+/** Clock-skew grace on the hosting gate: a site is served until `paid_until_ms`
+ * plus this window, so a just-expired site doesn't flicker at the epoch boundary. */
+const LAPSE_GRACE_MS = 5 * 60_000;
 
 /** How many manifest entries a cold hit warms in the background (subrequest budget). */
 const WARM_MAX_ENTRIES = 30;
@@ -91,27 +103,8 @@ const TEXT_TYPES = new Set([
   'application/xml', 'image/svg+xml',
 ]);
 
-// ---------------------------------------------------------------------------
-// Manifest shape (written by the backend; stored on Walrus; hash on-chain).
-// ---------------------------------------------------------------------------
-
-interface ManifestEntry {
-  /** Walrus quilt patch id for this file. */
-  patch: string;
-  /** Lowercase hex sha256 of the file's ORIGINAL (decompressed) bytes. */
-  sha256: string;
-  /** Content-Type to serve with. */
-  ct: string;
-  /** Original byte length (advisory). */
-  size: number;
-}
-
-interface Manifest {
-  v: number;
-  /** Path served for unmatched routes (SPA client-side routing). e.g. "/index.html". */
-  spaFallback: string;
-  files: Record<string, ManifestEntry>;
-}
+// Manifest shape: ./manifest (written by the publish face; stored on Walrus;
+// hash on-chain). v2 (`sealed`) sites serve the viewer bootstrap, not bytes.
 
 /** On-chain `Site` fields the worker needs. */
 interface SiteFields {
@@ -121,39 +114,14 @@ interface SiteFields {
    * GraphQL read as a BASE64 string (legacy JSON-RPC gave number[]; an operator
    * may store hex) — normalised by `manifestHashToHex`. */
   manifest_hash: number[] | string;
+  /** Prepaid-through epoch (ms). The ONE mutable Site field — the hosting gate
+   * compares it to now, so a lapsed site stops serving. 0 when absent/unparseable
+   * → treated as "no gate" (never blocks a legacy site that predates the field). */
+  paid_until_ms: number;
 }
 
-// ---------------------------------------------------------------------------
-// Hex / hashing helpers
-// ---------------------------------------------------------------------------
-
-function toHex(bytes: Uint8Array): string {
-  let out = '';
-  for (let i = 0; i < bytes.length; i++) {
-    out += bytes[i].toString(16).padStart(2, '0');
-  }
-  return out;
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  // `digest` accepts a BufferSource — pass the view directly (avoids the
-  // `SharedArrayBuffer` widening that `.buffer` introduces).
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return toHex(new Uint8Array(digest));
-}
-
-/** Decode a standard-base64 string to bytes, or null if it isn't valid base64.
- * `atob` is a workerd global (WHATWG). Mirrors the decode in packages/pay/src/subs.ts. */
-function base64ToBytes(b64: string): Uint8Array | null {
-  try {
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i) & 0xff;
-    return bytes;
-  } catch {
-    return null;
-  }
-}
+// Hex / hashing / base36 / GraphQL primitives live in ./util (shared with the
+// charge face — the base36 codec especially must stay byte-identical).
 
 /**
  * Normalise the on-chain `manifest_hash` (a Move `vector<u8>`) to lowercase hex.
@@ -179,103 +147,34 @@ function manifestHashToHex(raw: SiteFields['manifest_hash']): string | null {
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// Base36 ↔ Sui object id (shared codec with the backend/dashboard).
-//
-// FIXED WIDTH (must stay BYTE-IDENTICAL to `services/backend/src/deploy/base36.ts`):
-// a 256-bit value's largest base36 representation is exactly 50 chars, so the
-// backend LEFT-PADS every subdomain to 50 with '0'. `isBase36ObjectId` matches
-// that exact width — a low-magnitude id (e.g. 0x0…01 → "0…01", 50 chars) can't
-// slip below the match window. Decode absorbs the '0' pad, so the round-trip is
-// exact (verified: encode(0x..01) → 50-char string → decode → 0x..01).
-// ---------------------------------------------------------------------------
-
-/** Fixed subdomain width: the max base36 length a 256-bit object id produces. */
-const BASE36_OBJECT_ID_WIDTH = 50;
-
-// Exported (not used at serve time — the worker only DECODES host→siteId) so it
-// stays byte-identical to the backend's encode and survives `noUnusedLocals`.
-export function encodeObjectIdToBase36(objectId: string): string {
-  const hex = objectId.startsWith('0x') ? objectId.slice(2) : objectId;
-  const value = BigInt('0x' + hex);
-  return value.toString(36).padStart(BASE36_OBJECT_ID_WIDTH, '0');
-}
-
-function decodeBase36ToObjectId(subdomain: string): string {
-  const cleaned = subdomain.toLowerCase().replace(/^0+/, '') || '0';
-  let decimal = 0n;
-  for (const ch of cleaned) {
-    const digit = parseInt(ch, 36);
-    decimal = decimal * 36n + BigInt(digit);
-  }
-  return '0x' + decimal.toString(16).padStart(64, '0');
-}
-
-/** A subdomain that is a FIXED-WIDTH (50-char) base36-encoded 256-bit id. */
-function isBase36ObjectId(subdomain: string): boolean {
-  return new RegExp(`^[0-9a-z]{${BASE36_OBJECT_ID_WIDTH}}$`, 'i').test(subdomain);
-}
-
-// ---------------------------------------------------------------------------
-// Sui GraphQL RPC (zero-dep — the public JSON-RPC fullnode is retired). One plain
-// `fetch` of `{query,variables}`, mirroring packages/pay/src/subs.ts: throw on a
-// GraphQL `errors` body so a failed read FAILS CLOSED (never served as a hit).
-// ---------------------------------------------------------------------------
-
-async function suiGraphql<T>(
+/** Read the `Site` object's move fields over GraphQL. Throws if missing/not a Site.
+ * `expectedType` is the exact `<pkg>::site::Site` this worker's network serves —
+ * we assert the object's `type.repr` equals it, so a subdomain that resolves to a
+ * NON-Site object (or a Site from an abandoned package) is rejected up front
+ * rather than half-read. (GraphQL `MoveType.repr` is the fully-normalised form,
+ * matching the 66-char package id in @suize/shared.) */
+async function fetchSiteFields(
   graphqlUrl: string,
-  query: string,
-  variables: Record<string, unknown>,
-): Promise<T> {
-  const res = await fetch(graphqlUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, variables }),
-  });
-  if (!res.ok) throw new Error(`Sui GraphQL HTTP ${res.status}`);
-  const body = (await res.json()) as { data?: T; errors?: Array<{ message?: string }> };
-  if (body.errors?.length) throw new Error(`Sui GraphQL error: ${body.errors[0]?.message ?? 'query error'}`);
-  return body.data as T;
-}
-
-/** ULEB128-encode a non-negative integer (the BCS length prefix). */
-function uleb128(n: number): number[] {
-  const out: number[] = [];
-  let v = n >>> 0;
-  do {
-    let b = v & 0x7f;
-    v >>>= 7;
-    if (v !== 0) b |= 0x80;
-    out.push(b);
-  } while (v !== 0);
-  return out;
-}
-
-/**
- * BCS-encode a Move `0x1::string::String` — identical to a `vector<u8>`: a ULEB128
- * length prefix + the UTF-8 bytes — and base64 it, the form a GraphQL
- * `DynamicFieldName.bcs` needs. Byte-identical to the backend's
- * `bcs.string().serialize(host)` (verified across ascii/unicode/long inputs).
- */
-function bcsStringBase64(s: string): string {
-  const utf8 = new TextEncoder().encode(s);
-  const bytes = new Uint8Array([...uleb128(utf8.length), ...utf8]);
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return btoa(bin);
-}
-
-/** Read the `Site` object's move fields over GraphQL. Throws if missing/not a Site. */
-async function fetchSiteFields(graphqlUrl: string, siteId: string): Promise<SiteFields> {
+  siteId: string,
+  expectedType: string,
+): Promise<SiteFields> {
   const query = `query($id: SuiAddress!) {
-    object(address: $id) { asMoveObject { contents { json } } }
+    object(address: $id) { asMoveObject { contents { type { repr } json } } }
   }`;
   const result = await suiGraphql<{
-    object?: { asMoveObject?: { contents?: { json?: Record<string, unknown> } | null } | null } | null;
+    object?: {
+      asMoveObject?: {
+        contents?: { type?: { repr?: string } | null; json?: Record<string, unknown> } | null;
+      } | null;
+    } | null;
   }>(graphqlUrl, query, { id: siteId });
 
-  const fields = result?.object?.asMoveObject?.contents?.json;
+  const contents = result?.object?.asMoveObject?.contents;
+  const fields = contents?.json;
   if (!fields) throw new Error(`Site not found: ${siteId}`);
+  if (contents?.type?.repr !== expectedType) {
+    throw new Error(`Not a Site object: ${siteId} (type ${contents?.type?.repr ?? 'unknown'})`);
+  }
 
   const quilt_id = fields['quilt_id'];
   const manifest_blob_id = fields['manifest_blob_id'];
@@ -283,48 +182,24 @@ async function fetchSiteFields(graphqlUrl: string, siteId: string): Promise<Site
   if (typeof quilt_id !== 'string' || typeof manifest_blob_id !== 'string') {
     throw new Error(`Site object missing manifest fields: ${siteId}`);
   }
+  // `paid_until_ms` is a u64 → GraphQL renders it as a decimal STRING. Parse
+  // defensively; a missing/NaN value collapses to 0 (the hosting gate then no-ops).
+  const paidUntil = Number(fields['paid_until_ms'] ?? 0);
   return {
     quilt_id,
     manifest_blob_id,
     manifest_hash: manifest_hash as SiteFields['manifest_hash'],
+    paid_until_ms: Number.isFinite(paidUntil) ? paidUntil : 0,
   };
 }
 
-/**
- * Resolve a custom domain to a site id via the on-chain DomainRegistry, over
- * GraphQL. Mirrors the backend's `siteForDomain` transport 1:1 — the SAME parent
- * (the registry object id) and the SAME key (the host BCS-encoded as a
- * `0x1::string::String`). Returns null when unmapped or the registry is unset.
- *
- * KNOWN BUG (out of scope — owned by T-004): the registry maps
- * `domains: Table<String, ID>`, whose entries live under the Table's INNER UID,
- * not the registry object's id — so this parent is wrong and the field reads
- * null. Ported faithfully to keep behaviour unchanged; the FIX is a separate ticket.
- */
-async function resolveCustomDomain(host: string, env: Env): Promise<string | null> {
-  const registryId = env.DOMAIN_REGISTRY_ID;
-  if (!registryId || registryId.includes('PLACEHOLDER')) return null;
-
-  const query = `query($parent: SuiAddress!, $name: DynamicFieldName!) {
-    object(address: $parent) {
-      dynamicField(name: $name) { value { ... on MoveValue { json } } }
-    }
-  }`;
-  const result = await suiGraphql<{
-    object?: { dynamicField?: { value?: { json?: unknown } | null } | null } | null;
-  }>(env.SUI_GRAPHQL_URL, query, {
-    parent: registryId,
-    name: { type: '0x1::string::String', bcs: bcsStringBase64(host) },
-  });
-
-  const value = result?.object?.dynamicField?.value?.json;
-  // `Table<String, ID>` value renders as the ID string (or a wrapper carrying it).
-  if (typeof value === 'string') return value;
-  if (value && typeof value === 'object' && typeof (value as { id?: unknown }).id === 'string') {
-    return (value as { id: string }).id;
-  }
-  return null;
-}
+// Custom domain → site id: `siteForDomain` (./domains), the gRPC dynamic-field
+// read the verify path already trusts. The old GraphQL read here was LIVE-proven
+// broken: `object(address: <inner table UID>)` is null in Sui GraphQL (a Table's
+// inner UID is not a top-level object node), so every linked custom domain 404'd
+// "Domain not linked" while verify=1 — reading the SAME field over gRPC —
+// resolved it. siteForDomain returns null on any failure (never throws), so an
+// RPC outage degrades to the same notFound as an unlinked domain — never a 5xx.
 
 // ---------------------------------------------------------------------------
 // Edge cache for resolved Site fields (so we don't hit RPC every request).
@@ -337,11 +212,14 @@ async function getCachedSiteFields(env: Env, siteId: string): Promise<SiteFields
   const cached = await cache.match(cacheKey);
   if (cached) return (await cached.json()) as SiteFields;
 
-  const fields = await fetchSiteFields(env.SUI_GRAPHQL_URL, siteId);
+  const fields = await fetchSiteFields(env.SUI_GRAPHQL_URL, siteId, `${deployPkg(env).PACKAGE}::site::Site`);
   await cache.put(
     cacheKey,
     new Response(JSON.stringify(fields), {
-      headers: { 'Cache-Control': `max-age=${IMMUTABLE_CACHE_SECONDS}` },
+      // SHORT ttl: `paid_until_ms` is mutable (a paid /extend moves it), so this
+      // entry must NOT ride the 1-year immutable tier — else an extend could not
+      // un-lapse a site for a year.
+      headers: { 'Cache-Control': `max-age=${SITE_FIELDS_CACHE_SECONDS}` },
     }),
   );
   return fields;
@@ -354,7 +232,7 @@ async function getCachedCustomDomain(env: Env, host: string): Promise<string | n
   const cached = await cache.match(cacheKey);
   if (cached) return ((await cached.json()) as { siteId: string | null }).siteId;
 
-  const siteId = await resolveCustomDomain(host, env);
+  const siteId = await siteForDomain(env, host).catch(() => null);
   const ttl = siteId === null ? DOMAIN_NEGATIVE_CACHE_SECONDS : DOMAIN_CACHE_SECONDS;
   await cache.put(
     cacheKey,
@@ -366,35 +244,41 @@ async function getCachedCustomDomain(env: Env, host: string): Promise<string | n
 }
 
 // ---------------------------------------------------------------------------
-// Walrus blob fetch + gzip normalisation.
+// Walrus blob fetch + hash-driven gzip normalisation.
 //
-// The aggregator may return blobs gzip-compressed WITHOUT a `Content-Encoding`
-// header (Worker `fetch` does NOT auto-decompress). We normalise to the ORIGINAL
-// bytes so the sha256 re-hash matches the manifest entry (which the backend
-// computed over the original file bytes), and serve those original bytes.
+// The aggregator MAY return a blob gzip-compressed WITHOUT a `Content-Encoding`
+// header (Worker `fetch` does NOT auto-decompress). But a site file can ALSO be
+// a genuine gzip payload (.svgz/.gz) whose stored bytes ARE the manifest content.
+// So the sha256 — not the magic bytes — is the arbiter: try the raw bytes first;
+// only if they don't match the expected hash do we decompress and re-check. This
+// serves a real .svgz correctly (raw matches) AND undoes transport gzip
+// (decompressed matches) — the old "gunzip whenever the magic bytes appear"
+// corrupted genuine gzip files into a permanent 502.
 // ---------------------------------------------------------------------------
 
 async function fetchWalrusBytes(url: string): Promise<Uint8Array | null> {
   const res = await fetch(url);
   if (!res.ok) return null;
+  return new Uint8Array(await res.arrayBuffer());
+}
 
-  const raw = new Uint8Array(await res.arrayBuffer());
-
-  // If the upstream declared an encoding, the gzip is intentional transport — but
-  // since we re-hash and re-serve raw bytes, normalise everything to original bytes.
-  const isGzip = raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b;
-  if (!isGzip) return raw;
-
-  try {
-    const ds = new DecompressionStream('gzip');
-    const decompressed = await new Response(
-      new Response(raw).body!.pipeThrough(ds),
-    ).arrayBuffer();
-    return new Uint8Array(decompressed);
-  } catch {
-    // Not actually gzip (false-positive magic bytes) — serve as-is.
-    return raw;
+/** Return the byte form (raw, else gunzipped) whose sha256 == `expectedHex`, or
+ * null if neither matches. The hash is the integrity arbiter. */
+async function matchOrDecompress(raw: Uint8Array, expectedHex: string): Promise<Uint8Array | null> {
+  if ((await sha256Hex(raw)) === expectedHex) return raw;
+  // Not a match as-is — maybe the aggregator transport-gzipped it; try decompress.
+  if (raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b) {
+    try {
+      const ds = new DecompressionStream('gzip');
+      const out = new Uint8Array(
+        await new Response(new Response(raw as unknown as ArrayBuffer).body!.pipeThrough(ds)).arrayBuffer(),
+      );
+      if ((await sha256Hex(out)) === expectedHex) return out;
+    } catch {
+      /* not actually gzip */
+    }
   }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -412,15 +296,16 @@ async function getVerifiedManifest(
   const cached = await cache.match(cacheKey);
   if (cached) return (await cached.json()) as Manifest;
 
-  const bytes = await fetchWalrusBytes(`${env.WALRUS_AGGREGATOR}/v1/blobs/${site.manifest_blob_id}`);
-  if (!bytes) throw new Error(`Manifest blob unavailable: ${site.manifest_blob_id}`);
+  const raw = await fetchWalrusBytes(`${env.WALRUS_AGGREGATOR}/v1/blobs/${site.manifest_blob_id}`);
+  if (!raw) throw new Error(`Manifest blob unavailable: ${site.manifest_blob_id}`);
 
-  // INTEGRITY 1/2 — verify the manifest bytes against the on-chain hash.
+  // INTEGRITY 1/2 — the manifest bytes must hash to the on-chain manifest_hash
+  // (raw, or transport-gunzipped — matchOrDecompress lets the hash decide).
   const expected = manifestHashToHex(site.manifest_hash);
   if (!expected) throw new Error('Site manifest_hash is malformed');
-  const actual = await sha256Hex(bytes);
-  if (actual !== expected) {
-    throw new Error(`Manifest hash mismatch (on-chain ${expected} != blob ${actual})`);
+  const bytes = await matchOrDecompress(raw, expected);
+  if (!bytes) {
+    throw new Error(`Manifest hash mismatch (on-chain ${expected} != blob ${await sha256Hex(raw)})`);
   }
 
   let manifest: Manifest;
@@ -442,7 +327,8 @@ async function getVerifiedManifest(
 
   // First sight of this site in this colo — pre-fill every asset in the
   // background so the browser's follow-up JS/CSS requests land on warm caches.
-  warmSite(env, ctx, manifest);
+  // Sealed sites skip the warm: their bytes are served by the viewer, not here.
+  if (!manifest.sealed) warmSite(env, ctx, manifest);
   return manifest;
 }
 
@@ -530,16 +416,17 @@ async function loadVerifiedBlob(
   }
 
   // 3. Walrus aggregator — the source of truth.
-  const bytes = await fetchWalrusBytes(
+  const raw = await fetchWalrusBytes(
     `${env.WALRUS_AGGREGATOR}/v1/blobs/by-quilt-patch-id/${encodeURIComponent(entry.patch)}`,
   );
-  if (!bytes) return new Response('Upstream blob unavailable', { status: 502 });
+  if (!raw) return new Response('Upstream blob unavailable', { status: 502 });
 
-  // INTEGRITY 2/2 — re-hash the bytes against the manifest entry.
-  const actual = await sha256Hex(bytes);
-  if (actual !== sha) {
+  // INTEGRITY 2/2 — the bytes must hash to the manifest entry (raw, or transport-
+  // gunzipped — the hash decides; a genuine .svgz serves, transport gzip is undone).
+  const bytes = await matchOrDecompress(raw, sha);
+  if (!bytes) {
     return new Response(
-      `Integrity check failed for ${path} (expected ${entry.sha256}, got ${actual})`,
+      `Integrity check failed for ${path} (expected ${entry.sha256}, got ${await sha256Hex(raw)})`,
       { status: 502 },
     );
   }
@@ -681,6 +568,56 @@ function serverError(message: string, host: string): Response {
   });
 }
 
+/** 410 Gone — the site existed but its prepaid hosting lapsed. `no-store` so the
+ * gate re-evaluates each request against the (briefly-cached) on-chain field, and
+ * a renewal is reflected as soon as that entry expires. */
+function hostingLapsed(host: string): Response {
+  return new Response(
+    errorPage('410', "This site's hosting has lapsed. The owner can renew it to bring it back online.", host),
+    {
+      status: 410,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    },
+  );
+}
+
+/**
+ * A SEALED site's URL serves this bootstrap instead of bytes: the stored files
+ * are Seal-encrypted, and only the suize.io viewer (wallet-connected, on the
+ * site's viewer list) can decrypt them — client-side, never here.
+ */
+function sealedBootstrap(env: Env, siteId: string): Response {
+  const viewer = `${(env.VIEWER_URL || 'https://suize.io').replace(/\/$/, '')}/#/view/${siteId}`;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Private site — Suize</title>
+<script>location.replace(${JSON.stringify(viewer)});</script>
+<style>
+  html,body{margin:0;height:100%;background:#0a0a0a;color:#e7e7e7;
+    font-family:'Martian Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
+  .wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    min-height:100%;gap:.75rem;padding:2rem;text-align:center}
+  a{color:#7c5cff}
+</style></head>
+<body><div class="wrap">
+  <div>This is a private site.</div>
+  <div><a href="${viewer}">Open it in the Suize viewer</a> and sign in with your wallet.</div>
+</div></body></html>`;
+  return new Response(html, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
+
 function errorPage(code: string, message: string, host: string): string {
   const safe = message.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!));
   const safeHost = host.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!));
@@ -712,6 +649,13 @@ export default {
     const url = new URL(request.url);
     const host = url.hostname;
 
+    // The charge API answers on ITS host (api.suize.site; localhost in dev)
+    // AND on the base-domain APEX for the API paths (`suize.site/deploy` —
+    // otherwise a dead 404 surface). Every other host serves sites.
+    if (isApiHost(host, env) || (host.toLowerCase() === baseDomain(env) && isApiPath(url.pathname))) {
+      return handleApi(request, env);
+    }
+
     // Only GET/HEAD are meaningful for static serving.
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
@@ -723,7 +667,21 @@ export default {
 
     try {
       const site = await getCachedSiteFields(env, siteId);
+
+      // Hosting gate: a site whose prepaid window has lapsed (past a small
+      // clock-skew grace) stops serving — checked BEFORE any blob bytes are
+      // streamed. 410 Gone: the site existed and its hosting lapsed. The
+      // site-fields entry is cached only briefly (SITE_FIELDS_CACHE_SECONDS), so a
+      // paid /extend brings it back within the minute.
+      if (site.paid_until_ms > 0 && Date.now() > site.paid_until_ms + LAPSE_GRACE_MS) {
+        return hostingLapsed(host);
+      }
+
       const manifest = await getVerifiedManifest(env, ctx, site);
+
+      // Sealed site: the URL serves the viewer bootstrap, never the (encrypted)
+      // bytes — decryption is client-side in the suize.io viewer.
+      if (manifest.sealed) return sealedBootstrap(env, siteId);
 
       const path = normalisePath(url.pathname);
       const entry = manifest.files[path];

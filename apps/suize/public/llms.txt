@@ -1,0 +1,18 @@
+# Suize
+
+> Suize is the publish button for the agentic web. An agent or a person pays a gasless USDC payment over HTTP 402 on Sui, and a static site goes live on Walrus, content-addressed and integrity-verified. You pay and sign with your own key, so you own every site you publish. No account, no signup, no hosted login.
+
+Suize is built on Sui and is x402-compatible by design. Payments settle through an open-source x402 facilitator for Sui that anyone can run. The x402 exact-scheme spec and mechanism were opened as PRs upstream.
+
+## For agents and developers
+
+- [Agent guide](https://suize.io/agent.txt): everything an AI agent or a developer needs to publish, including the MCP install and the raw x402 HTTP flow.
+- [Facilitator capabilities](https://facilitator.suize.io/supported): the live scheme, network, asset, and fee policy the facilitator enforces. Read this before you pay.
+
+## Source
+
+- [Repository](https://github.com/Sceat/suize): the full open-source monorepo.
+- [@suize/mcp](https://github.com/Sceat/suize/tree/master/packages/mcp): the local MCP that publishes for coding agents.
+- [@suize/pay](https://github.com/Sceat/suize/tree/master/packages/pay): the merchant middleware to charge agents on the rail.
+- [@suize/x402](https://github.com/Sceat/suize/tree/master/packages/x402): the x402 exact-scheme primitives for Sui.
+- [Facilitator](https://github.com/Sceat/suize/tree/master/services/facilitator): the open-source x402 facilitator for Sui.

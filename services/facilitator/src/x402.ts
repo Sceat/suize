@@ -106,6 +106,45 @@ const alreadyExecuted = async (
   }
 };
 
+// ── broadcast-ack-lost recovery poll ──────────────────────────────────────────
+// A gasless send_funds finalizes DETERMINISTICALLY from its signed bytes, but not
+// always by the instant a broadcast throws — a gRPC deadline abort can fire while the
+// tx is still 1-3s from finality. So when the broadcast path loses its ack, we do NOT
+// read the chain once and give up (that reports a LANDED settle as failed, and the
+// payer then pays twice — the reproduced double-charge). We POLL a few times over
+// ~8s, tolerating NOT_FOUND between reads, and stop on the first definitive answer.
+
+/** Poll schedule (ms between the 5 reads → ~8s window). Overridable in tests
+ * (setSettlePoll) so the suite never sleeps the real window. */
+let SETTLE_POLL_WAITS_MS: readonly number[] = [1500, 2000, 2000, 2500];
+/** TEST SEAM ONLY — shrink the settle recovery-poll waits. No production caller. */
+export const setSettlePoll = (waits: readonly number[]): void => {
+  SETTLE_POLL_WAITS_MS = waits;
+};
+
+/**
+ * Poll the chain for an EXECUTED tx after a lost broadcast ack. Reads up to
+ * SETTLE_POLL_WAITS_MS.length + 1 times, waiting between reads and tolerating
+ * NOT_FOUND. Returns the found tx (executed SUCCESS or on-chain FAILURE) on the first
+ * hit, or null if still NOT_FOUND after the window. A non-NOT_FOUND read error
+ * propagates (the caller treats it as the original broadcast failure).
+ */
+const pollExecuted = async (client: SuiGrpcClient, digest: string): Promise<unknown | null> => {
+  for (let i = 0; ; i++) {
+    try {
+      const read = await client.getTransaction({
+        digest,
+        include: { effects: true, balanceChanges: true, transaction: true },
+      });
+      return read.$kind === "Transaction" ? read.Transaction : read.FailedTransaction;
+    } catch (e) {
+      if (!isNotFound(e)) throw e; // unknown read error → let the caller fail closed
+    }
+    if (i >= SETTLE_POLL_WAITS_MS.length) return null; // window exhausted, still unseen
+    await new Promise((r) => setTimeout(r, SETTLE_POLL_WAITS_MS[i]));
+  }
+};
+
 /**
  * Verify a signed-but-not-executed `exact` payment pays the recomputed split. Pure
  * read (simulate only — never broadcasts). Returns the recovered payer on success; an
@@ -373,16 +412,15 @@ export const doSettle = async (
             payer,
           );
     } catch (e) {
-      // Idempotency fallback: a race where the chain executed this digest between our
-      // read and the broadcast makes executeTransaction throw. Read the chain — and
-      // bind the result to THESE requirements exactly like the fast path above.
+      // Idempotency fallback: the broadcast lost its ack — either a race that already
+      // executed this digest between our read and the broadcast, or a gRPC deadline
+      // abort while the tx was still finalizing. POLL the chain (a gasless send_funds
+      // finalizes 1-3s later, deterministically from the signed bytes) rather than
+      // reading once — a landed settle reported as failed is the double-charge bug.
+      // Bind any executed success to THESE requirements exactly like the fast path.
       try {
-        const read = await client.getTransaction({
-          digest,
-          include: { effects: true, balanceChanges: true, transaction: true },
-        });
-        const tx = read.$kind === "Transaction" ? read.Transaction : read.FailedTransaction;
-        const ok = tx?.effects?.status?.success === true || (tx as { status?: { success?: boolean } })?.status?.success === true;
+        const tx = await pollExecuted(client, digest);
+        const ok = (tx as { effects?: { status?: { success?: boolean } } })?.effects?.status?.success === true || (tx as { status?: { success?: boolean } })?.status?.success === true;
         if (ok && tx != null) {
           const problems = await executedMatchesRequirements(client, policy, tx, requirements, payer);
           if (problems) {

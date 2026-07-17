@@ -13,8 +13,8 @@
 //      `PaymentRequired` body (`accepts:[{ scheme:"exact", network, asset, amount,
 //      payTo, … }]`) AND the same JSON, base64'd, in the `PAYMENT-REQUIRED`
 //      header. The single accepted requirement declares the fee split in
-//      `extra.outputs` (merchant-absorbed 2% with a $0.01 floor — fetched from the
-//      facilitator's /terms) and the idempotency id in the `payment-identifier`
+//      `extra.outputs` (merchant-absorbed 2% with a $0.01 floor — computed from the
+//      facilitator's GET /supported fee policy) and the idempotency id in the `payment-identifier`
 //      extension. A single-output requirement is STRUCTURAL (merchant == treasury,
 //      e.g. the deploy charge) — NOT a free tier: the facilitator recomputes + enforces
 //      the fee at verify, so a fee-free payment is rejected on settle.
@@ -160,11 +160,48 @@ const TERMS_TTL_MS = 5 * 60 * 1000;
 /** The payer's window to sign + settle, stamped into every requirement. */
 const MAX_TIMEOUT_SECONDS = 120;
 
-const DEFAULT_FACILITATOR = "https://api.suize.io";
+const DEFAULT_FACILITATOR = "https://facilitator.suize.io";
 const DEFAULT_NETWORK: Network = "sui:testnet";
 
 const USDC_DECIMALS = 6;
 const USDC_UNIT = 10n ** BigInt(USDC_DECIMALS);
+
+/** A 0x…64-hex Sui address (a resolved treasury must match this). */
+const SUI_ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/;
+/** Basis-points denominator for the fee math. */
+const BPS_DENOMINATOR = 10_000n;
+
+/**
+ * The fee split — a ZERO-DEP mirror of `splitOutputs` from `@suize/x402`
+ * (packages/x402/src/split.ts). BOTH sides of the rail compute the SAME split from
+ * the same inputs, so this MUST stay structurally identical: a drift here is a silent
+ * protocol break (the facilitator recomputes + enforces the split at verify/settle,
+ * so a merchant that declares a different split has every payment rejected).
+ *
+ * fee = min(max(amount·bps/10_000, floor), amount − 1), merchant-absorbed. Outputs are
+ * [{merchant, net}, {treasury, fee}] UNLESS merchant === treasury (or no fee can be
+ * carved), in which case the legs collapse to ONE full-amount output.
+ */
+const splitOutputs = (
+  payTo: string,
+  treasury: string,
+  amountAtomic: bigint,
+  feeBps: bigint,
+  feeFloor: bigint,
+): Output[] => {
+  const pct = (amountAtomic * feeBps) / BPS_DENOMINATOR;
+  let fee = pct > feeFloor ? pct : feeFloor; // floor
+  if (fee >= amountAtomic) fee = amountAtomic - 1n; // clamp strictly below gross
+  const net = amountAtomic - fee;
+  if (fee <= 0n || net <= 0n) return [{ to: payTo, amount: amountAtomic.toString() }];
+  if (treasury.toLowerCase() === payTo.toLowerCase()) {
+    return [{ to: payTo, amount: amountAtomic.toString() }];
+  }
+  return [
+    { to: payTo, amount: net.toString() },
+    { to: treasury, amount: fee.toString() },
+  ];
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Config + public types
@@ -175,7 +212,7 @@ export interface SuizeConfig {
   to: string;
   /** The price per request — a decimal USDC string, e.g. "0.10" (≤ 6 dp, > 0). */
   price: string;
-  /** The facilitator base URL (/terms, /verify, /settle, /build live there). */
+  /** The facilitator base URL (/supported, /verify, /settle, /build live there). */
   facilitator?: string;
   /** The chain tag stamped into the requirement ("sui:testnet" / "sui:mainnet"). */
   network?: Network;
@@ -315,7 +352,7 @@ const mergeOutputs = (outputs: Output[]): Output[] => {
 };
 
 /** Thrown by suize()'s resolveOutputs when the canonical fee split can't be obtained
- * (a cold-start /terms miss with no cached split). FAIL-CLOSED: the serve path turns it
+ * (a cold-start /supported miss with no cached split). FAIL-CLOSED: the serve path turns it
  * into a transient 503 — Suize is NOT a free facilitator, so we refuse to mint a
  * fee-free challenge rather than serve a sale the facilitator would reject anyway. */
 class TermsUnavailable extends Error {
@@ -414,31 +451,49 @@ export const suize = (config: SuizeConfig) => {
   const inflight = new Set<string>(); // tx (base64) currently being verified/settled
   let terms: { outputs: Output[]; at: number } | null = null; // cached fee split
 
-  /** Fetch the canonical fee split from {facilitator}/terms (5-min TTL). FAIL-CLOSED:
-   * Suize is NOT a free facilitator — the facilitator ENFORCES the fee at verify (it
-   * recomputes the split), so a fee-free payment is rejected on settle. If we can't get a
-   * split we REFUSE to mint a challenge (throw → the serve path answers a transient 503)
-   * rather than serve fee-free. A transient miss keeps the last-good split; a cold-start
-   * miss throws. Answers `{ outputs: [{ to, amount }, …] }`. */
+  /** Resolve the canonical fee split by reading the facilitator's fee policy from
+   * `GET /supported?payTo=<merchant>` and computing the split LOCALLY (5-min TTL).
+   * The facilitator publishes `kinds[0].extra = { feeBps, feeFloor, treasury }` (the
+   * EFFECTIVE rate for this merchant) and `ready`; we feed those into `splitOutputs`,
+   * the same kernel the facilitator recomputes + ENFORCES at verify/settle. FAIL-CLOSED:
+   * Suize is NOT a free facilitator, so if the policy isn't READY (no resolved treasury)
+   * we REFUSE to mint a challenge (throw → the serve path answers a transient 503) rather
+   * than serve fee-free. A transient miss keeps the last-good split; a cold-start miss throws. */
   const resolveOutputs = async (): Promise<Output[]> => {
     const now = Date.now();
     if (terms && now - terms.at < TERMS_TTL_MS) return terms.outputs;
     try {
-      const res = await fetch(
-        `${facilitator}/terms?` + new URLSearchParams({ payTo: to, amount: price }),
-      );
+      const res = await fetch(`${facilitator}/supported?` + new URLSearchParams({ payTo: to }));
       if (res.ok) {
-        const body = (await res.json()) as { outputs?: unknown };
-        const raw = Array.isArray(body.outputs) ? body.outputs : [];
-        const outputs: Output[] = raw
-          .filter((o): o is Output => !!o && typeof (o as Output).to === "string" && typeof (o as Output).amount === "string")
-          .map((o) => ({ to: o.to, amount: o.amount }));
-        // ⚠️ merge same-address legs (a colliding split would never deep-equal a
-        // single on-chain credit) — also done in mintPaymentRequired, belt+braces.
-        const merged = mergeOutputs(outputs);
-        if (merged.length) {
-          terms = { outputs: merged, at: now };
-          return merged;
+        const body = (await res.json()) as {
+          ready?: boolean;
+          kinds?: Array<{ extra?: { feeBps?: unknown; feeFloor?: unknown; treasury?: unknown } }>;
+        };
+        const extra = body.kinds?.[0]?.extra;
+        const treasury = typeof extra?.treasury === "string" ? extra.treasury : "";
+        const feeBps = Number(extra?.feeBps);
+        const feeFloor = Number(extra?.feeFloor);
+        // Only trust a READY policy with a resolved treasury + finite fee numbers.
+        if (
+          body.ready &&
+          SUI_ADDRESS_RE.test(treasury) &&
+          Number.isFinite(feeBps) &&
+          Number.isFinite(feeFloor)
+        ) {
+          const split = splitOutputs(
+            to,
+            treasury,
+            usdcAtomic(price),
+            BigInt(Math.trunc(feeBps)),
+            BigInt(Math.trunc(feeFloor)),
+          );
+          // ⚠️ merge same-address legs (a colliding split would never deep-equal a
+          // single on-chain credit) — also done in mintPaymentRequired, belt+braces.
+          const merged = mergeOutputs(split);
+          if (merged.length) {
+            terms = { outputs: merged, at: now };
+            return merged;
+          }
         }
       }
     } catch {
@@ -447,7 +502,7 @@ export const suize = (config: SuizeConfig) => {
     // FAIL-CLOSED: a last-good split survives a transient miss; otherwise refuse to mint
     // a fee-free challenge (the serve path turns this into a transient 503).
     if (terms) return terms.outputs;
-    throw new TermsUnavailable(`${facilitator}/terms for ${to} @ ${price}`);
+    throw new TermsUnavailable(`${facilitator}/supported for ${to} @ ${price}`);
   };
 
   /** Mint a fresh tracked `PaymentRequired` for this route (and remember its id). */

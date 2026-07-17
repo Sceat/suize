@@ -1,4 +1,7 @@
-// Trust beats — the three verifiable/permanence/custody columns.
+// Trust beats: after you publish. Three plain-language columns (ownership /
+// integrity / payment), one short sentence each. Every claim is literally true
+// today: whoever pays is the on-chain Site.owner, the bytes are content-addressed
+// and integrity-checked at serve time, and one gasless USDC payment funds storage.
 
 export function Trust() {
   return (
@@ -7,73 +10,37 @@ export function Trust() {
         <div className="beat">
           <div className="beat__marker">
             <span className="beat__no">01</span>
-            <span className="beat__lbl">Verifiable</span>
+            <span className="beat__lbl">Ownership</span>
             <span className="beat__line" />
           </div>
-          <h3>Receipts you can open.</h3>
+          <h3>The payer owns it on-chain.</h3>
           <p>
-            Every deploy returns a manifest, a double content hash, and the payment digest. Each
-            one is an explorer link — nothing to trust, everything to check.
+            Whoever makes the payment owns the site. There is no account to open and no API keys to
+            manage.
           </p>
-          <div className="beat__proof">
-            <span>
-              manifest <b>0x9f3a…c1</b>
-            </span>
-            <span>
-              content sha256×2 <b>verified</b>
-            </span>
-            <span>
-              payment digest <b>0x41b8…7e</b>
-            </span>
-          </div>
         </div>
 
         <div className="beat">
           <div className="beat__marker">
             <span className="beat__no">02</span>
-            <span className="beat__lbl">Permanence</span>
+            <span className="beat__lbl">Integrity</span>
             <span className="beat__line" />
           </div>
-          <h3>Your sites outlive us.</h3>
-          <p>
-            Storage is a funded pool on Walrus that anyone can top up. Suize could disappear
-            tomorrow and every permanent site keeps serving. Extend by hash, no login required.
-          </p>
-          <div className="beat__proof">
-            <span>
-              storage <b>Walrus</b>
-            </span>
-            <span>
-              fundable by <b>anyone</b>
-            </span>
-            <span>
-              extend by <b>site hash</b>
-            </span>
-          </div>
+          <h3>Visitors get the exact files.</h3>
+          <p>The site is content-addressed, and every byte is checked when it is served.</p>
         </div>
 
         <div className="beat">
           <div className="beat__marker">
             <span className="beat__no">03</span>
-            <span className="beat__lbl">Custody</span>
+            <span className="beat__lbl">Payment</span>
             <span className="beat__line" />
           </div>
-          <h3>Zero custody, by design.</h3>
+          <h3>Pay once, then it is live.</h3>
           <p>
-            You connect your own wallet and sign your own payment. Keys never leave your machine,
-            funds never touch a Suize account. The facilitator is open source — run your own.
+            One gasless USDC payment puts the static site on Walrus. Keep it for years, or throw it
+            away tomorrow.
           </p>
-          <div className="beat__proof">
-            <span>
-              keys <b>never leave you</b>
-            </span>
-            <span>
-              facilitator <b>open source</b>
-            </span>
-            <span>
-              fee <b>operator-owned</b>
-            </span>
-          </div>
         </div>
       </div>
     </section>

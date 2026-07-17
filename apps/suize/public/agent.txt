@@ -1,0 +1,108 @@
+# Suize: agent guide
+
+Suize is the publish button for AI agents. An agent pays a small USDC amount over
+an HTTP 402 challenge and a static site goes live on Walrus (decentralized storage
+on Sui), content-addressed and integrity-verified. Gasless, non-custodial: you pay
+and sign with your OWN key, so you own every site you deploy. No account, no signup,
+no hosted login.
+
+If you are an AI agent or a developer building one, this file tells you everything
+you need to deploy.
+
+## The two ways to pay
+
+You need a Sui key that holds mainnet USDC to pay: Circle native USDC on Sui,
+type `0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC`.
+The rail is gasless, so you need NO SUI: the deploy payment draws from your USDC
+Address Balance and pays no gas. By default the Sui CLI keeps your key and does
+the signing (Suize only asks it to sign), so the key never leaves your machine.
+Suize never holds it and never signs for you.
+
+1. MCP (easiest for coding agents: Claude Code, Cursor, Codex)
+   Install:  claude mcp add suize -- npx -y @suize/mcp
+   Zero config: the MCP signs through your Sui CLI and defaults to mainnet (matching
+   the hosted charge door). Create a dedicated key once and it is used automatically
+   (the alias "suize"):
+     sui client new-address ed25519 suize
+   Fund the address it prints with mainnet USDC. That is it; no key to copy anywhere.
+   Optional env overrides for that server:
+     SUIZE_CLI_ALIAS       Sui CLI alias to sign with (default "suize")
+     SUIZE_SUI_BIN         path to the sui binary, if it is not on PATH
+     SUIZE_SUI_CONFIG_DIR  Sui config dir (passed to the CLI as SUI_CONFIG_DIR)
+     SUIZE_KEY_FILE        a path to a file holding a suiprivkey1... key, signed in-process (preferred: keeps it out of shell history), OR
+     SUIZE_KEY             a suiprivkey1... key directly, signed in-process (avoid inline values: they land in shell history)
+     SUIZE_NETWORK         mainnet (default) or testnet, paired with a self-hosted testnet SUIZE_API
+   Tools: deploy_site(dir, name?, months?, private?) · list_sites · extend_site(siteId, months) · site_status(siteId)
+   Then just tell the agent: "publish ./dist". It answers the 402, pays, and returns a live URL.
+
+2. Raw x402 (any Sui-aware agent, no MCP)
+   Build and sign the gasless payment yourself with @suize/x402, then send the
+   X-PAYMENT header. See the flow below.
+
+Reuse a key you already control, or create a dedicated one with the Sui CLI:
+  sui client new-address ed25519 suize
+Fund its address with mainnet USDC. No SUI needed.
+
+## The HTTP flow (raw x402)
+
+Base API: https://api.suize.site (Sui mainnet)
+
+1. Ask for the price. A bare POST returns HTTP 402 with the payment terms:
+     POST /deploy?months=1&sealed=0
+   The 402 body carries accepts[0] with { asset, amount, payTo, extra.outputs }
+   (the fee split), and extra.buildUrl.
+
+2. Build the gasless payment. Either construct it locally with
+   @suize/x402 buildGaslessOutputs({ client, sender, asset, outputs }), or POST the
+   declared outputs to the facilitator build door:
+     POST https://facilitator.suize.io/build   { sender, outputs }  -> { bytes }
+
+3. Sign the bytes LOCALLY with your key. Base64-encode the payment payload
+   { x402Version: 2, accepted, payload: { signature, transaction } } into X-PAYMENT.
+
+4. Retry with the bundle + the header:
+     POST /deploy?months=1  (multipart/form-data)
+       name      your site label
+       site.tar  a tar of your built static site
+       header X-PAYMENT: <base64 payload>
+   Response 200: { siteId, subdomain, url, version, digest, months, paidUntilMs,
+   storageEndEpoch, expiresAtMs, sealed }. The site is live at its url (a
+   *.suize.site subdomain). The recovered payer, you, becomes the on-chain
+   Site.owner (whoever pays owns), though the owner address is not echoed in
+   this response body; read it back from the on-chain Site object or GET
+   /preview?site=<siteId>.
+
+Extend more time:  POST /extend?site=<siteId>&months=N   (same 402 -> pay -> done)
+Custom domain:     POST /domains  (+ ?verify=1), $19.99/year, DNS-verified, payer must own the site.
+
+## Pricing
+
+- 0.10 USDC per month of hosting, up to about two years per payment on mainnet (the exact cap is what Walrus can fund in one store; the charge door rejects an over-cap request before you pay). Nothing is permanent; a site serves while its storage is funded and expires if you let it lapse.
+- Private (Seal-encrypted) sites cost 2x. Only wallet addresses you allow can decrypt them, client-side.
+- Custom domain: 19.99 USDC per year.
+- A site whose Walrus storage would cost more than 0.05 USD per month is rejected before any spend (roughly a 100 MB upload ceiling today).
+
+## The network and asset (read this live)
+
+Suize's hosted facilitator and charge door run on Sui mainnet today. The exact
+chain, USDC asset type, and fee policy are published at:
+  GET https://facilitator.suize.io/supported
+Read that before you pay: it returns the scheme, network (sui:mainnet for the
+hosted instance; sui:testnet only for a self-hosted testnet fork), and the fee
+split this facilitator enforces. Your payment must credit the declared outputs
+exactly or it is rejected at verify.
+
+## The rail
+
+Payments settle through an open-source x402 facilitator for Sui
+(https://facilitator.suize.io: /supported /verify /settle /build). It is gasless
+and keyless: it simulates and broadcasts your signed transaction, never holds a
+key. Anyone can run their own instance. Suize opened the x402 exact-scheme spec
+and mechanism as PRs upstream.
+
+## Links
+
+- Source:   https://github.com/Sceat/suize
+- The MCP:  https://github.com/Sceat/suize/tree/master/packages/mcp
+- Merchant integration (be a merchant on the rail): @suize/pay
+- Site:     https://suize.io

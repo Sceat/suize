@@ -14,8 +14,8 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const dist = join(root, 'dist')
 
-if (!existsSync(join(dist, 'index.js')) || !existsSync(join(dist, 'subs.js')) || !existsSync(join(dist, 'webhook.js'))) {
-  throw new Error('dist/index.js + dist/subs.js + dist/webhook.js must exist — run tsup first (this script runs after it)')
+if (!existsSync(join(dist, 'index.js'))) {
+  throw new Error('dist/index.js must exist — run tsup first (this script runs after it)')
 }
 
 const src = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -30,8 +30,6 @@ const manifest = {
   types: './index.d.ts',
   exports: {
     '.': { types: './index.d.ts', import: './index.js' },
-    './subs': { types: './subs.d.ts', import: './subs.js' },
-    './webhook': { types: './webhook.d.ts', import: './webhook.js' },
   },
   sideEffects: false,
   keywords: src.keywords,
@@ -43,4 +41,4 @@ writeFileSync(join(dist, 'package.json'), JSON.stringify(manifest, null, 2) + '\
 const readme = join(root, 'README.md')
 if (existsSync(readme)) copyFileSync(readme, join(dist, 'README.md'))
 
-console.log(`dist/ manifest written: ${manifest.name}@${manifest.version} (exports . + ./subs → compiled JS)`)
+console.log(`dist/ manifest written: ${manifest.name}@${manifest.version} (exports . → compiled JS)`)

@@ -1,9 +1,9 @@
 /**
  * @suize/shared — the single source of truth shared by every app + service.
  *
- * Lives at the root of the Bun workspace so the wallet frontend, the landing
- * page, and the unified backend all import the SAME network constant, on-chain
- * package ids, and sponsor wire types. Pure types + constants — no runtime deps.
+ * Lives at the root of the Bun workspace so the product frontend, the deploy
+ * worker, and the facilitator all import the SAME network constant, on-chain
+ * package ids, and deploy wire types. Pure types + constants — no runtime deps.
  */
 
 // ---------------------------------------------------------------------------
@@ -45,9 +45,9 @@ export const graphqlUrl = (network: SuiNetwork): string =>
 
 /**
  * The settlement coin type the rail charges in, PER NETWORK — Circle's USDC
- * (decimals 6, symbol "USDC"; testnet value verified live via getCoinMetadata,
- * see apps/wallet/src/data/coins.ts). Mainnet is Circle's NATIVE USDC (a
- * RegulatedCoin — orthogonal to non-custodial; LOCKED #12). The `Account<USDC>`
+ * (decimals 6, symbol "USDC"; testnet value verified live via getCoinMetadata).
+ * Mainnet is Circle's NATIVE USDC (a RegulatedCoin — orthogonal to
+ * non-custodial). The `Account<USDC>`
  * type arg + every rail PTB (`charge`/`pay`/…) land THIS exact type, so it is a
  * load-bearing on-chain id and lives here in the single source of truth (not
  * duplicated in any app/service). 6 decimals → $1 = 1_000_000.
@@ -117,38 +117,62 @@ export const WALRUS_EPOCHS: Record<SuiNetwork, { genesisMs: number; durationMs: 
 export const walrusEpochToMs = (epoch: number, net: SuiNetwork): number =>
   WALRUS_EPOCHS[net].genesisMs + epoch * WALRUS_EPOCHS[net].durationMs;
 
+/**
+ * Walrus on-chain ids per network: the shared `System` object (its `package_id`
+ * field is read at runtime so a Walrus package upgrade never strands an extend)
+ * and the WAL coin type `system::extend_blob` payments are drawn from.
+ * MAINNET values are VERIFY-AT-FLIP (the T-009 gate) — confirm against the live
+ * Walrus deployment before any mainnet extend runs.
+ */
+export const WALRUS_IDS: Record<SuiNetwork, { systemObject: string; walCoinType: string }> = {
+  testnet: {
+    systemObject: '0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af',
+    walCoinType: '0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL',
+  },
+  mainnet: {
+    systemObject: '0x2134d52768ea07e8c43570ef975eb3e4c27a39fa6396bef985b5abc58d03ddd2',
+    walCoinType: '0x356a26eb9e012a68958082340d4c4116e7f55615cf27affcff209cf0ae544f59::wal::WAL',
+  },
+};
+
+/**
+ * Seal key-server object ids per network (free, keyless, OPEN-mode key servers
+ * registered on-chain). Sealed (private) sites encrypt/decrypt against these —
+ * the worker (encrypt at publish) and the viewer (decrypt in-browser) MUST use
+ * the exact same set. Testnet is Mysten's two open servers; mainnet is a three-
+ * operator committee of verified free Open-mode servers (live-probed 2026-07-15,
+ * each answering GET <url>/v1/service?service_id=<id> with a valid pop).
+ * These ids are MONEY-CRITICAL: a wrong id encrypts a paid site against a
+ * nonexistent committee and it is undecryptable forever.
+ */
+export const SEAL_KEY_SERVERS: Record<SuiNetwork, string[]> = {
+  testnet: [
+    '0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75', // mysten-testnet-1
+    '0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8', // mysten-testnet-2
+  ],
+  mainnet: [
+    '0x1afb3a57211ceff8f6781757821847e3ddae73f64e78ec8cd9349914ad985475', // NodeInfra
+    '0x145540d931f182fef76467dd8074c9839aea126852d90d18e1556fcbbd1208b6', // Overclock
+    '0xe0eb52eba9261b96e895bbb4deca10dcd64fbc626a1133017adcd5131353fd10', // Studio Mirai
+  ],
+};
+
+/**
+ * Seal decryption threshold per network. INVARIANT: this is the SAME number at
+ * encrypt (the worker) and at fetchKeys (the viewer) — a mismatch makes paid
+ * sites undecryptable. It must be <= the server count for that network. Mainnet
+ * is 2-of-3 so one operator being down or disappearing never bricks a paid site;
+ * testnet is 2-of-2 (Mysten's two open servers).
+ */
+export const SEAL_THRESHOLD: Record<SuiNetwork, number> = {
+  testnet: 2,
+  mainnet: 2,
+};
+
 // ---------------------------------------------------------------------------
-// On-chain package ids + the exact Move targets the sponsor may sponsor.
-// These are public on-chain ids — safe to commit.
+// On-chain package ids + the deploy_sui Move-call targets. These are public
+// on-chain ids — safe to commit.
 // ---------------------------------------------------------------------------
-
-/**
- * The Sui framework package `0x2`, in its NORMALIZED 64-hex form. Enoki's sponsor
- * allow-list compares against the tx's NORMALIZED move-call targets, so any
- * framework helper we allow-list for sponsorship (e.g. the `CoinWithBalance`-intent
- * helpers in SUBS_MOVE_TARGETS) MUST use this form — a short `0x2::…` never matches
- * and silently breaks sponsorship (proven on testnet 2026-06-12).
- */
-const FRAMEWORK_PKG =
-  '0x0000000000000000000000000000000000000000000000000000000000000002';
-
-/**
- * Crash router package (live on testnet — version-gated + accumulator build).
- * Upgraded 2026-06-06 to v2 (added router::withdraw_all for atomic settle->wallet
- * sweep); on-chain Version lifted to 2 via migrate, fencing the prior v1 package
- * 0xcd1f6af8…ebd31e19. UpgradeCap 0xbbb53a32…d886b9e1 (deployer-owned).
- */
-const CRASH_ROUTER_PACKAGE =
-  '0x16eb262d69300c4291beab7e9f27b2b94640124a290f373230c5c8a3d3d50c26';
-
-/**
- * Wallet Move package — LIVE on testnet.
- * Published 2026-06-02 from packages/move-wallet (modules: mandate / vault / swap /
- * navi). Publish digest EuEspy1q7qEbVGT7HCWvyVxEDmfbL88gGuUjwUdrpYAe; UpgradeCap
- * 0xc2d611327d2b684fc14ca9fc6c813b84253689e21e095f78f9108736006f782d (deployer-owned).
- */
-const WALLET_PACKAGE =
-  '0x285865f6795ae733bbbb3d55df6826d4614dbdcad7bd5c177ab6a4b4314267b1';
 
 /**
  * Deploy Move package (`deploy_sui`) — v2 REPUBLISHED to testnet 2026-06-10
@@ -156,153 +180,52 @@ const WALLET_PACKAGE =
  * v1 publish 0xadcc8d… is abandoned — its Sites/domains are orphaned). v2 adds:
  * Site blob-OBJECT id fields (Walrus storage extension). PACKAGE is the package id;
  * the two *_OBJECT ids are the shared objects created by the modules' init — the
- * deploy backend reads these to build PTBs, the worker reads them to resolve + serve
- * sites.
+ * deploy worker reads these to build PTBs and to resolve + serve sites.
  *
  * NOTE (x402 V2 pivot 2026-06-12): the `charge_ledger` + `renewal_registry` modules
- * were REMOVED from move-deploy (deploy billing is now x402-exact one-off settlements
- * via the keyless facilitator; storage auto-renewal rides the standalone `subs`
- * module). Their two shared objects from THIS testnet publish are orphaned-harmless
- * (nothing references them); the MAINNET republish excludes both modules.
+ * were REMOVED from move-deploy (deploy billing is now x402-exact settlements via
+ * the keyless facilitator; storage renewal is now the prepaid-months model below —
+ * `extend_site` buys more months, no subscription module). Their two shared objects
+ * from THIS testnet publish are orphaned-harmless (nothing references them); the
+ * MAINNET republish excludes both modules.
  * REPUBLISHED on testnet 2026-06-14 (publish digest BQ7Pna6hwEutTeJCpvtFKivxy9MP6RHYfJHgQZEY2UQB)
  * to add the on-chain ONE-SITE-PER-PAYMENT guard: `site::create_site` now takes a
  * settled payment digest + the shared `SiteDigestRegistry` and aborts `EDigestUsed`
  * (site.move code 0) if the digest already minted a site — the chain is the atomic
  * dedup lock (multi-replica-safe; replaces the old in-memory settledDeploys map).
  * Caps from this publish: the DeployerCap 0xfcdbc25d… (the create_site mint authority —
- * gates Site minting to the paid backend) was minted to the publisher 0x087aa862… then
+ * gates Site minting to the paid worker) was minted to the publisher 0x087aa862… then
  * TRANSFERRED to the prod deploy service wallet 0xcc58bc00… (agent@suize, which signs
  * create_site in prod and already holds the SiteAdminCaps — digest mLcJFogd…). The cap's
  * CUSTODY == the mint trust root (a hot-wallet single point of failure; see
- * apps/deploy/SPEC.md). version::AdminCap 0x6aa982b5… + UpgradeCap 0x81f93227… stay on the
+ * services/deploy-worker/README.md). version::AdminCap 0x6aa982b5… + UpgradeCap 0x81f93227… stay on the
  * CLI publisher. (2026-06-14 republish `6kAxGVLn…` adds the DeployerCap gate — Move audit.)
  */
+// v4 REPUBLISHED to testnet 2026-07-12 (digest 4LLhhe1gikCYQP4aYbq9CpeuGpf7VatVYh8wbR56N5dH,
+// publisher = the `suize-deploy` CLI wallet 0x171a87c1…). Prepaid-months model: Site carries
+// `paid_until_ms` (mutable, via `extend_site`) + `sealed`; the `allowlist` module (Seal access
+// control for private sites — DeployerCap-gated creation, owner-held AllowlistCap, `seal_approve`
+// un-version-gated so an upgrade freeze can't brick decryption). v4 supersedes v3 (0x437d0a29…)
+// with the MONEY-HAT fix: `extend_site` now takes a Clock + a RELATIVE `add_ms` and computes the
+// new paid-through on-chain as max(now, paid_until)+add — so two concurrent extenders can't strand
+// one's funds on a stale absolute target, and a lapsed site gets the full purchased time; plus
+// `site_for_digest` (the digest→site audit read the worker's recovery path uses after an
+// already-consumed retry). v2/v3 abandoned in place. version::AdminCap 0x5abd2300… + UpgradeCap
+// 0x89acb559… stay on the publisher wallet.
 const DEPLOY_PACKAGE =
-  '0x5cbf0ce0a2f56128ef0d7679aab8f3a8ba690533163dc2524754fd40f27faf0b';
+  '0x41cc6bab26d2b7b63c47f1dcc2bf1494cbee798cd47cc2115100d7e1cd71ac36';
 const DEPLOY_VERSION_OBJECT =
-  '0x339c2b6bbd8ed4cb5ddef2c6c8f137374c6e1eab4aedef665b61c0b464a77898';
+  '0xd97828ae3e5ca26f7aa712a8d9af4a65b65bc49c404c97ad89b62ac1d0b0fbfa';
 const DEPLOY_DOMAIN_REGISTRY_OBJECT =
-  '0xec0565e9c27ab340595a26b8b823ed681e36616f32ebf4aba20a0193574d4c08';
+  '0x11d7efed38c1a4e98fa1cd68b2e236b3c459eb583e316f28a96b8aa1b5afd6aa';
 const DEPLOY_SITE_DIGEST_REGISTRY_OBJECT =
-  '0x8ed1be2e9ad1813150368e7c458a1f70239185e8545717b04a233bb5333ca5f0';
-/** The owned `DeployerCap` (held by the deploy service wallet): the mint authority
- *  `create_site` now requires — only the paid backend can mint a Site, so every Site
- *  field (owner/size/blob ids) is service-attested. Custody == the mint trust root. */
+  '0xe5928ef6b1ae7418876c567a916aca38e2c5cb7d546412eadb43370afa9092e8';
+/** The owned `DeployerCap` (held by the deploy service wallet — `suize-deploy`,
+ *  0x171a87c1… on testnet): the mint authority `create_site` + `extend_site` +
+ *  `allowlist::create_for_owner` require — only the paid worker can mint/extend,
+ *  so every on-chain field is service-attested. Custody == the mint trust root. */
 const DEPLOY_DEPLOYER_CAP_OBJECT =
-  '0xfcdbc25dafbe2af0aeeb2471acab6d1e657d4f0ac9380435f17a46c4cf8894bf';
-
-// NOTE (x402 V2 pivot 2026-06-12): the `suize::account` rail package + its shared
-// `RailConfig` object are RETIRED. Payments are now vanilla x402 V2 'exact' over
-// gasless Address-Balance PTBs, settled KEYLESS over gRPC by the facilitator — there
-// is no on-chain Account, no RailConfig, no `&RailConfig` arg, no sponsor allow-list
-// entry for the rail. The 2% (+$0.01 floor) fee lives in the declared `extra.outputs`
-// split (facilitator-enforced), not in an on-chain fee object. The unpublished
-// account.move source stays under packages/move-wallet as a retired-in-place archive.
-
-/**
- * Subscriptions Move package (`subs::subscription`) — the standalone Party-object
- * subscription module: each subscription is its own object (fixed payee +
- * per-period cap + period); renewals are USER-SIGNED, sponsored txs the relayer
- * triggers. CONFIG_OBJECT is the shared config the module's `init` creates; the
- * wallet/relayer read these ids from here per the single-source-of-truth rule.
- */
-// PUBLISHED to testnet 2026-06-14 (publish digest 2XbnJRCCJzcRXkmPWsVY2sthDevjm25UDB9tZKDNTaqi)
-// from packages/move-subs (module: subscription) by the CLI dev wallet 0x087aa862… —
-// which therefore holds the SubsAdminCap (0xcd0e5bbc…) + UpgradeCap (0xfb6dac80…) and is
-// the SubsConfig.treasury until synced. VERSION-GATED republish (2026-06-15): every
-// create/renew/cancel now takes the shared `Version` first (assert_latest) — run
-// `sync-subs-config.ts` after publish to set BOTH treasury AND coin_type on the fresh
-// SubsConfig. CONFIG_OBJECT is the shared SubsConfig init created; VERSION_OBJECT is the
-// shared Version. Mainnet stays '0x0' — its publish is a republish.
-const SUBS_PACKAGE: string = '0x759105b5f7382cb22533e8a5282e90c92c558edb1bc2eaa0904247914082d821';
-
-/** Trace package (`trace::trace` — `anchor` + `seal_approve`) — PUBLISHED testnet
- *  2026-06-17 (digest `BcoxS3vp…`). The encrypted-history on-chain commitment + the
- *  Seal owner-only access policy. Mainnet is a republish ('0x0' until then). */
-const TRACE_PACKAGE: string = '0xc7c95e514776cee94d65b5997247d88ff2493bd5b83971b176cd1a072cbd8c07';
-const SUBS_CONFIG_OBJECT: string = '0x976c10fb2eb9d29b8ae7c17fa6bf8b06cbb1e6a591e6ce7a82c04ff344332029';
-const SUBS_VERSION_OBJECT: string = '0x6542cdaa1f7bc55a00a319b98b8dd6d45b546868558a1e1a0b58d409b6d87d86';
-
-/**
- * Ad-slot auction Move package (`auction::auction`) — the agents.suize.io directory's
- * on-chain monetization. Each `AdSlot` is a SHARED object sold by continuous English
- * auction (King-of-the-Hill: a strictly-higher bid takes the slot; the net goes to the
- * directory, the configured fee to the treasury — so an ad sale is a payment on the
- * rail that shows in the directory's own feed). Bids are USER-SIGNED + Enoki-sponsored
- * (same shape as a subs renewal), so the sponsor allow-lists AUCTION_MOVE_TARGETS.
- *
- * PUBLISHED to testnet 2026-06-14 — the HARDENED v2 (republish digest
- * 6kjMqdJzNn46q1sZz2V2smw1eXzg1akfemKNhPgJAH5P; supersedes the pre-hardening 0x07c192ad…,
- * now abandoned) from packages/move-auction by the CLI dev wallet 0x087aa862… — which holds
- * the AuctionAdminCap (0x8df7762c…) + UpgradeCap (0x3bbdadaa…). Post-publish admin txs set
- * the AuctionConfig.treasury to the resolved treasury@suize, pinned USDC (set_coin_type —
- * which MUST precede create_slot now: the hardened module aborts ECoinUnpinned otherwise),
- * and created the three slots below; CONFIG.directory defaults to the publisher
- * (= DIRECTORY_PAYTO). ON-CHAIN CAVEAT (same as subs): AuctionConfig.treasury is a
- * LITERAL set at sync — if treasury@suize is repointed, an admin set_treasury is needed.
- * Mainnet stays '0x0' — its publish is a republish.
- */
-// REPUBLISHED 2026-06-15 (digest in git): version gate + `creative`/`update_creative`
-// REMOVED — an ad's content now comes from the holder's BusinessProfile NFT (see PROFILE_*).
-// Fresh publish (ABI break), so the prior 0xe0c4eeec… is abandoned. CLI dev wallet
-// 0x087aa862… holds the new AuctionAdminCap (0x583fb90a…) + UpgradeCap (0x908b44d0…).
-const AUCTION_PACKAGE: string = '0xa7151d699c93e48e5f502759d4de704ba4b8f22111b3d0b5a60c265ff2d37869';
-/**
- * The auction MOVE-CALL ENTRY package. EQUALS AUCTION_PACKAGE — a FRESH republish (not an
- * upgrade), so the AdSlot/AuctionConfig TYPES and the call targets share this one new id.
- * A future UPGRADE that adds a fn would set this to the upgraded id while PACKAGE keeps the
- * original; that distinction is preserved here for that case.
- */
-const AUCTION_PACKAGE_LATEST: string = AUCTION_PACKAGE;
-const AUCTION_CONFIG_OBJECT: string = '0xe81a46df69a31d91b0eae9e03eb299e339294142cbd132957558d88e49ad1293';
-/** The shared `Version` gate — `bid` / `create_slot` call `assert_latest` first. */
-const AUCTION_VERSION_OBJECT: string = '0x9152d4ec84c1e04b0ae8ba453d7fe39e9a8791992ca63eda5384704554bd1a23';
-/** The shared `AdSlot` objects (genesis $50, held by the directory) — created by the sync
- * script on this republish (digest G8hBsUWc…). */
-const AUCTION_SLOTS: Record<string, string> = {
-  hero: '0xce8607a907080baa23685ed2ce03bc3ce7b07e229cbb45faf8ec6af8c2e44128',
-  'feed-banner': '0x8c162a8061fd5e9c4fcf48f98601756663a4b2a4f48dbd32e468e2780893b574',
-  'rankings-sidebar': '0x5f0abceb1b3ad0e040c1937c4ee497479db63f0a6cff6390f1a1a3fcb2306801',
-};
-
-/**
- * The directory's own merchant payout address — where each ad-slot bid's NET proceeds
- * land (the fee leg goes to treasury@suize). This is `AuctionConfig.directory` on-chain
- * (defaults to the publisher; redirect via the AuctionAdminCap `set_directory`). It is
- * the address the directory appears under in its own live feed.
- */
-export const DIRECTORY_PAYTO = '0x087aa862ca645c0b94400c49e11b491011fca35db837361ccfc4c6f69d356e86';
-
-/** The genesis price of every ad slot: $50 = 50_000_000 base units (6 decimals). A first
- * bid must STRICTLY exceed it. */
-export const AD_SLOT_START_PRICE = 50_000_000;
-
-// ---------------------------------------------------------------------------
-// Business Profile NFT (`profile::profile`) — the merchant identity reused across ads +
-// the directory. A soulbound `BusinessProfile` (key, no store) with `Display<>` holds
-// name · description · image_url (logo) · banner_url · website. PUBLISHED to testnet
-// 2026-06-15 by the CLI dev wallet 0x087aa862… (holds ProfileAdminCap 0x100d5892… +
-// UpgradeCap 0x981e3548…). create/edit each cost a FLAT $0.10 (USDC) → treasury (the
-// rail's 2% is separate). One per business by convention; resolve by the address's owned
-// profile. Mainnet '0x0' — a republish. The on-chain ProfileConfig.treasury is set post-
-// publish (the sync script), same caveat as subs/auction.
-const PROFILE_PACKAGE: string = '0x21be5a6957d8e944eebb93d594057859fd793474ed6778479145b73b0b156c5d';
-const PROFILE_CONFIG_OBJECT: string = '0x537c791ad8612122f6f3363e7698125f4a3ed409a1ad8d54cfc796d81fd51e86';
-/** The shared `Version` gate — create_profile / edit_profile call `assert_latest` first. */
-const PROFILE_VERSION_OBJECT: string = '0xbb63c6c44e565d3b6955729f2e2f7c1149d3eefad26171f08a93370506410954';
-/** The on-chain `BusinessProfile` struct type — for `getOwnedObjects` type-filtered lookups. */
-export const BUSINESS_PROFILE_TYPE = (network: SuiNetwork): string =>
-  `${packageIds(network).PROFILE.PACKAGE}::profile::BusinessProfile`;
-/** The flat create/edit fee for a Business Profile: $0.10 at 6 decimals. */
-export const PROFILE_FEE = 100_000;
-
-/** Display metadata for the ad slots (the on-chain ids live in PACKAGE_IDS.AUCTION.SLOTS,
- * keyed by the same `key`). The order here is the surface order on agents.suize.io. */
-export const AD_SLOT_DEFS = [
-  { key: 'hero', label: 'Hero banner', blurb: 'Top of every page' },
-  { key: 'feed-banner', label: 'Feed banner', blurb: 'Inside the live purchase feed' },
-  { key: 'rankings-sidebar', label: 'Rankings sidebar', blurb: 'Beside the volume leaderboard' },
-] as const;
+  '0xa9c5279717fb0d5cb2b334dab814e6e6dee71128400b735dcc9af9d195cbe05a';
 
 /**
  * The Suize treasury is the SuiNS handle `treasury@suize` — the ONE source of truth,
@@ -320,9 +243,9 @@ export const TREASURY_SUINS_NAME = 'treasury@suize';
 export const TREASURY_SUINS_DOTTED = 'treasury.suize.sui';
 
 /** The minimal SuiNS-resolving client this helper needs. The browser's dapp-kit
- *  `SuiClient` exposes `resolveNameServiceAddress` natively; the backend's gRPC
- *  client has no such method, so it passes a thin adapter over `NameService.lookupName`
- *  (see `services/backend/src/sui.ts` → `treasuryResolver`). Either satisfies this. */
+ *  `SuiClient` exposes `resolveNameServiceAddress` natively; a gRPC client has no
+ *  such method, so it needs a thin adapter over `NameService.lookupName` conforming
+ *  to this shape. Either satisfies this. */
 export interface TreasuryResolver {
   resolveNameServiceAddress(input: { name: string }): Promise<string | null>;
 }
@@ -338,143 +261,125 @@ export async function resolveTreasury(client: TreasuryResolver): Promise<string 
   return addr && SUI_ADDRESS_RE.test(addr) ? addr.toLowerCase() : null;
 }
 
-// NOTE (deploy merchant): the Deploy merchant is resolved at RUNTIME by the backend
-// (`deployMerchant()` in services/backend/src/deploy/payment.ts), NOT pinned here —
-// so no merchant-address const lives in this package. The `SUIZE_DEPLOY_MERCHANT` env
-// selects it: UNSET → the merchant IS the Suize treasury (first-party — a single
-// full-amount output, deploy income == treasury income); SET to a real address → a
-// third-party merchant (net → merchant, the 2%/$0.01 fee leg → treasury, so the deploy
-// shows in that merchant's ledger AND in the agents.suize.io feed). Either way the
-// treasury still resolves LIVE from `treasury@suize`.
-//
-// ON-CHAIN CAVEAT (subs): `subs::subscription`'s `SubsConfig.treasury` is set ON-CHAIN
-// at publish and Move can't resolve SuiNS — so the subscription rake goes to whatever
-// that stored address is. Point it at the resolved `treasury@suize` via a one-time
-// `SubsAdminCap` admin tx; that is NOT a code change (no literal belongs here).
+// ---------------------------------------------------------------------------
+// Deploy pricing — PREPAID MONTHS (owner-locked 2026-07-10; one-shot cap
+// 2026-07-13). One flat rate: $0.10 per month of hosting; extend = buy more
+// months at the same rate. The prepay ceiling is what Walrus can fund in ONE
+// store (WALRUS_MAX_EPOCHS_AHEAD), DERIVED per network by maxDeployMonths (about
+// two years on mainnet); there is no permanent tier and no drip-funding cron.
+// Sealed (Seal-encrypted private) sites pay 2×. Custom domains are a separate
+// $19.99/year one-off. A "month" is 30 days flat: the commercial month every
+// price and expiry computes with. The worker enforces these at the charge door;
+// the MCP + gallery quote with the SAME helpers (one home for the math).
+// ---------------------------------------------------------------------------
 
-/** The price (in native USDC base units, 6 decimals) of one one-off deploy charge: $0.50 = 500_000. */
-export const DEPLOY_CHARGE_AMOUNT = 500_000;
+/** One pricing month: 30 days flat, in ms. */
+export const DEPLOY_MONTH_MS = 2_592_000_000;
 
-/** The DISCOUNTED per-deploy price for an active Deploy subscriber (Premium): $0.10
- * = 100_000, vs the $0.50 standard rate. A perk of the $19.99/mo plan — each deploy
- * costs a fifth. ENFORCED at the facilitator verify against the payer's on-chain sub
- * (`hasValidDeploySub(payer)`): a non-subscriber that submits this lower amount is
- * rejected; a subscriber may pay either this or the standard amount. */
-export const DEPLOY_PREMIUM_CHARGE_AMOUNT = 100_000;
+/** The price of ONE month of hosting, in USDC base units (6 decimals): $0.10. */
+export const DEPLOY_PRICE_PER_MONTH_USDC = 100_000;
 
-/** The Walrus storage a one-off deploy buys, in EPOCHS — the documented default
- * (the backend's `DEPLOY_EPOCHS`, env-tunable). At testnet's ~1-day epochs that's
- * ~1 month; the actual per-site end epoch is on-chain (the blobs' `storage.end_epoch`,
- * surfaced as `expiresAtMs` on GET /sites/:id). Extend or subscribe to push it out. */
-export const DEPLOY_STORAGE_EPOCHS = 30;
+/** Sealed (private, Seal-encrypted) sites pay this multiple of the flat rate. */
+export const DEPLOY_SEALED_MULTIPLIER = 2;
+
+/** A custom domain costs this per YEAR (charged at link, re-paid yearly): $19.99. */
+export const DOMAIN_PRICE_PER_YEAR_USDC = 19_990_000;
 
 /**
- * The Deploy subscription — $19.99/mo (price placeholder, owner-flagged), unlocking
- * (a) custom domains and (b) Suize auto-renewing the site's Walrus storage. PRICE is
- * what each period debits; PERIOD_MS is the recurring interval (30 days). On the subs
- * module the fixed `amount` IS the per-period leash (the module asserts
- * `payment.value() == amount`), so there is no separate PERIOD_CAP const.
+ * Walrus protocol ring-buffer length: the furthest-ahead epoch a single store or
+ * extend may fund (the System object's `future_accounting` ring). A protocol
+ * constant on BOTH networks, verified on-chain 2026-07-13. Storage is funded in
+ * ONE shot at deploy/extend time (there is no drip-funding cron), so a purchase
+ * can never reach past `currentEpoch + WALRUS_MAX_EPOCHS_AHEAD`; the max prepay
+ * horizon is DERIVED from it per network by `maxDeployMonths`.
  */
-export const DEPLOY_SUB_PRICE_USDC = 19_990_000;
-export const DEPLOY_SUB_PERIOD_MS = 2_592_000_000;
+export const WALRUS_MAX_EPOCHS_AHEAD = 53;
 
 /**
- * The per-ADDRESS auto-renew ceiling: a single Deploy subscription (owned by an
- * address) auto-renews the Walrus storage of ALL that address's sites, but only up
- * to this much TOTAL site storage. A WAL-spend safety bound — a malicious owner with
- * 10 TB of sites must NOT make the service wallet renew all of it for one $19.99 sub.
- * Cost basis ~$0.023/GB/mo Walrus ⇒ ~$2.30/mo of WAL at the 100 GiB cap, comfortably
- * under the $19.99 revenue. 100 GiB = 100 * 1024^3 bytes.
+ * How many Walrus epochs cover `months` of hosting on `net` — ceil'd, so the
+ * rounding always over-provisions in the buyer's favor (testnet ~1-day epochs
+ * → 30/month; mainnet 14-day epochs → 1 month = 3 epochs). The whole purchase is
+ * stored in one shot, so this stays within `WALRUS_MAX_EPOCHS_AHEAD`: exactly
+ * what `maxDeployMonths` caps `months` to.
  */
-export const DEPLOY_RENEW_MAX_BYTES = 100 * 1024 ** 3;
+export const deployEpochsForMonths = (months: number, net: SuiNetwork): number =>
+  Math.ceil((months * DEPLOY_MONTH_MS) / WALRUS_EPOCHS[net].durationMs);
 
 /**
- * Crash router package + its 7 sponsorable `router::*` targets, PLUS the one
- * framework helper a fully-manager-funded bet needs (`0x2::coin::zero`): after a
- * cash-out the manager holds the funds and the wallet has no dUSDC coin object, so
- * the bet PTB mints a zero Coin<DUSDC> as its (harmless) 0-value payment. It moves
- * no value — it just lets the bet build without a wallet coin to split.
- *
- * ALWAYS TESTNET (LOCKED #11/#12): Crash stays network-PINNED to testnet (DeepBook
- * Predict is testnet-only). `packageIds()` returns THESE ids for EVERY network, so
- * a suite-wide mainnet flip can never drag Crash along.
+ * The largest whole months of hosting Walrus can fund in ONE store on `net`: the
+ * biggest month count whose `deployEpochsForMonths` still fits within
+ * `WALRUS_MAX_EPOCHS_AHEAD`. DERIVED per network, never hardcoded per env — with
+ * mainnet's 14-day epochs this is 24 months (about two years); with testnet's
+ * 1-day epochs it collapses to 1. One month always fits, so the result is >= 1.
  */
-export const CRASH_TESTNET_IDS = {
-  PACKAGE: CRASH_ROUTER_PACKAGE,
-  TARGETS: {
-    CREATE_MANAGER: `${CRASH_ROUTER_PACKAGE}::router::create_manager`,
-    BET: `${CRASH_ROUTER_PACKAGE}::router::bet`,
-    CASH_OUT: `${CRASH_ROUTER_PACKAGE}::router::cash_out`,
-    CLAIM: `${CRASH_ROUTER_PACKAGE}::router::claim`,
-    WITHDRAW: `${CRASH_ROUTER_PACKAGE}::router::withdraw`,
-    // Sweeps the FULL manager balance to the sender (no amount arg). Bundled into
-    // the cash_out + claim PTBs for an atomic settle -> auto-sweep to wallet, so
-    // payouts never pile up invisibly in the manager.
-    WITHDRAW_ALL: `${CRASH_ROUTER_PACKAGE}::router::withdraw_all`,
-    SUPPLY: `${CRASH_ROUTER_PACKAGE}::router::supply`,
-    REDEEM_LP: `${CRASH_ROUTER_PACKAGE}::router::redeem_lp`,
-    // Sui framework: zero-coin mint for a fully-manager-funded bet (moves no value).
-    // MUST be the NORMALIZED 64-hex `0x2` form (`0x000…002`): Enoki compares the
-    // request's allow-list against the tx's NORMALIZED move-call targets, so a short
-    // `0x2::…` entry never matches and silently breaks sponsorship (the same bug class
-    // proven on the subs `redeem_funds`/`into_balance` helpers, testnet 2026-06-12).
-    COIN_ZERO: `${FRAMEWORK_PKG}::coin::zero`,
-  },
-} as const;
+export const maxDeployMonths = (net: SuiNetwork): number => {
+  let months = 1;
+  while (deployEpochsForMonths(months + 1, net) <= WALRUS_MAX_EPOCHS_AHEAD) months++;
+  return months;
+};
 
 /**
- * Wallet package block — LIVE on testnet. The sponsorable WRITE targets across the
- * four modules (mandate / vault / swap / navi). Read-only accessors are intentionally
- * omitted — they are never signed, only `devInspect`ed. The sponsor allow-lists
- * this exact set (via WALLET_MOVE_TARGETS) so gasless onboarding + agent moves can
- * call ONLY these; every one of them enforces the on-chain cage (budget / scope /
- * expiry / allow-list) so over-listing OUR own functions is safe.
+ * The absolute prepay ceiling in months: the mainnet-derived cap (the largest of
+ * any network). It is the outer bound the pure price function guards against; the
+ * tighter per-network gate is `maxDeployMonths(net)`, applied at the charge door
+ * before a quote. Mainnet today: 24 months ($2.40 public, $4.80 sealed).
  */
-const walletIds = (pkg: string) => ({
-  PACKAGE: pkg,
-  TARGETS: {
-    // mandate — the leash (owner mint/revoke/top-up + the agent gate).
-    MANDATE_CREATE: `${pkg}::mandate::create_mandate`,
-    MANDATE_ISSUE_CAP: `${pkg}::mandate::issue_agent_cap`,
-    MANDATE_REVOKE_CAP: `${pkg}::mandate::revoke_agent_cap`,
-    MANDATE_TOP_UP: `${pkg}::mandate::top_up_budget`,
-    MANDATE_SET_EXPIRY: `${pkg}::mandate::set_expiry`,
-    MANDATE_CONSUME: `${pkg}::mandate::consume_budget`,
-    // vault — single-coin sandbox custody (owner deposit/withdraw + agent deploy).
-    VAULT_CREATE: `${pkg}::vault::create_vault`,
-    VAULT_DEPOSIT: `${pkg}::vault::deposit`,
-    VAULT_WITHDRAW_IDLE: `${pkg}::vault::withdraw_idle`,
-    VAULT_AGENT_CONSUME: `${pkg}::vault::agent_consume`,
-    // swap — DEGEN two-sided DeepBook vault (owner deposits/withdraws + agent swaps).
-    SWAP_CREATE: `${pkg}::swap::create_swap_vault`,
-    SWAP_DEPOSIT_BASE: `${pkg}::swap::deposit_base`,
-    SWAP_DEPOSIT_QUOTE: `${pkg}::swap::deposit_quote`,
-    SWAP_DEPOSIT_DEEP: `${pkg}::swap::deposit_deep`,
-    SWAP_WITHDRAW_BASE: `${pkg}::swap::withdraw_base`,
-    SWAP_WITHDRAW_QUOTE: `${pkg}::swap::withdraw_quote`,
-    SWAP_WITHDRAW_DEEP: `${pkg}::swap::withdraw_deep`,
-    SWAP_AGENT_BASE_TO_QUOTE: `${pkg}::swap::agent_swap_base_to_quote`,
-    SWAP_AGENT_QUOTE_TO_BASE: `${pkg}::swap::agent_swap_quote_to_base`,
-    // navi — SAFE multi-asset lend-as-is vault (owner custody + agent supply/withdraw).
-    NAVI_CREATE: `${pkg}::navi::create_vault`,
-    NAVI_SET_ACCOUNT_CAP: `${pkg}::navi::set_account_cap`,
-    NAVI_TAKE_ACCOUNT_CAP: `${pkg}::navi::take_account_cap`,
-    NAVI_DEPOSIT: `${pkg}::navi::deposit`,
-    NAVI_WITHDRAW_IDLE: `${pkg}::navi::withdraw_idle`,
-    NAVI_AGENT_SUPPLY: `${pkg}::navi::agent_supply`,
-    NAVI_AGENT_WITHDRAW_REQUEST: `${pkg}::navi::agent_withdraw_request`,
-    NAVI_AGENT_ABSORB_WITHDRAWN: `${pkg}::navi::agent_absorb_withdrawn`,
-  } as Record<string, string>,
-});
+export const DEPLOY_MAX_MONTHS = maxDeployMonths('mainnet');
+
+/**
+ * The exact USDC amount (base units) a deploy or extend of `months` costs.
+ * Throws on a non-integer / out-of-range month count — the charge door surfaces
+ * that as a 400, never a mis-priced 402. `months` is bounded by the absolute
+ * ceiling here; the tighter per-network cap is enforced at the route.
+ */
+export const deployPriceUsdc = (months: number, sealed: boolean): number => {
+  if (!Number.isInteger(months) || months < 1 || months > DEPLOY_MAX_MONTHS) {
+    throw new RangeError(`months must be an integer in [1, ${DEPLOY_MAX_MONTHS}]`);
+  }
+  return months * DEPLOY_PRICE_PER_MONTH_USDC * (sealed ? DEPLOY_SEALED_MULTIPLIER : 1);
+};
+
+// ── The upload cap: Walrus storage cost ─────────────────────────────────────
+// A site may not cost more than $0.05/month of Walrus storage (owner law
+// 2026-07-10) — the floor that guarantees ≥50% margin on the largest allowed
+// site. Cost model (Walrus mainnet, USD-pegged): bytes are ~5× erasure-encoded,
+// and EACH blob pays a ~64 MiB metadata floor — a deploy writes TWO blobs (the
+// quilt + the manifest). ≈420 MiB raw passes; today the CF-Worker ~100 MB
+// ingress ceiling binds first, so this guard is the future-proof outer wall.
+
+/** The hard ceiling on a site's monthly Walrus storage cost, in USD. */
+export const MAX_SITE_WALRUS_USD_PER_MONTH = 0.05;
+
+/** Walrus storage price: USD per GiB of ENCODED bytes per month (USD-pegged). */
+export const WALRUS_USD_PER_GIB_ENCODED_MONTH = 0.023;
+
+/** Erasure-coding expansion: encoded size ≈ raw × this. */
+export const WALRUS_ENCODING_FACTOR = 5;
+
+/** Per-blob metadata floor, bytes (~64 MiB — dominates small blobs). */
+export const WALRUS_BLOB_METADATA_BYTES = 64 * 1024 ** 2;
+
+/** A deploy writes this many Walrus blobs (site quilt + manifest). */
+export const DEPLOY_BLOB_COUNT = 2;
+
+/** The estimated monthly Walrus storage cost (USD) of a site of `rawBytes`. */
+export const walrusMonthlyCostUsd = (rawBytes: number): number =>
+  ((rawBytes * WALRUS_ENCODING_FACTOR + DEPLOY_BLOB_COUNT * WALRUS_BLOB_METADATA_BYTES) /
+    1024 ** 3) *
+  WALRUS_USD_PER_GIB_ENCODED_MONTH;
+
+/** True when a bundle of `rawBytes` is within the $0.05/month storage-cost cap. */
+export const withinUploadCap = (rawBytes: number): boolean =>
+  walrusMonthlyCostUsd(rawBytes) <= MAX_SITE_WALRUS_USD_PER_MONTH;
 
 /**
  * Deploy package block (`deploy_sui`) — PUBLISHED on testnet (real ids in the
- * DEPLOY_PACKAGE / VERSION_OBJECT / DOMAIN_REGISTRY_OBJECT consts above; mainnet is
- * a republish — '0x0' placeholders until then). The three write targets are signed
- * by the backend's OWN deploy service wallet (it pays its own gas) — NOT
- * Enoki-sponsored — so they are intentionally absent from the sponsor allow-list
- * union; DEPLOY_MOVE_TARGETS exports them for the worker + future use.
- * Detail: apps/deploy/SPEC.md.
+ * DEPLOY_PACKAGE / VERSION_OBJECT / DOMAIN_REGISTRY_OBJECT consts above) AND on
+ * mainnet (published 2026-07-12 — real ids in NETWORK_ADDRESSES.mainnet below).
+ * The write targets are signed
+ * directly by the deploy worker's OWN deploy service wallet (it pays its own gas) —
+ * there is no sponsor in this path; DEPLOY_MOVE_TARGETS exports them for future use.
+ * Detail: services/deploy-worker/README.md.
  */
 const deployIds = (ids: {
   pkg: string;
@@ -492,128 +397,33 @@ const deployIds = (ids: {
   SITE_DIGEST_REGISTRY_OBJECT: ids.siteDigestRegistry,
   /** The owned `DeployerCap` (deploy service wallet): `create_site`'s mint authority —
    *  the FIRST moveCall arg. Only the holder can mint a Site, so an attacker cannot
-   *  forge one (free hosting / a renewer-draining Site). Mainnet '0x0' until transferred
-   *  to the prod service wallet. */
+   *  forge one (free hosting / a renewer-draining Site). Mainnet cap is minted to the
+   *  publisher/operator wallet, PENDING transfer to the prod service wallet. */
   DEPLOYER_CAP_OBJECT: ids.deployerCap,
   TARGETS: {
     CREATE_SITE: `${ids.pkg}::site::create_site`,
+    EXTEND_SITE: `${ids.pkg}::site::extend_site`,
     LINK_DOMAIN: `${ids.pkg}::domain_registry::link_domain`,
     UNLINK_DOMAIN: `${ids.pkg}::domain_registry::unlink_domain`,
+    // Seal allowlist (private sites). create is worker-signed (DeployerCap);
+    // add/remove are OWNER-signed (AllowlistCap) from the dashboard;
+    // seal_approve is DRY-RUN by Seal key servers, never broadcast.
+    ALLOWLIST_CREATE: `${ids.pkg}::allowlist::create_for_owner`,
+    ALLOWLIST_ADD: `${ids.pkg}::allowlist::add`,
+    ALLOWLIST_REMOVE: `${ids.pkg}::allowlist::remove`,
+    SEAL_APPROVE: `${ids.pkg}::allowlist::seal_approve`,
   },
 });
 
 /**
- * Subscriptions package block (`subs::subscription`) — the standalone Party-object
- * subscription module (named address `subs`, module `subscription`). PUBLISHED on
- * testnet (real ids in SUBS_PACKAGE / SUBS_CONFIG_OBJECT above; mainnet is a
- * republish — '0x0' until then). The three write targets are USER-SIGNED +
- * Enoki-sponsored (the wallet signs create/cancel locally; the relayer triggers
- * user-pre-authorized renewals), so the sponsor allow-lists this exact set via
- * SUBS_MOVE_TARGETS.
- *   create — the user mints a subscription (fixed payee + per-period cap + period)
- *   renew  — a sponsored, user-pre-authorized recurring debit (relayer-triggered)
- *   cancel — the user kills the subscription
- * Plus the Sui framework helpers the `CoinWithBalance` intent injects under
- * sponsorship (`redeem_funds` / `into_balance`) — the sponsor allow-list must
- * accept them or the sponsored renewal PTB is rejected. The function names MUST
- * match the published module verbatim — a typo silently breaks sponsorship.
- */
-const subsIds = (ids: { pkg: string; config: string; version: string }) => ({
-  PACKAGE: ids.pkg,
-  CONFIG_OBJECT: ids.config,
-  /** The shared `Version` gate every create/renew/cancel passes first (assert_latest). */
-  VERSION_OBJECT: ids.version,
-  TARGETS: {
-    CREATE: `${ids.pkg}::subscription::create`,
-    RENEW: `${ids.pkg}::subscription::renew`,
-    CANCEL: `${ids.pkg}::subscription::cancel`,
-    // Sui framework: the helpers the SDK's `tx.balance({ type, balance })` intent
-    // injects to materialize the period's `Balance<USDC>` from the sender's funds
-    // under sponsorship — `balance::redeem_funds` draws it from the Address Balance,
-    // and `coin::into_balance` (+ `balance::redeem_funds` again) covers the
-    // split-from-Coin-objects path. The sponsor allow-list must accept these or the
-    // sponsored create/renew PTB is rejected. MUST be the NORMALIZED 64-hex `0x2`
-    // form (`0x000…002`): Enoki compares the request's allow-list against the tx's
-    // NORMALIZED targets, so a short `0x2::…` entry never matches and silently
-    // breaks sponsorship (proven on testnet 2026-06-12 — short form → Enoki 400
-    // "not part of an allow-listed move call target"; full form → accepted).
-    BALANCE_REDEEM_FUNDS: `${FRAMEWORK_PKG}::balance::redeem_funds`,
-    COIN_INTO_BALANCE: `${FRAMEWORK_PKG}::coin::into_balance`,
-  } as Record<string, string>,
-});
-
-/**
- * Trace package block (`trace::trace`). Minimal — just the package + the ONE
- * sponsored write target `anchor` (the on-chain history commitment). `seal_approve`
- * is NOT a target: Seal's key servers DRY-RUN it, it is never broadcast or sponsored.
- * `anchor` moves no coins, so no `CoinWithBalance` framework helpers are needed.
- */
-const traceIds = (ids: { pkg: string }) => ({
-  PACKAGE: ids.pkg,
-  TARGETS: {
-    ANCHOR: `${ids.pkg}::trace::anchor`,
-  } as Record<string, string>,
-});
-
-/**
- * Ad-slot auction package block (`auction::auction`) — PUBLISHED on testnet (real ids
- * above; mainnet is a republish — '0x0' until then). `SLOTS` maps each slot key to its
- * shared `AdSlot` object id (read live for the current price/holder/creative). The ONE
- * write target `bid` is USER-SIGNED + Enoki-sponsored, so the sponsor allow-lists this
- * set via AUCTION_MOVE_TARGETS — PLUS the two Sui framework helpers the `CoinWithBalance`
- * intent injects to materialize the bid's `Balance<USDC>` under sponsorship (same pair
- * as subs; MUST be the NORMALIZED 64-hex `0x2` form or Enoki silently rejects).
- */
-const auctionIds = (ids: {
-  pkg: string;
-  pkgLatest: string;
-  config: string;
-  version: string;
-  slots: Record<string, string>;
-}) => ({
-  // PACKAGE = the ORIGINAL publish id: the AdSlot/AuctionConfig TYPE origin + AUCTION_PUBLISHED
-  // gate. (Fresh republish, so pkg === pkgLatest today.)
-  PACKAGE: ids.pkg,
-  CONFIG_OBJECT: ids.config,
-  /** The shared `Version` gate every bid/create_slot passes (assert_latest). */
-  VERSION_OBJECT: ids.version,
-  SLOTS: ids.slots,
-  TARGETS: {
-    // `bid<T>(version, slot, config, payment, clock, ctx)` — USER-SIGNED + Enoki-sponsored, so
-    // the sponsor allow-lists this set. No `update_creative` (ad content is the BusinessProfile).
-    BID: `${ids.pkgLatest}::auction::bid`,
-    BALANCE_REDEEM_FUNDS: `${FRAMEWORK_PKG}::balance::redeem_funds`,
-    COIN_INTO_BALANCE: `${FRAMEWORK_PKG}::coin::into_balance`,
-  } as Record<string, string>,
-});
-
-/**
- * Business Profile package block (`profile::profile`). `create_profile` + `edit_profile` each
- * push a $0.10 `Balance<USDC>` → treasury; USER-SIGNED + Enoki-sponsorable, so the sponsor
- * allow-lists PROFILE_MOVE_TARGETS + the CoinWithBalance framework helpers (same `0x2` form).
- */
-const profileIds = (ids: { pkg: string; config: string; version: string }) => ({
-  PACKAGE: ids.pkg,
-  CONFIG_OBJECT: ids.config,
-  VERSION_OBJECT: ids.version,
-  TARGETS: {
-    CREATE_PROFILE: `${ids.pkg}::profile::create_profile`,
-    EDIT_PROFILE: `${ids.pkg}::profile::edit_profile`,
-    BALANCE_REDEEM_FUNDS: `${FRAMEWORK_PKG}::balance::redeem_funds`,
-    COIN_INTO_BALANCE: `${FRAMEWORK_PKG}::coin::into_balance`,
-  } as Record<string, string>,
-});
-
-/**
- * Per-network ADDRESS SLOTS for the network-keyed blocks. Mainnet is ALL '0x0'
- * placeholders until the mainnet publish/republish (LOCKED #12 — `deploy_sui` +
- * `subs` mainnet are republishes). CRASH is deliberately ABSENT here — it is
- * network-pinned (CRASH_TESTNET_IDS).
+ * Per-network ADDRESS SLOTS for the deploy block. BOTH networks are live now:
+ * testnet (v4, publish digest 4LLhhe1g…) and mainnet (published 2026-07-12,
+ * publish tx 93E1S1Gb…) — see the per-network entries below (LOCKED #12 —
+ * `deploy_sui` mainnet is a republish).
  */
 const NETWORK_ADDRESSES: Record<
   SuiNetwork,
   {
-    wallet: string;
     deploy: {
       pkg: string;
       version: string;
@@ -621,14 +431,9 @@ const NETWORK_ADDRESSES: Record<
       siteDigestRegistry: string;
       deployerCap: string;
     };
-    subs: { pkg: string; config: string; version: string };
-    auction: { pkg: string; pkgLatest: string; config: string; version: string; slots: Record<string, string> };
-    profile: { pkg: string; config: string; version: string };
-    trace: { pkg: string };
   }
 > = {
   testnet: {
-    wallet: WALLET_PACKAGE,
     deploy: {
       pkg: DEPLOY_PACKAGE,
       version: DEPLOY_VERSION_OBJECT,
@@ -636,46 +441,31 @@ const NETWORK_ADDRESSES: Record<
       siteDigestRegistry: DEPLOY_SITE_DIGEST_REGISTRY_OBJECT,
       deployerCap: DEPLOY_DEPLOYER_CAP_OBJECT,
     },
-    subs: { pkg: SUBS_PACKAGE, config: SUBS_CONFIG_OBJECT, version: SUBS_VERSION_OBJECT },
-    auction: {
-      pkg: AUCTION_PACKAGE,
-      pkgLatest: AUCTION_PACKAGE_LATEST,
-      config: AUCTION_CONFIG_OBJECT,
-      version: AUCTION_VERSION_OBJECT,
-      slots: AUCTION_SLOTS,
-    },
-    profile: { pkg: PROFILE_PACKAGE, config: PROFILE_CONFIG_OBJECT, version: PROFILE_VERSION_OBJECT },
-    trace: { pkg: TRACE_PACKAGE },
   },
+  // MAINNET deploy_sui — PUBLISHED 2026-07-12 from the operator page (publish tx
+  // 93E1S1GbB3k2cDPcjp2rYS2bX3aRuK1ZFRa6LCZZ4cjt, publisher/operator wallet
+  // 0x9036f4be…). `version`/`registry`/`siteDigestRegistry` are the SHARED objects
+  // from the modules' init; `deployerCap` is the owned mint authority, minted to the
+  // publisher 0x9036f4be… — PENDING transfer to the prod deploy service wallet
+  // (custody == the mint trust root). version::AdminCap 0x69a17d3f… + package::UpgradeCap
+  // 0xe5d9873b… also stay on the publisher (wallet-held, not wired into shared).
   mainnet: {
-    wallet: '0x0',
     deploy: {
-      pkg: '0x0',
-      version: '0x0',
-      registry: '0x0',
-      siteDigestRegistry: '0x0',
-      deployerCap: '0x0',
+      pkg: '0xec2dcd65271127019351678ddd05287176a0b9b7fc59ef6ceef34fdbc36e87db',
+      version: '0xfc39ef5748bccdbbc445054940ff99bb448cf47497da71b047c1a5530bf56b4e',
+      registry: '0x28d4557f9c55cdc8bb1afb98092ecfba505d8f23b0eae8a067473c2cba7a972b',
+      siteDigestRegistry: '0xc95ac121e1ebc7727022c944ef573180a044360ff20208eca525dc36ea0b0ce5',
+      deployerCap: '0x235e9170233b6aaa022df9cd336b12f3de5d65ac6bbf88b42ff32f56b68df59c',
     },
-    subs: { pkg: '0x0', config: '0x0', version: '0x0' },
-    auction: { pkg: '0x0', pkgLatest: '0x0', config: '0x0', version: '0x0', slots: {} },
-    profile: { pkg: '0x0', config: '0x0', version: '0x0' },
-    trace: { pkg: '0x0' },
   },
 };
 
 /**
- * The network-keyed package-id table. WALLET / DEPLOY / SUBS resolve from
- * NETWORK_ADDRESSES[network]; CRASH is ALWAYS the testnet ids (LOCKED #11/#12 —
- * Crash is network-pinned, the mainnet flip never drags it along).
+ * The network-keyed package-id table. DEPLOY resolves from
+ * NETWORK_ADDRESSES[network] (mainnet is a republish — '0x0' until then).
  */
 export const packageIds = (network: SuiNetwork) => ({
-  CRASH: CRASH_TESTNET_IDS,
-  WALLET: walletIds(NETWORK_ADDRESSES[network].wallet),
   DEPLOY: deployIds(NETWORK_ADDRESSES[network].deploy),
-  SUBS: subsIds(NETWORK_ADDRESSES[network].subs),
-  AUCTION: auctionIds(NETWORK_ADDRESSES[network].auction),
-  PROFILE: profileIds(NETWORK_ADDRESSES[network].profile),
-  TRACE: traceIds(NETWORK_ADDRESSES[network].trace),
 });
 
 /**
@@ -685,175 +475,23 @@ export const packageIds = (network: SuiNetwork) => ({
  */
 export const PACKAGE_IDS = packageIds('testnet');
 
-/** Flat list of the Crash router targets, in declaration order. */
-export const CRASH_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.CRASH.TARGETS);
-
 /**
- * Flat list of the `subs` write targets (create / renew / cancel) PLUS the Sui
- * framework helpers the `CoinWithBalance` intent injects under sponsorship — the
- * sponsor allow-lists this exact set so the gasless wallet/relayer can call ONLY
- * the subscription surface. The sponsor MUST union these in only when SUBS_PUBLISHED
- * is true, else a `0x0::subs::*` target poisons the allow-list.
- */
-export const SUBS_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.SUBS.TARGETS);
-
-/** True once the `subs` package has been published (its id is no longer the 0x0 placeholder). */
-export const SUBS_PUBLISHED: boolean = PACKAGE_IDS.SUBS.PACKAGE !== '0x0';
-
-/**
- * The `trace` write target (`anchor`) the sponsor allow-lists so the wallet's
- * gas-sponsored history anchor can be called. Just the one target — `anchor` moves
- * no coins (no `CoinWithBalance` helpers), and `seal_approve` is dry-run (never
- * sponsored). Union in ONLY when TRACE_PUBLISHED, else `0x0::trace::anchor` poisons
- * the allow-list.
- */
-export const TRACE_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.TRACE.TARGETS);
-
-/** True once the `trace` package has been published (its id is no longer 0x0). */
-export const TRACE_PUBLISHED: boolean = PACKAGE_IDS.TRACE.PACKAGE !== '0x0';
-
-/**
- * Flat list of the `auction` write target (`bid`) PLUS the Sui framework helpers the
- * `CoinWithBalance` intent injects under sponsorship — the sponsor allow-lists this set
- * so a gasless ad-slot bid can call ONLY the auction surface. The sponsor MUST union
- * these in only when AUCTION_PUBLISHED is true, else a `0x0::auction::*` target poisons
- * the allow-list.
- */
-export const AUCTION_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.AUCTION.TARGETS);
-
-/** True once the `auction` package has been published (its id is no longer the 0x0 placeholder). */
-export const AUCTION_PUBLISHED: boolean = PACKAGE_IDS.AUCTION.PACKAGE !== '0x0';
-
-/** Flat list of the `profile` write targets (create/edit) + the CoinWithBalance framework
- * helpers — the sponsor allow-lists this set so a gasless profile mint/edit calls ONLY the
- * profile surface. Union in only when PROFILE_PUBLISHED. */
-export const PROFILE_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.PROFILE.TARGETS);
-
-/** True once the `profile` package is published (id no longer the 0x0 placeholder). */
-export const PROFILE_PUBLISHED: boolean = PACKAGE_IDS.PROFILE.PACKAGE !== '0x0';
-
-/** Flat list of the wallet targets — the wallet pkg is LIVE on testnet (mandate/vault/swap/navi). */
-export const WALLET_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.WALLET.TARGETS);
-
-/**
- * Flat list of the deploy targets (create_site / link_domain / unlink_domain).
- * Exported for future use only — these are signed by the backend's own deploy
- * service wallet (pays its own gas), so they are deliberately NOT added to the
- * sponsor's allow-list union. (Placeholder package id until move-deploy ships.)
+ * Flat list of the deploy targets (create_site / link_domain / unlink_domain / …).
+ * Exported for future use only — these are signed directly by the deploy worker's
+ * own service wallet (it pays its own gas), so there is no sponsor allow-list to
+ * add them to.
  */
 export const DEPLOY_MOVE_TARGETS: string[] = Object.values(PACKAGE_IDS.DEPLOY.TARGETS);
 
 // ---------------------------------------------------------------------------
-// Sponsor wire types — the request/response contract between the apps and the
-// unified backend's sponsor module (POST /sponsor, POST /execute).
-// ---------------------------------------------------------------------------
-
-/** POST /sponsor request body. */
-export interface SponsorRequest {
-  network: SuiNetwork;
-  /** base64 of `tx.build({ onlyTransactionKind: true })`. */
-  transactionKindBytes: string;
-  /** zkLogin sender address (0x + 64 hex). */
-  sender: string;
-}
-
-/** POST /sponsor response body. */
-export interface SponsorResponse {
-  /** base64 sponsored tx bytes the client signs with its zkLogin keypair. */
-  bytes: string;
-  /** sponsored tx digest, echoed back to /execute. */
-  digest: string;
-}
-
-/** POST /execute request body. */
-export interface ExecuteRequest {
-  /** digest returned by /sponsor. */
-  digest: string;
-  /** base64 user signature over the sponsored `bytes`. */
-  signature: string;
-}
-
-/** POST /execute response body. */
-export interface ExecuteResponse {
-  /** executed tx digest. */
-  digest: string;
-}
-
-// ---------------------------------------------------------------------------
-// Handle wire types — the request/response contract between the apps and the
-// unified backend's handle module (GET /handle/available, GET /handle/me,
-// POST /handle/claim). Handles are `<name>@suize` (= `<name>.suize.sui` leaf
-// subnames). Issuance + lookup are FULLY ON-CHAIN via the Sui SDK (no DB): the
-// SuiNS leaf record is the availability source, and the user-signed reverse record
-// (setDefault at claim) makes /me resolve. Issuance is self-custody (Path B): the backend custodies the
-// suize.sui parent NFT + a separate issuer key, mints leaf subnames via
-// @mysten/suins, and sponsors gas through the existing Enoki sponsor.
-// ---------------------------------------------------------------------------
-
-/**
- * GET /handle/available?name=<name> response body.
- * `available=false` carries an optional human-readable `reason` (taken,
- * too short, bad charset, blocklisted, reserved) for the onboarding UI.
- */
-export interface HandleAvailableResponse {
-  available: boolean;
-  reason?: string;
-}
-
-/**
- * GET /handle/me response body (auth: verified zkLogin address).
- * `handle` is the claimed `<name>@suize` handle, or null if none — this null
- * check drives the onboarding gate. `suggestedName` is an optional seed for the
- * name step (e.g. the Google email local-part) when no handle exists yet.
- */
-export interface HandleMeResponse {
-  handle: string | null;
-  suggestedName?: string;
-}
-
-/**
- * POST /handle/claim request body.
- * `name` is the bare label (lowercase [a-z0-9-], 3–20 chars); `address` is the
- * zkLogin address to target — the backend authorizes `address == session`.
- */
-export interface HandleClaimRequest {
-  name: string;
-  address: string;
-}
-
-/**
- * POST /handle/claim response body.
- * `handle` is the issued `<name>@suize` handle; `txDigest` is the leaf-subname
- * mint transaction digest (sponsored).
- *
- * `setDefaultBytes`/`setDefaultDigest` carry the SPONSORED `set_reverse_lookup`
- * (setDefault) transaction the WALLET must sign with the user's zkLogin signer
- * and execute via the existing `executeRequest` path. A leaf subname does NOT
- * auto-set a reverse record, so without this step `resolveNameServiceNames`
- * returns nothing — the claim is only complete once the wallet lands these.
- * Both are present whenever the leaf was minted/owned by this address; they are
- * optional only for forward-compat and the (never-hit) configured-but-no-record
- * path. The sender of these bytes is the VERIFIED USER (Enoki sponsors gas), so
- * `set_reverse_lookup` binds the reverse record to the user's address.
- */
-export interface HandleClaimResponse {
-  handle: string;
-  txDigest: string;
-  /** Base64 sponsored `set_reverse_lookup` tx bytes — the wallet signs these verbatim. */
-  setDefaultBytes?: string;
-  /** Digest of the sponsored setDefault tx — passed to `executeRequest` after signing. */
-  setDefaultDigest?: string;
-}
-
-// ---------------------------------------------------------------------------
 // Deploy wire types — the request/response contract between agents/dashboard and
-// the unified backend's deploy module (POST /deploy, GET /sites, GET /sites/:id,
+// the deploy worker's charge face (POST /deploy, GET /sites, GET /sites/:id,
 // POST /domains, DELETE /domains/:domain). Sites are deployed to Walrus + a fresh
-// on-chain `Site` object by the backend's OWN deploy service wallet (it pays SUI +
+// on-chain `Site` object by the worker's OWN deploy service wallet (it pays SUI +
 // WAL gas). POST /deploy is AUTHENTICATED BY THE PAYMENT ITSELF — the X-PAYMENT header
 // carries a signed gasless payment, and the on-chain `owner` is ALWAYS the recovered
 // payer (whoever pays, owns). There is no separate deploy-auth nonce/signature and no
-// anonymous/service-owned deploy. See apps/deploy/SPEC.md.
+// anonymous/service-owned deploy. See services/deploy-worker/README.md.
 // ---------------------------------------------------------------------------
 
 /**
@@ -873,14 +511,15 @@ export interface DeployResponse {
 
 // ---------------------------------------------------------------------------
 // CHARGE↔Deploy join — the payment-gated deploy (x402 V2 'exact', first-party,
-// 2026-06-12). A deploy is a one-off $0.50 gasless settlement on the rail BEFORE the
-// Walrus upload + Site mint. There are NO Suize-specific wire types here anymore: the
-// wire is vanilla x402 V2 (the `PaymentRequired` body + the `X-PAYMENT` header carrying
-// the b64 `PaymentPayload`), so the dashboard + agents import the shapes from
+// 2026-06-12). A deploy is a gasless settlement on the rail BEFORE the Walrus upload
+// + Site mint, priced per prepaid month at `deployPriceUsdc` (see the pricing block
+// above). There are NO Suize-specific wire types here anymore: the wire is vanilla
+// x402 V2 (the `PaymentRequired` body + the `X-PAYMENT` header carrying the b64
+// `PaymentPayload`), so the dashboard + agents import the shapes from
 // `@suize/pay` / `@suize/x402`, NOT from here. The old sub-account convenience door
 // (deploy/quote · deploy/charge · deploy/execute + their request/response types) is
 // DELETED — the payer pays directly from its Address Balance, keyless-settled. See
-// `services/backend/src/deploy/payment.ts` + `apps/deploy/SPEC.md` §2.
+// `services/deploy-worker/src/payment.ts` + `services/deploy-worker/README.md`.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -890,16 +529,17 @@ export interface DeployResponse {
 // the POST /pay/build + /pay/submit sponsored-door types are DELETED. Verification
 // is now the vanilla x402 POST /verify → `VerifyResponse` and POST /settle →
 // `SettleResponse` (both exported from `@suize/x402` / `@suize/pay`, NOT here —
-// they ride the standard wire). Payments settle KEYLESS over gRPC (no Enoki
-// sponsor of the payer leg), so there is no sponsored build/submit pair. Only the
-// optional `/checkout` URL-formatter wire (below) is Suize-shaped + lives here.
+// they ride the standard wire). Payments settle KEYLESS over gRPC (no sponsor
+// signs the payer leg), so there is no sponsored build/submit pair. The domain-op
+// wire types below (DomainLinkRequest / DomainChallengeResponse / …) are the only
+// Suize-shaped wire left in this section.
 // ---------------------------------------------------------------------------
 
 /**
  * GET /sites/:id (and the entries of GET /sites) response body.
- * `owner` is the cryptographically-recovered deployer address (the signer of the
- * deploy auth nonce) — always a real, authenticated owner, never the service wallet.
- * `domains` are the linked custom domains.
+ * `owner` is the cryptographically-recovered payer address (recovered from the
+ * settled `X-PAYMENT` signature) — always a real, authenticated owner, never the
+ * service wallet. `domains` are the linked custom domains.
  */
 export interface SiteInfo {
   siteId: string;
@@ -917,23 +557,14 @@ export interface SiteInfo {
   /** The wall-clock ms the storage lapses at (epochToMs(storageEndEpoch)). Absent
    * when the end epoch is unknown. Drives the dashboard's "expires <date>" copy. */
   expiresAtMs?: number;
-  /** True when the site has an ACTIVE Deploy subscription (read through the merchant
-   * SDK — suizeSubs.findByRef(siteId)). Unlocks custom domains + auto-renews storage.
-   * Absent on the list endpoint; absent when the subs module is unpublished. */
-  subscribed?: boolean;
-  /** Client-derived, deploy dashboard ONLY: true when this site's `owner` is the
-   * signed-in user's agent SUB-ACCOUNT (a 1-of-2 multisig whose committee includes
-   * the user's main address) rather than the main address itself. Never set by the
-   * backend/wire — the dashboard tags it after an ON-CHAIN committee check (the
-   * signature IS the link; no stored state). Drives the "via agent" card chip. */
-  viaAgent?: boolean;
 }
 
 /**
  * POST /domains?verify=0 request body — ISSUE a link challenge for a site. This
- * step writes nothing on-chain and is intentionally unauthenticated (it only
- * mints DNS/nonce material). The response (DomainChallengeResponse) carries a
- * fresh single-use `nonce` the caller must SIGN for the verify step.
+ * step writes nothing on-chain and is intentionally unauthenticated (it only mints
+ * the DNS TXT/CNAME challenge material). The response (DomainChallengeResponse)
+ * carries the TXT record to publish; the verify step below signs a fresh
+ * client-picked timestamp, not a server-issued nonce (STATELESS, no nonce store).
  */
 export interface DomainLinkRequest {
   siteId: string;
@@ -942,13 +573,13 @@ export interface DomainLinkRequest {
 
 /**
  * POST /domains?verify=1 request body — VERIFY + link on-chain. Authority is a
- * SERVER-VERIFIED zkLogin personal-message signature (op-bound + nonce-fresh):
- * the client signs `buildDeployLinkAuthMessage(domain, siteId, nonce)` with its
- * zkLogin signer; the backend reconstructs that exact message, recovers the
+ * SERVER-VERIFIED zkLogin personal-message signature (op-bound + timestamp-fresh):
+ * the client signs `buildDeployLinkAuthMessage(domain, siteId, ts)` with its
+ * zkLogin signer; the worker reconstructs that exact message, recovers the
  * signer address via `verifyPersonalMessageSignature`, and requires it to equal
  * `Site.owner`. There is NO client-claimed `requester` — the recovered address
  * IS the requester. `ts` is the client ms-epoch timestamp the signed message binds
- * (the backend accepts it within a freshness window — STATELESS, no nonce store);
+ * (the worker accepts it within a freshness window — STATELESS, no nonce store);
  * `signature` is base64 of the personal-message sig.
  */
 export interface DomainLinkVerifyRequest {
@@ -971,9 +602,9 @@ export interface DomainUnlinkRequest {
 
 // NOTE (x402 V2 pivot 2026-06-12): the POST/DELETE /deploy/renewal join + its wire
 // types (DeployRenewalLinkRequest / …UnlinkRequest / …Response) are DELETED. Storage
-// auto-renewal now rides the standalone `subs` module (the wallet signs
-// `subscription::create` with `ref` = the site id; the backend's extender keeps the
-// site's Walrus storage extended). There is no subscription↔site registry to link.
+// renewal is now a direct prepaid-months purchase: anyone pays an `extend_site`
+// x402 charge for more months at the flat per-month rate (see `deployPriceUsdc` /
+// `deployEpochsForMonths` above). There is no subscription↔site registry to link.
 
 // ---------------------------------------------------------------------------
 // Deploy domain-op AUTH MESSAGE BUILDERS — the EXACT personal-message strings the
@@ -1006,10 +637,22 @@ export const buildDeployUnlinkAuthMessage = (
   ts: number,
 ): string => `Suize Deploy\nunlink ${domain}\n@${ts}`;
 
+/** Personal message for RE-POINTING `domain` onto `newSiteId` — moving a custom
+ * domain to ANOTHER site the same owner controls, WITHOUT re-paying the yearly
+ * reservation. Bound to a client `ts` (ms epoch). The backend recovers the signer
+ * and requires it == the owner of BOTH the domain's currently-linked site (proves
+ * domain control) AND `newSiteId` (you can only move onto a site you own). Free —
+ * the reservation is already paid, so there is no payment to recover from. */
+export const buildDeployRepointAuthMessage = (
+  domain: string,
+  newSiteId: string,
+  ts: number,
+): string => `Suize Deploy\nrepoint ${domain} -> ${newSiteId}\n@${ts}`;
+
 // NOTE (x402 V2 pivot 2026-06-12): the renewal-join auth-message builders
 // (buildDeployRenewalLink/UnlinkAuthMessage) are DELETED — there is no
-// subscription↔site registry to link/unlink anymore (storage auto-renewal rides the
-// standalone `subs` module; the join is the subscription's on-chain `ref` = the site id).
+// subscription↔site registry to link/unlink anymore (storage renewal is a direct
+// prepaid `extend_site` purchase, not a subscription).
 
 /**
  * SSL-provisioning status for a linked custom domain (Cloudflare-for-SaaS

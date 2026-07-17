@@ -1,25 +1,29 @@
 // Stdio smoke test — spawns the REAL binary and speaks newline-delimited
-// JSON-RPC 2.0 over its stdin/stdout, exactly like an MCP client would.
-// NO fake session, NO key fallback: SUIZE_SESSION_PATH points into an empty
-// temp dir, so the session-gated tools must answer "authenticate first".
+// JSON-RPC 2.0 over its stdin/stdout, exactly like an MCP client would. No key
+// is set, so a tool that needs to sign fails fast with the key-setup guidance
+// (network-free: list_sites reaches the signer before any fetch).
 import { afterAll, beforeAll, expect, test } from 'bun:test'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const pkgDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 let child: ChildProcessWithoutNullStreams
-let tmp: string
 const pending = new Map<number, (msg: Record<string, any>) => void>()
 let nextId = 1
 
 beforeAll(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'suize-mcp-test-'))
+  // Explicitly strip any signing key from the inherited env so the no-key gate
+  // is what's under test. Point the Sui CLI signer at a binary that does not
+  // exist so the fallback fails fast and hermetically (no `sui`, no network) with
+  // the install guidance, regardless of the host's own keystore.
+  const env = { ...process.env }
+  delete env.SUIZE_KEY
+  delete env.SUIZE_KEY_FILE
+  env.SUIZE_SUI_BIN = join(pkgDir, 'test', '__no_such_sui_binary__')
   child = spawn('bun', [join(pkgDir, 'src', 'index.ts')], {
-    env: { ...process.env, SUIZE_SESSION_PATH: join(tmp, 'session.json') },
+    env,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
   let buffer = ''
@@ -41,7 +45,6 @@ beforeAll(() => {
 
 afterAll(() => {
   child?.kill()
-  rmSync(tmp, { recursive: true, force: true })
 })
 
 const send = (msg: object): void => {
@@ -77,49 +80,31 @@ test('initialize negotiates the protocol and advertises tools', async () => {
   send({ jsonrpc: '2.0', method: 'notifications/initialized' })
 })
 
-test('tools/list exposes the full tool set with sane schemas', async () => {
+test('tools/list exposes the deploy tool set with sane schemas', async () => {
   const res = await request('tools/list')
   expect(res.error).toBeUndefined()
   const tools = res.result.tools as Array<{ name: string; description: string; inputSchema: any }>
   const names = tools.map(t => t.name)
-  expect(names).toEqual([
-    'authenticate',
-    'suize_pay',
-    'suize_balance',
-    'suize_receipts',
-    'suize_subscriptions',
-    'suize_kill',
-  ])
-  // descriptions ARE the docs the assistant reads — keep them present and drastically
-  // simple: no custody essay, no "funds a new address" inducement (owner law — a tool
-  // description must not provoke the agent into deeper reasoning).
+  expect(names).toEqual(['deploy_site', 'list_sites', 'extend_site', 'site_status'])
   for (const tool of tools) {
     expect(tool.description.length).toBeGreaterThan(0)
-    expect(tool.description.toLowerCase()).not.toContain('fund')
-    // every tool advertises an object input schema
     expect(tool.inputSchema.type).toBe('object')
   }
-  // the MCP is wallet-only — no Deploy-product tools leak in
-  expect(names).not.toContain('suize_deploy')
-  expect(names).not.toContain('suize_extend')
-  expect(names).not.toContain('suize_subscribe')
+  // the wallet-era tools are gone
+  expect(names).not.toContain('suize_pay')
+  expect(names).not.toContain('authenticate')
 })
 
-test('every session-gated tool returns the "authenticate first" error', async () => {
-  // suize_pay needs a url or payTo to get past arg validation into the session gate.
-  const calls: Array<[string, Record<string, unknown>]> = [
-    ['suize_pay', { payTo: '0x' + '1'.repeat(64), amount: '0.50' }],
-    ['suize_balance', {}],
-    ['suize_receipts', {}],
-    ['suize_subscriptions', {}],
-    ['suize_kill', {}],
-  ]
-  for (const [name, args] of calls) {
-    const res = await request('tools/call', { name, arguments: args })
-    expect(res.error).toBeUndefined()
-    expect(res.result.isError).toBe(true)
-    expect(res.result.content[0].text).toContain('run the authenticate tool first')
-  }
+test('a signing tool with no key fails fast with setup guidance (network-free)', async () => {
+  // list_sites reaches the signer (address()) before any network call. With no
+  // SUIZE_KEY and the CLI binary pointed at a missing path, it must return the
+  // actionable Sui-CLI setup guidance, not hang or crash.
+  const res = await request('tools/call', { name: 'list_sites', arguments: {} })
+  expect(res.error).toBeUndefined()
+  expect(res.result.isError).toBe(true)
+  const text = res.result.content[0].text as string
+  expect(text).toContain('Sui CLI')
+  expect(text).toContain('SUIZE_KEY_FILE')
 })
 
 test('unknown tool → invalid params; unknown method → method not found; ping pongs', async () => {

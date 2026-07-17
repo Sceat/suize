@@ -1,0 +1,14 @@
+# Local-dev overrides for `wrangler dev` — copy to .dev.vars (gitignored).
+# Everything in wrangler.toml [vars] applies too; these ADD the secrets and
+# point the facilitator at a local instance.
+
+# The service wallet (signs create_site / extend_site / allowlist create; pays
+# SUI gas + WAL top-ups). Export a funded TESTNET key, e.g.:
+#   sui keytool export --key-identity suize-deploy
+DEPLOY_WALLET_KEY = "suiprivkey1..."
+
+# A local facilitator (services/facilitator: `wrangler dev --port 8801`).
+FACILITATOR_URL = "http://127.0.0.1:8801"
+
+# Optional — Cloudflare-for-SaaS auto-SSL for custom domains.
+# CF_API_TOKEN = ""
