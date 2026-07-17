@@ -92,3 +92,6 @@ screenshots/
 
 # ── Owner strategy docs — never in the public tree ───────────────────
 marketing/
+
+# Personal wallet tool, not part of Suize
+apps/wallet/
