@@ -15,7 +15,7 @@ Bun workspace monorepo: `apps/* packages/* services/*`.
 | `services/facilitator`   | `@suize/facilitator`   | CF Worker: the open-source x402 facilitator for Sui (`/supported` `/verify` `/settle` `/build` `/health`). Keyless, stateless. Live at facilitator.suize.io.                          |
 | `packages/shared`        | `@suize/shared`        | THE source of truth: network resolution, on-chain ids, prices, Walrus/Seal constants, wire types. Pure, no runtime deps.                                                              |
 | `packages/x402`          | `@suize/x402`          | The x402 V2 `exact` Sui scheme: wire types, the gasless tx builder, the fee-split math, the verify enforcement.                                                                       |
-| `packages/pay`           | `@suize/pay`           | Zero-dep merchant middleware (challenge + verify + settle), published on npm.                                                                                                         |
+| `packages/pay`           | `@suize/pay`           | DEPRECATED (owner 2026-07-19): merchant middleware, unlisted from every public surface; kept in-tree for history.                                                                     |
 | `packages/mcp`           | `@suize/mcp`           | The local stdio MCP deploy client (`deploy_site` and friends). Signs via the user's Sui CLI, key file, or env key.                                                                   |
 | `packages/move-deploy`   | `deploy_sui`           | The on-chain Move package: `site` (Site object, digest registry), `domain_registry`, `allowlist` (Seal access control), `version`.                                                    |
 
@@ -59,5 +59,5 @@ When the owner cues a live demo run (lines like "publish the demo page" or "publ
 
 ## Pointers
 
-- Per-piece READMEs: `services/facilitator/README.md`, `services/deploy-worker/README.md`, `apps/suize/README.md`, `packages/{pay,mcp,x402}/README.md`. Root `README.md` is the public front door.
+- Per-piece READMEs: `services/facilitator/README.md`, `services/deploy-worker/README.md`, `apps/suize/README.md`, `packages/{mcp,x402}/README.md`. Root `README.md` is the public front door.
 - `BACKLOG.md`: the ticket ledger. `DECISIONS.md`: the decision log. Fold stray facts into the owning README, never a new doc file.

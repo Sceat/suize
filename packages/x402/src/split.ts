@@ -1,7 +1,7 @@
 // The x402-Sui FEE SPLIT — the one shared implementation (single home).
 //
 // Both sides of the rail compute the SAME split from the same inputs:
-//   - a MERCHANT (e.g. @suize/pay) computes its declared outputs from the fee policy
+//   - a MERCHANT computes its declared outputs from the fee policy
 //     it read off the facilitator's GET /supported extra { feeBps, feeFloor, treasury };
 //   - the FACILITATOR recomputes this split at verify/settle and enforces that the
 //     payment credits each leg EXACTLY (payer/merchant-declared outputs are never

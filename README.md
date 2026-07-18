@@ -9,7 +9,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-111.svg)](./LICENSE)
 [![Built on Sui](https://img.shields.io/badge/Built%20on-Sui-6fbcf0.svg)](https://sui.io)
 [![x402 V2 "exact"](https://img.shields.io/badge/payments-x402%20V2%20%22exact%22-7c3aed.svg)](https://github.com/x402-foundation/x402/pull/2616)
-[![npm @suize/pay](https://img.shields.io/npm/v/@suize/pay?label=%40suize%2Fpay&color=cb3837)](https://www.npmjs.com/package/@suize/pay)
 [![npm @suize/mcp](https://img.shields.io/npm/v/@suize/mcp?label=%40suize%2Fmcp&color=cb3837)](https://www.npmjs.com/package/@suize/mcp)
 
 </div>
@@ -93,7 +92,6 @@ A [Bun](https://bun.sh) workspace monorepo, `apps/* packages/* services/*`. The 
 | [`services/facilitator`](./services/facilitator) | `@suize/facilitator` | The open-source x402 `exact` facilitator for Sui. Keyless, stateless, four endpoints. Live at `facilitator.suize.io`. |
 | [`services/deploy-worker`](./services/deploy-worker) | `@suize/deploy-worker` | Suize Deploy: charges for and serves Walrus-hosted sites, and pays its own facilitator instance like any other merchant. Live at `api.suize.site` and `*.suize.site`. |
 | [`packages/shared`](./packages/shared) | `@suize/shared` | The single source of truth for network selection, on-chain ids, prices, and wire types. Nothing else hardcodes an id or a network. |
-| [`packages/pay`](./packages/pay) | `@suize/pay` | The merchant middleware. `npm i @suize/pay`, about 60 lines of integration, and any x402 agent can pay your endpoint. |
 | [`packages/x402`](./packages/x402) | `@suize/x402` | The shared x402 V2 `exact` primitives for Sui: wire types, the gasless payment-transaction builder, the fee-split math, and the facilitator's verify logic. |
 | [`packages/mcp`](./packages/mcp) | `@suize/mcp` | A local stdio MCP server, gives Claude Code / Cursor / Codex a `deploy_site` tool that pays with your own local Sui key. |
 | [`packages/move-deploy`](./packages/move-deploy) | `deploy_sui` | The on-chain Move package: the `Site` object, the domain registry, and the Seal allowlist for private sites. |
@@ -109,9 +107,9 @@ The fee is never something a merchant can quietly drop: the facilitator recomput
 Nothing here is a mockup.
 
 - **On-chain (Sui mainnet).** `deploy_sui` is published and live: [`0xec2dcd65…`](https://suivision.xyz/package/0xec2dcd65271127019351678ddd05287176a0b9b7fc59ef6ceef34fdbc36e87db). Suize's own suize.io frontend was deployed onto Walrus through this exact rail, a real USDC settlement on mainnet.
-- **On npm.** [`@suize/pay`](https://www.npmjs.com/package/@suize/pay) (`npm i @suize/pay`) and [`@suize/mcp`](https://www.npmjs.com/package/@suize/mcp) (`npx @suize/mcp`) are published and installable.
+- **On npm.** [`@suize/mcp`](https://www.npmjs.com/package/@suize/mcp) (`npx @suize/mcp`) is published and installable.
 - **Upstream.** We authored the Sui `exact` scheme and opened the spec + mechanism PRs upstream on `x402-foundation/x402`: [#2615](https://github.com/x402-foundation/x402/pull/2615) (spec) and [#2616](https://github.com/x402-foundation/x402/pull/2616) (`@x402/sui` mechanism).
-- **Tests.** 186 TypeScript tests passing across the facilitator, `@suize/x402`, `@suize/pay`, `@suize/mcp`, and the deploy worker, plus 26 Move tests for `deploy_sui`. Zero failing.
+- **Tests.** 165 TypeScript tests passing across the facilitator, `@suize/x402`, `@suize/mcp`, and the deploy worker, plus 26 Move tests for `deploy_sui`. Zero failing.
 
 ## Run it locally
 
@@ -128,7 +126,6 @@ Tests, per package:
 ```bash
 cd services/facilitator && bun test    # 28 passing
 cd packages/x402 && bun test           # 39 passing
-cd packages/pay && bun test            # 21 passing
 cd packages/mcp && bun test            # 19 passing
 cd services/deploy-worker && bun test  # 79 passing
 cd packages/move-deploy && sui move test  # 26 passing
