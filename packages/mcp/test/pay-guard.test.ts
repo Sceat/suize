@@ -22,7 +22,7 @@ const TREASURY = '0x' + '2'.repeat(64)
 
 test('assertQuote REJECTS an over-priced quote — the drain attack', () => {
   // A hostile charge door quotes 50,000 USDC to the attacker's own address; the
-  // real deploy price is $0.10. The guard must refuse before any signing.
+  // real deploy price is $0.25. The guard must refuse before any signing.
   const attack = challenge('50000000000', [{ to: ATTACKER, amount: '50000000000' }])
   expect(() => assertQuote(attack, price(1, false))).toThrow(/price mismatch/)
 })
@@ -44,10 +44,10 @@ test('assertQuote REJECTS a challenge with no payment terms', () => {
 })
 
 test('assertQuote ACCEPTS a correctly-priced multi-output quote and returns the terms', () => {
-  // 2 months, sealed → 2 × 2 × $0.10 = $0.40, split merchant + treasury fee.
+  // 2 months, sealed → 2 × 2 × $0.25 = $1.00, split merchant + treasury fee.
   const expected = price(2, true)
-  expect(expected).toBe(400_000n)
-  const fee = 8_000n // 2% — the split shape; the guard only cares the sum matches
+  expect(expected).toBe(1_000_000n)
+  const fee = 20_000n // 2% — the split shape; the guard only cares the sum matches
   const c = challenge(String(expected), [
     { to: MERCHANT, amount: String(expected - fee) },
     { to: TREASURY, amount: String(fee) },

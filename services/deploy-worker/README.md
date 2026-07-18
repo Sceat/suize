@@ -53,7 +53,7 @@ curl -X POST "https://api.suize.site/deploy?months=1"
 }
 ```
 
-That is $0.10 for one month of hosting. Deploy is Suize's own first-party merchant, so its
+That is $0.25 for one month of hosting. Deploy is Suize's own first-party merchant, so its
 payTo IS the facilitator's fee treasury and the outputs collapse to a single leg (a
 third-party merchant's quote splits into a merchant leg and a separate facilitator fee leg,
 enforced identically at verify). The payer signs a gasless Sui transaction crediting those
@@ -79,7 +79,7 @@ reads.
 
 | Method + path | Purpose |
 | --- | --- |
-| `POST /deploy?months=&sealed=` | Publish: 402 quote → paid multipart retry (`name`, `site.tar`) → live site. `months` at $0.10/month, up to what Walrus can fund in one store (about two years on mainnet); `sealed=1` for a Seal-encrypted private site at 2x. One payment mints one site. |
+| `POST /deploy?months=&sealed=` | Publish: 402 quote → paid multipart retry (`name`, `site.tar`) → live site. `months` at $0.25/month, up to what Walrus can fund in one store (about two years on mainnet); `sealed=1` for a Seal-encrypted private site at 2x. One payment mints one site. |
 | `POST /extend?site=&months=` | Buy more months for an existing site at its own rate. Open-payer: anyone may fund any site, it only ever adds paid time. |
 | `POST /domains[?verify=1]` | `{siteId, domain}`: mint the DNS challenge (free), then verify + link on-chain ($19.99/year, owner-signed). |
 | `DELETE /domains/<domain>` | `{ts, signature}`: owner-signed unlink. Free. |

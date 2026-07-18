@@ -3,7 +3,7 @@
 // EXTEND IS OPEN-PAYER (owner decision 2026-07-12): any payer may fund any
 // site's extension — it only ever ADDS paid time (a gift-extend is harmless,
 // and an agent that rotated keys can still keep its site alive). The rate is
-// the site's own: $0.10/month, 2× for sealed sites. The settled payment digest
+// the site's own: $0.25/month, 2× for sealed sites. The settled payment digest
 // is consumed ON-CHAIN by `site::extend_site` through the same registry as
 // create_site, so a replayed X-PAYMENT can never extend twice.
 //

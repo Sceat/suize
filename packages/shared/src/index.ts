@@ -212,8 +212,20 @@ export const SEAL_THRESHOLD: Record<SuiNetwork, number> = {
 // `site_for_digest` (the digest→site audit read the worker's recovery path uses after an
 // already-consumed retry). v2/v3 abandoned in place. version::AdminCap 0x5abd2300… + UpgradeCap
 // 0x89acb559… stay on the publisher wallet.
+// v5 UPGRADED on testnet 2026-07-18 (COMPATIBLE additive upgrade tx
+// GLgt16uyCap9pznpY2pC1qMJJQgrX4WiWPs4DsNDjnJs, signed by the `suize-deploy` UpgradeCap
+// 0x89acb559…; original-id stays 0x41cc6bab…). Adds ONLY `site::delete_site` + the
+// `SiteDeleted` event: an OWNER-SIGNED delete (the Site is SHARED, so the fn enforces
+// ctx.sender() == Site.owner, aborting ENotOwner / site.move code 2 for anyone else),
+// version-gated like create/extend. PACKAGE_VERSION stays 1 (no `migrate` needed — the
+// live Version object's value 1 still matches, so create_site/extend_site keep working
+// against this new id). Callers target DEPLOY_TARGET_PACKAGE; existing types and events
+// keep DEPLOY_PACKAGE as their original-id. The shared objects (version/registry) and the
+// DeployerCap are UNCHANGED.
 const DEPLOY_PACKAGE =
   '0x41cc6bab26d2b7b63c47f1dcc2bf1494cbee798cd47cc2115100d7e1cd71ac36';
+const DEPLOY_TARGET_PACKAGE =
+  '0xbf5429eed974d33091cd8f7e836ac1679855653b7bcbb5901735d41005942f51';
 const DEPLOY_VERSION_OBJECT =
   '0xd97828ae3e5ca26f7aa712a8d9af4a65b65bc49c404c97ad89b62ac1d0b0fbfa';
 const DEPLOY_DOMAIN_REGISTRY_OBJECT =
@@ -263,7 +275,7 @@ export async function resolveTreasury(client: TreasuryResolver): Promise<string 
 
 // ---------------------------------------------------------------------------
 // Deploy pricing — PREPAID MONTHS (owner-locked 2026-07-10; one-shot cap
-// 2026-07-13). One flat rate: $0.10 per month of hosting; extend = buy more
+// 2026-07-13). One flat rate: $0.25 per month of hosting; extend = buy more
 // months at the same rate. The prepay ceiling is what Walrus can fund in ONE
 // store (WALRUS_MAX_EPOCHS_AHEAD), DERIVED per network by maxDeployMonths (about
 // two years on mainnet); there is no permanent tier and no drip-funding cron.
@@ -276,8 +288,8 @@ export async function resolveTreasury(client: TreasuryResolver): Promise<string 
 /** One pricing month: 30 days flat, in ms. */
 export const DEPLOY_MONTH_MS = 2_592_000_000;
 
-/** The price of ONE month of hosting, in USDC base units (6 decimals): $0.10. */
-export const DEPLOY_PRICE_PER_MONTH_USDC = 100_000;
+/** The price of ONE month of hosting, in USDC base units (6 decimals): $0.25. */
+export const DEPLOY_PRICE_PER_MONTH_USDC = 250_000;
 
 /** Sealed (private, Seal-encrypted) sites pay this multiple of the flat rate. */
 export const DEPLOY_SEALED_MULTIPLIER = 2;
@@ -322,7 +334,7 @@ export const maxDeployMonths = (net: SuiNetwork): number => {
  * The absolute prepay ceiling in months: the mainnet-derived cap (the largest of
  * any network). It is the outer bound the pure price function guards against; the
  * tighter per-network gate is `maxDeployMonths(net)`, applied at the charge door
- * before a quote. Mainnet today: 24 months ($2.40 public, $4.80 sealed).
+ * before a quote. Mainnet today: 24 months ($6.00 public, $12.00 sealed).
  */
 export const DEPLOY_MAX_MONTHS = maxDeployMonths('mainnet');
 
@@ -383,12 +395,16 @@ export const withinUploadCap = (rawBytes: number): boolean =>
  */
 const deployIds = (ids: {
   pkg: string;
+  targetPkg: string;
   version: string;
   registry: string;
   siteDigestRegistry: string;
   deployerCap: string;
 }) => ({
+  /** The type-origin package used by existing objects and event filters. */
   PACKAGE: ids.pkg,
+  /** The latest package version used to build Move call targets. */
+  TARGET_PACKAGE: ids.targetPkg,
   VERSION_OBJECT: ids.version,
   DOMAIN_REGISTRY_OBJECT: ids.registry,
   /** The shared `SiteDigestRegistry`: the on-chain one-site-per-payment dedup set.
@@ -401,17 +417,22 @@ const deployIds = (ids: {
    *  publisher/operator wallet, PENDING transfer to the prod service wallet. */
   DEPLOYER_CAP_OBJECT: ids.deployerCap,
   TARGETS: {
-    CREATE_SITE: `${ids.pkg}::site::create_site`,
-    EXTEND_SITE: `${ids.pkg}::site::extend_site`,
-    LINK_DOMAIN: `${ids.pkg}::domain_registry::link_domain`,
-    UNLINK_DOMAIN: `${ids.pkg}::domain_registry::unlink_domain`,
+    CREATE_SITE: `${ids.targetPkg}::site::create_site`,
+    EXTEND_SITE: `${ids.targetPkg}::site::extend_site`,
+    // OWNER-SIGNED site deletion (sender must == Site.owner). LIVE on testnet
+    // (v5 upgrade, package 0xbf5429ee…). On MAINNET this target string is
+    // computed from the current mainnet pkg id but the fn does NOT exist there
+    // yet — it goes live only after the mainnet package upgrade (owner-signed).
+    DELETE_SITE: `${ids.targetPkg}::site::delete_site`,
+    LINK_DOMAIN: `${ids.targetPkg}::domain_registry::link_domain`,
+    UNLINK_DOMAIN: `${ids.targetPkg}::domain_registry::unlink_domain`,
     // Seal allowlist (private sites). create is worker-signed (DeployerCap);
     // add/remove are OWNER-signed (AllowlistCap) from the dashboard;
     // seal_approve is DRY-RUN by Seal key servers, never broadcast.
-    ALLOWLIST_CREATE: `${ids.pkg}::allowlist::create_for_owner`,
-    ALLOWLIST_ADD: `${ids.pkg}::allowlist::add`,
-    ALLOWLIST_REMOVE: `${ids.pkg}::allowlist::remove`,
-    SEAL_APPROVE: `${ids.pkg}::allowlist::seal_approve`,
+    ALLOWLIST_CREATE: `${ids.targetPkg}::allowlist::create_for_owner`,
+    ALLOWLIST_ADD: `${ids.targetPkg}::allowlist::add`,
+    ALLOWLIST_REMOVE: `${ids.targetPkg}::allowlist::remove`,
+    SEAL_APPROVE: `${ids.targetPkg}::allowlist::seal_approve`,
   },
 });
 
@@ -426,6 +447,7 @@ const NETWORK_ADDRESSES: Record<
   {
     deploy: {
       pkg: string;
+      targetPkg: string;
       version: string;
       registry: string;
       siteDigestRegistry: string;
@@ -436,6 +458,7 @@ const NETWORK_ADDRESSES: Record<
   testnet: {
     deploy: {
       pkg: DEPLOY_PACKAGE,
+      targetPkg: DEPLOY_TARGET_PACKAGE,
       version: DEPLOY_VERSION_OBJECT,
       registry: DEPLOY_DOMAIN_REGISTRY_OBJECT,
       siteDigestRegistry: DEPLOY_SITE_DIGEST_REGISTRY_OBJECT,
@@ -452,12 +475,19 @@ const NETWORK_ADDRESSES: Record<
   mainnet: {
     deploy: {
       pkg: '0xec2dcd65271127019351678ddd05287176a0b9b7fc59ef6ceef34fdbc36e87db',
+      targetPkg: '0xec2dcd65271127019351678ddd05287176a0b9b7fc59ef6ceef34fdbc36e87db',
       version: '0xfc39ef5748bccdbbc445054940ff99bb448cf47497da71b047c1a5530bf56b4e',
       registry: '0x28d4557f9c55cdc8bb1afb98092ecfba505d8f23b0eae8a067473c2cba7a972b',
       siteDigestRegistry: '0xc95ac121e1ebc7727022c944ef573180a044360ff20208eca525dc36ea0b0ce5',
       deployerCap: '0x235e9170233b6aaa022df9cd336b12f3de5d65ac6bbf88b42ff32f56b68df59c',
     },
   },
+};
+
+// flip mainnet after the deploy_sui package upgrade ships delete_site.
+export const DELETE_SITE_LIVE: Record<SuiNetwork, boolean> = {
+  testnet: true,
+  mainnet: false,
 };
 
 /**

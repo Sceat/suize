@@ -33,15 +33,15 @@ mainnet). Then just ask your assistant to deploy:
 publish ./dist
 ```
 
-It answers the 402, pays $0.10 for a month of hosting, and returns the live URL.
+It answers the 402, pays $0.25 for a month of hosting, and returns the live URL.
 
 ## Tools
 
 | Tool | What it does |
 |---|---|
-| `deploy_site` | Publish a built static folder (`{ dir }`, e.g. `./dist`) to Walrus and return a live URL + Site ID. `{ months }` prepays hosting (default 1, $0.10/month, up to about two years per payment on mainnet); `{ private: true }` deploys a Seal-encrypted site only wallets you allow can open (2x rate); `{ name }` labels it. The payer is the on-chain owner. |
+| `deploy_site` | Publish a built static folder (`{ dir }`, e.g. `./dist`) to Walrus and return a live URL + Site ID. `{ months }` prepays hosting (default 1, $0.25/month, up to about two years per payment on mainnet); `{ private: true }` deploys a Seal-encrypted site only wallets you allow can open (2x rate); `{ name }` labels it. The payer is the on-chain owner. |
 | `list_sites` | List every site you've deployed (found on-chain by your key's address), newest first, each with its name, Site ID, and URL. |
-| `extend_site` | Buy more hosting time for a site you own: `{ siteId }` + `{ months }`. Pays $0.10/month (2x for private). |
+| `extend_site` | Buy more hosting time for a site you own: `{ siteId }` + `{ months }`. Pays $0.25/month (2x for private). |
 | `site_status` | Show a site's current state: URL, owner, size, and how long its hosting is paid through (active or lapsed). Pass `{ siteId }`. |
 
 ## Non-custodial by construction

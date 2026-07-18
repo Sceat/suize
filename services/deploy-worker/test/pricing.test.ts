@@ -1,5 +1,5 @@
 // The money math — every number here is a billing contract (owner-locked
-// 2026-07-10; one-shot cap 2026-07-13): $0.10/month flat, sealed 2×, the prepay
+// 2026-07-10; one-shot cap 2026-07-13): $0.25/month flat, sealed 2×, the prepay
 // ceiling DERIVED per network from the Walrus one-shot window, and the
 // $0.05/month Walrus storage-cost cap. A drift in any of these mis-prices charges.
 import { test, expect } from "bun:test";
@@ -16,19 +16,19 @@ import {
   withinUploadCap,
 } from "@suize/shared";
 
-test("one month costs exactly $0.10 (100_000 atomic)", () => {
-  expect(deployPriceUsdc(1, false)).toBe(100_000);
+test("one month costs exactly $0.25 (250_000 atomic)", () => {
+  expect(deployPriceUsdc(1, false)).toBe(250_000);
 });
 
 test("sealed doubles the rate", () => {
-  expect(deployPriceUsdc(1, true)).toBe(200_000);
-  expect(deployPriceUsdc(7, true)).toBe(1_400_000);
+  expect(deployPriceUsdc(1, true)).toBe(500_000);
+  expect(deployPriceUsdc(7, true)).toBe(3_500_000);
 });
 
-test("the max prepay (the mainnet one-shot cap, 24 months) is $2.40 public / $4.80 sealed", () => {
+test("the max prepay (the mainnet one-shot cap, 24 months) is $6.00 public / $12.00 sealed", () => {
   expect(DEPLOY_MAX_MONTHS).toBe(24);
-  expect(deployPriceUsdc(DEPLOY_MAX_MONTHS, false)).toBe(2_400_000);
-  expect(deployPriceUsdc(DEPLOY_MAX_MONTHS, true)).toBe(4_800_000);
+  expect(deployPriceUsdc(DEPLOY_MAX_MONTHS, false)).toBe(6_000_000);
+  expect(deployPriceUsdc(DEPLOY_MAX_MONTHS, true)).toBe(12_000_000);
 });
 
 test("out-of-range months throw (never a mis-priced quote)", () => {

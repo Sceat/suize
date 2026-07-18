@@ -41,13 +41,13 @@ const payChallenge = async (challenge: any): Promise<{ header: string; accepted:
   return { header: btoa(JSON.stringify(payload)), accepted };
 };
 
-// ── 1. discovery: 402 with 2-month pricing ($0.20) ───────────────────────────
+// ── 1. discovery: 402 with 2-month pricing ($0.50) ───────────────────────────
 const disc = await fetch(`${WORKER}/deploy?months=2`, { method: "POST" });
 const challenge = (await disc.json()) as any;
 check("discovery answers 402", disc.status === 402);
 check(
-  "2-month quote is $0.20 (200000 atomic)",
-  challenge?.accepts?.[0]?.amount === "200000",
+  "2-month quote is $0.50 (500000 atomic)",
+  challenge?.accepts?.[0]?.amount === "500000",
   `amount=${challenge?.accepts?.[0]?.amount}`,
 );
 const outs = challenge?.accepts?.[0]?.extra?.outputs ?? [];
@@ -95,7 +95,7 @@ if (process.env.SKIP_SERVE === "1") {
 // ── 4. paid extend (+1 month) ─────────────────────────────────────────────────
 const extDisc = await fetch(`${WORKER}/extend?site=${site.siteId}&months=1`, { method: "POST" });
 const extChallenge = (await extDisc.json()) as any;
-check("extend discovery answers 402 at $0.10", extDisc.status === 402 && extChallenge?.accepts?.[0]?.amount === "100000");
+check("extend discovery answers 402 at $0.25", extDisc.status === 402 && extChallenge?.accepts?.[0]?.amount === "250000");
 
 const extPaid = await payChallenge(extChallenge);
 const ext = await fetch(`${WORKER}/extend?site=${site.siteId}&months=1`, {
