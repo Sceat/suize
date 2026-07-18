@@ -1,6 +1,6 @@
 {
   "name": "@suize/mcp",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Local stdio MCP server — let your coding assistant (Claude Code / Cursor / Codex) deploy a static site to Walrus through Suize in one tool call. Signs a gasless x402 payment with a local key: the key never leaves your machine, and you own every site you deploy.",
   "private": false,
   "type": "module",

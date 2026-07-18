@@ -85,7 +85,7 @@ test('tools/list exposes the deploy tool set with sane schemas', async () => {
   expect(res.error).toBeUndefined()
   const tools = res.result.tools as Array<{ name: string; description: string; inputSchema: any }>
   const names = tools.map(t => t.name)
-  expect(names).toEqual(['deploy_site', 'list_sites', 'extend_site', 'site_status'])
+  expect(names).toEqual(['deploy_site', 'list_sites', 'extend_site', 'site_status', 'link_domain', 'domain_status'])
   for (const tool of tools) {
     expect(tool.description.length).toBeGreaterThan(0)
     expect(tool.inputSchema.type).toBe('object')

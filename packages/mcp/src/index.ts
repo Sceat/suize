@@ -28,9 +28,12 @@ import {
   extendSite,
   listSites,
   siteStatus,
+  linkDomain,
+  domainStatus,
   type DeployArgs,
   type ExtendArgs,
   type SiteIdArgs,
+  type DomainArgs,
 } from './deploy'
 
 // ── Protocol constants (kept in lockstep with the backend MCP module) ────────
@@ -122,6 +125,36 @@ const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'link_domain',
+    description:
+      'Link a custom domain to a site you deployed. First run returns the DNS records to set (TXT + CNAME); ' +
+      'once DNS verifies, the same call pays $19.99 for one year from your local Suize key and links the domain ' +
+      'on-chain with automatic SSL. Verification and re-runs are free; only the final link charges, and the ' +
+      'payment must come from the site owner\'s key.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        siteId: { type: 'string' as const, description: 'The 0x… Site ID to link (from deploy_site or list_sites).' },
+        domain: { type: 'string' as const, description: 'The custom domain, e.g. "docs.example.com".' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'domain_status',
+    description:
+      'Check a custom domain\'s link state for a site: linked (with SSL state), waiting on DNS (shows the exact ' +
+      'records still missing), or verified-but-unlinked. Free, never pays.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        siteId: { type: 'string' as const, description: 'The 0x… Site ID the domain belongs to.' },
+        domain: { type: 'string' as const, description: 'The custom domain to check.' },
+      },
+      additionalProperties: false,
+    },
+  },
 ] as const
 
 type ToolArgs = Record<string, unknown>
@@ -130,6 +163,8 @@ const TOOL_HANDLERS: Record<string, (args: ToolArgs) => Promise<string>> = {
   list_sites: () => listSites(),
   extend_site: args => extendSite(args as ExtendArgs),
   site_status: args => siteStatus(args as SiteIdArgs),
+  link_domain: args => linkDomain(args as DomainArgs),
+  domain_status: args => domainStatus(args as DomainArgs),
 }
 
 // ── Dispatch (same switch shape as the backend MCP module) ───────────────────

@@ -12,7 +12,7 @@ import { basename, join, relative } from 'node:path'
 import { createTar } from 'nanotar'
 import { fromBase64 } from '@mysten/sui/utils'
 import { grpcClient, buildGaslessOutputs, formatUsdc } from '@suize/x402'
-import { caip2, maxDeployMonths, deployPriceUsdc } from '@suize/shared'
+import { caip2, maxDeployMonths, deployPriceUsdc, DOMAIN_PRICE_PER_YEAR_USDC } from '@suize/shared'
 import { API_URL, GRAPHQL_URL, NETWORK, DEPLOY, USDC_TYPE, SUI_ADDRESS_RE, address, signer } from './config'
 
 export interface DeployArgs {
@@ -375,4 +375,177 @@ const BASE36_WIDTH = 50
 const subdomainOf = (siteId: string): string => {
   const hex = siteId.startsWith('0x') ? siteId.slice(2) : siteId
   return BigInt('0x' + hex).toString(36).padStart(BASE36_WIDTH, '0')
+}
+
+// ── custom domains: link_domain + domain_status ──────────────────────────────
+// Thin client over the worker's POST /domains contract:
+//   POST /domains?verify=1 {siteId, domain} → 200 pending (DNS records to set)
+//   | 200 linked (idempotent) | 402 once DNS is green → pay → linked.
+// Verifies and re-checks are FREE; only a green-DNS unlinked domain mints a 402.
+
+export interface DomainArgs {
+  siteId?: string
+  domain?: string
+}
+
+const DOMAIN_RE = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/
+
+interface DomainProbe {
+  status?: string
+  txtName?: string
+  txtValue?: string
+  cname?: string
+  txtOk?: boolean
+  cnameOk?: boolean
+  detail?: string
+  sslStatus?: string
+  digest?: string
+  instructions?: string
+  error?: string
+}
+
+const domainArgs = (args: DomainArgs): { siteId: string; domain: string } => {
+  const siteId = (args.siteId ?? '').trim()
+  const domain = (args.domain ?? '').trim().toLowerCase()
+  if (!SUI_ADDRESS_RE.test(siteId)) {
+    throw new Error('Pass { siteId } — the 0x… id of the site to link (from deploy_site or list_sites).')
+  }
+  if (!DOMAIN_RE.test(domain)) throw new Error('Pass { domain } — the custom domain, e.g. "docs.example.com".')
+  return { siteId, domain }
+}
+
+const domainsPost = (siteId: string, domain: string, verify: boolean, header?: string): Promise<Response> =>
+  fetch(`${API_URL}/domains${verify ? '?verify=1' : ''}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(header ? { 'X-PAYMENT': header } : {}) },
+    body: JSON.stringify({ siteId, domain }),
+  })
+
+const recordsBlock = (domain: string, p: DomainProbe): string =>
+  [
+    'Set these DNS records at your provider, then run the same tool again (re-checks are free):',
+    `  TXT    ${p.txtName}  =  ${p.txtValue}${p.txtOk === false ? '   (not visible yet)' : p.txtOk ? '   (ok)' : ''}`,
+    `  CNAME  ${domain}  ->  ${p.cname}${p.cnameOk === false ? '   (not visible yet)' : p.cnameOk ? '   (ok)' : ''}`,
+    '  (zone apex: flattened A records pointing at the CNAME target are accepted)',
+  ].join('\n')
+
+/** FREE pre-charge guard: what site does the on-chain registry already hold for
+ * this domain? Stops link_domain from paying a year of service into an
+ * EDomainTaken abort when the domain belongs to someone else's site.
+ * Best-effort: any read fault returns null and the server-side gates still
+ * protect the flow (mainnet-only; the fallback RPC host is a mainnet node). */
+const registryHolder = async (domain: string): Promise<string | null> => {
+  if (NETWORK !== 'mainnet') return null
+  try {
+    const registry = DEPLOY.DOMAIN_REGISTRY_OBJECT
+    if (!registry || registry === '0x0') return null
+    const gq = await fetch(GRAPHQL_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: 'query($id: SuiAddress!) { object(address: $id) { asMoveObject { contents { json } } } }',
+        variables: { id: registry },
+      }),
+      signal: AbortSignal.timeout(5000),
+    })
+    const json = (await gq.json()) as {
+      data?: { object?: { asMoveObject?: { contents?: { json?: { domains?: { id?: string } } } | null } | null } | null }
+    }
+    const table = json.data?.object?.asMoveObject?.contents?.json?.domains?.id
+    if (typeof table !== 'string') return null
+    const rpc = await fetch('https://sui-rpc.publicnode.com', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'suix_getDynamicFieldObject',
+        params: [table, { type: '0x1::string::String', value: domain }],
+      }),
+      signal: AbortSignal.timeout(5000),
+    })
+    const value = ((await rpc.json()) as { result?: { data?: { content?: { fields?: { value?: unknown } } | null } | null } })
+      .result?.data?.content?.fields?.value
+    return typeof value === 'string' && value.startsWith('0x') ? value : null
+  } catch {
+    return null
+  }
+}
+
+export const linkDomain = async (args: DomainArgs): Promise<string> => {
+  const { siteId, domain } = domainArgs(args)
+  const yearly = BigInt(DOMAIN_PRICE_PER_YEAR_USDC)
+
+  // 0. free on-chain guard — never pay into a domain someone else holds, and
+  //    short-circuit a domain this site already owns (repointed domains keep
+  //    serving even after the original TXT record is gone).
+  const holder = await registryHolder(domain)
+  if (holder === siteId) {
+    return `${domain} is already linked on-chain to ${siteId} — https://${domain}. No charge.`
+  }
+  if (holder) {
+    throw new Error(
+      `${domain} is already linked on-chain to site ${holder} — not charging. ` +
+        'If that site is yours, repoint or unlink it from the suize.io dashboard first.',
+    )
+  }
+
+  // 1. free verify probe: DNS state, idempotent-linked, or a 402 once green.
+  const probe = await domainsPost(siteId, domain, true)
+  const body = (await asJson(probe)) as DomainProbe & Challenge
+
+  if (probe.status === 200 && body.status === 'linked') {
+    return `${domain} is already linked to ${siteId} — https://${domain} (SSL: ${body.sslStatus ?? 'active'}). No charge.`
+  }
+  if (probe.status === 200 && body.status === 'pending') {
+    return [
+      `Domain link for ${domain} is waiting on DNS.`,
+      recordsBlock(domain, body),
+      `The $${formatUsdc(yearly)}/year charge happens only after both records verify.`,
+    ].join('\n')
+  }
+  if (probe.status !== 402) {
+    throw new Error(`domain link failed (${probe.status}): ${body.error ?? JSON.stringify(body).slice(0, 200)}`)
+  }
+
+  // 2. DNS green → pay the op-bound quote (guard: exactly the shared yearly price).
+  const header = await payChallenge(body, yearly)
+  const { res, body: out } = await postPaid(() => domainsPost(siteId, domain, true, header))
+  const linked = out as DomainProbe
+  if (res.status !== 200) {
+    throw new Error(
+      `domain link failed (${res.status}): ${linked.error ?? JSON.stringify(out).slice(0, 200)}. ` +
+        'If the payment settled, re-run link_domain with the same inputs — the flow is idempotent by payment digest and will not charge twice.',
+    )
+  }
+  return [
+    `Linked ${domain} -> ${siteId} for $${formatUsdc(yearly)} (one year of custom-domain service).`,
+    `  URL:    https://${domain}`,
+    linked.digest ? `  Digest: ${linked.digest}` : '',
+    `  SSL:    ${linked.sslStatus ?? 'provisioning'}${linked.instructions ? `\n  ${linked.instructions}` : ''}`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+export const domainStatus = async (args: DomainArgs): Promise<string> => {
+  const { siteId, domain } = domainArgs(args)
+  // The on-chain registry is the truth for LINKED (DNS probes can lag or carry a
+  // stale site-bound TXT after a repoint); the DNS probe covers the pending states.
+  const holder = await registryHolder(domain)
+  if (holder === siteId) return `${domain} is LINKED on-chain to ${siteId} — https://${domain}.`
+  if (holder) return `${domain} is linked on-chain to a DIFFERENT site: ${holder}.`
+  const probe = await domainsPost(siteId, domain, true) // free: no payment is ever attached
+  const body = (await asJson(probe)) as DomainProbe
+  if (probe.status === 402) {
+    return [
+      `DNS for ${domain} is verified, the domain is NOT linked yet.`,
+      `Linking costs $${formatUsdc(BigInt(DOMAIN_PRICE_PER_YEAR_USDC))} for one year: run link_domain { siteId, domain }.`,
+    ].join('\n')
+  }
+  if (body.status === 'linked') return `${domain} is LINKED to ${siteId} — https://${domain} (SSL: ${body.sslStatus ?? 'active'}).`
+  if (body.status === 'pending') {
+    return [`${domain} is NOT linked yet; DNS records incomplete.`, recordsBlock(domain, body)].join('\n')
+  }
+  throw new Error(`domain status failed (${probe.status}): ${body.error ?? JSON.stringify(body).slice(0, 200)}`)
 }
