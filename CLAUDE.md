@@ -2,7 +2,7 @@
 
 > Loaded every session. This file owns the global picture, the payment-rail facts, and the locked decisions. Per-piece detail lives in each piece's README: reference, never redeclare, state each fact once. Every claim here is true today; a thing is described as it works or it is absent.
 
-**Suize is the publish button for the agentic web.** An agent (via `@suize/mcp` or raw x402) or a human (the suize.io dashboard, wallet-connect) pays one gasless x402 USDC payment on Sui and a static site goes live on Walrus, content-addressed and integrity-verified at serve time. Hosting is $0.10 per month, prepaid up to what Walrus can fund in one store (about two years per payment on mainnet); sealed (Seal-encrypted private) sites pay 2x; extend anytime at the same rate; custom domains are $19.99/year. Fully non-custodial: whoever pays owns the site (on-chain `Site.owner`); the MCP signs through the user's own Sui CLI by default. No account, no API key, no signup.
+**Suize is the publish button for the agentic web.** An agent (via `@suize/mcp` or raw x402) or a human (the suize.io dashboard, wallet-connect) pays one gasless x402 USDC payment on Sui and a static site goes live on Walrus, content-addressed and integrity-verified at serve time. Hosting is $0.25 per month, prepaid up to what Walrus can fund in one store (about two years per payment on mainnet); sealed (Seal-encrypted private) sites pay 2x; extend anytime at the same rate; custom domains are $19.99/year. Fully non-custodial: whoever pays owns the site (on-chain `Site.owner`); the MCP signs through the user's own Sui CLI by default. No account, no API key, no signup.
 
 ## Repo map
 
@@ -24,7 +24,7 @@ Bun workspace monorepo: `apps/* packages/* services/*`.
 - **x402 V2 `exact`, protocol-gasless.** No custom payment Move code: the payer signs a `0x2::balance::send_funds` PTB drawing from its USDC Address Balance, with `gasPayment: []` and the deterministic budget-0 election (`setGasBudget(0n)` forces the SDK's gasless branch; empirics in `packages/x402/src/build.ts`). No SUI needed, only USDC.
 - **The facilitator recomputes and enforces the fee split at verify.** It simulates the signed tx (never broadcasts at verify), recomputes the canonical split from its own operator policy (`FEE_BPS`, `FEE_FLOOR`, `FEE_TREASURY`, optional `MERCHANT_RATES`, all env vars), and rejects any mismatched credit, undeclared recipient, or wrong payer debit. Declared outputs are never trusted. Settle broadcasts the payer-signed bytes keyless: the facilitator holds no key, the chain is the database.
 - **Idempotency is an on-chain digest registry; replays recover.** The tx digest is the payment identity: `/settle` dedups by digest, and `create_site` / `extend_site` consume the settled digest in the shared `SiteDigestRegistry` (abort `EDigestUsed` on reuse). A retried `X-PAYMENT` after a mid-flight death re-drives the idempotent effect (the `alreadySettled` path) so paid funds always produce the paid work; it can never double-charge or double-mint.
-- **Prices and caps live ONLY in `@suize/shared`:** `DEPLOY_PRICE_PER_MONTH_USDC = 100000` ($0.10), `DEPLOY_SEALED_MULTIPLIER = 2`, `DOMAIN_PRICE_PER_YEAR_USDC = 19990000` ($19.99). The prepay ceiling is DERIVED per network by `maxDeployMonths(net)` from `WALRUS_MAX_EPOCHS_AHEAD = 53` (Walrus funds storage in one shot at deploy/extend, no cron): about 24 months on mainnet, 1 on testnet. Quote and enforcement use the same helpers; a drifted copy is a billing bug.
+- **Prices and caps live ONLY in `@suize/shared`:** `DEPLOY_PRICE_PER_MONTH_USDC = 250000` ($0.25), `DEPLOY_SEALED_MULTIPLIER = 2`, `DOMAIN_PRICE_PER_YEAR_USDC = 19990000` ($19.99). The prepay ceiling is DERIVED per network by `maxDeployMonths(net)` from `WALRUS_MAX_EPOCHS_AHEAD = 53` (Walrus funds storage in one shot at deploy/extend, no cron): about 24 months on mainnet, 1 on testnet. Quote and enforcement use the same helpers; a drifted copy is a billing bug.
 
 ## Locked decisions (do not relitigate)
 
@@ -52,6 +52,10 @@ Bun workspace monorepo: `apps/* packages/* services/*`.
 
 - Operational wallet management (keys, funding, WAL duties) lives in the private ops runbook outside the public tree.
 
+
+<demo-runbook>
+When the owner cues a live demo run (lines like "publish the demo page" or "publish the architecture preview privately and whitelist my wallet 0x…"), FIRST read `marketing/demo/RUNBOOK.md` (local, gitignored): it holds the staged site folders, the demo wallet, the exact tool calls, pre-flight checks, and fallbacks. While he records: act immediately on each cue, keep output minimal, reply with the live URL.
+</demo-runbook>
 
 ## Pointers
 

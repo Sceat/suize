@@ -31,5 +31,11 @@
     "gasless",
     "suize"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sceat/suize.git",
+    "directory": "packages/x402"
+  },
+  "homepage": "https://suize.io"
 }

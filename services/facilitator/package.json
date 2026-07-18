@@ -2,7 +2,7 @@
   "name": "@suize/facilitator",
   "version": "0.1.0",
   "description": "An open, free-to-run x402 V2 'exact' payment facilitator for Sui — a stateless Cloudflare Worker. Fork it, set your treasury, wrangler deploy. Verify and settle gasless USDC Address-Balance payments; the fee split is operator-owned and enforced at verify.",
-  "private": false,
+  "private": true,
   "type": "module",
   "license": "MIT",
   "scripts": {

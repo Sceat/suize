@@ -95,3 +95,7 @@ marketing/
 
 # Personal wallet tool, not part of Suize
 apps/wallet/
+
+# Parabole (ECAL/David Molnar) is a COMMERCIAL face — never redistribute it in
+# the public tree; the local copy stays on the build machine only.
+apps/suize/public/fonts/Hashgraph-Title.woff2

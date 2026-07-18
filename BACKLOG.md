@@ -411,3 +411,19 @@
   keys: gates✓ (tsc clean ×3, tests 6+35+21 green, builds green) behavior✓ (prod 0.3.0 smoke
   all-200 incl. resurrected /feed) · proof: api.suize.io on Mysten gRPC host, publicnode stopgap
   removed · awaiting T-000 ship
+
+- [T-039] SITE DELETION — Move + UI DONE, TESTNET-PROVEN 2026-07-18: delete_site (version-gated,
+  sender==owner asserted — the worker caught that Site is SHARED, closing a would-be anyone-
+  deletes-anyone vuln), SiteDeleted event, 26/26 Move tests; testnet pkg upgraded to v2
+  0xbf5429ee… (digest GLgt16uy…); UI two-step inline confirm + ghost filtering (event lists
+  existence-checked, batched 50/req); lead drove the REAL flow: replay-A deleted via UI, card
+  gone, gone after reload, object not found on-chain. Gates: tsc 0 x2, build 0, worker 79/79.
+  GATED: mainnet pkg upgrade = owner GO after dress run (UpgradeCap on 0x9036, owner signs;
+  then flip DELETE_SITE_LIVE.mainnet + rebuild/redeploy/repoint). RIDERS: USDC-only wallets
+  can't pay delete gas (our exact users) → sponsorship or truthful error copy post-demo;
+  deleted-site payment replay returns an error not an explanation (self-inflicted, LOW);
+  testnet dev wallet now holds 0.5 SUI for E2E gas.
+- [T-040] Wallet "+" (add account) no-ops: upstream dapp-kit v2 hardcodes it for Slush and its
+  click re-invokes the Slush popup, losing the user gesture across an await (popup-blocked).
+  Not our CSS/DOM (shadow DOM, verified). Post-demo: ship our own "connect another wallet"
+  control instead of the stock Slush special-case; meanwhile allow popups on suize.io.

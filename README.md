@@ -48,20 +48,20 @@ curl -X POST "https://api.suize.site/deploy?months=1"
   "accepts": [{
     "scheme": "exact",
     "network": "sui:mainnet",
-    "amount": "100000",
+    "amount": "250000",
     "asset": "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC",
     "payTo": "0x9036f4be5ca0d0c2b890f12b398c032a00952aa41c2776507db0d018002373a7",
     "maxTimeoutSeconds": 120,
     "extra": {
       "outputs": [
-        { "to": "0x9036f4be5ca0d0c2b890f12b398c032a00952aa41c2776507db0d018002373a7", "amount": "100000" }
+        { "to": "0x9036f4be5ca0d0c2b890f12b398c032a00952aa41c2776507db0d018002373a7", "amount": "250000" }
       ]
     }
   }]
 }
 ```
 
-That's a real quote: $0.10 for one month of hosting. Deploy is Suize's own first-party merchant on the rail, its payTo is the same address as the facilitator's fee treasury, so the outputs collapse to a single leg (a third-party merchant's quote splits into a merchant leg and a separate facilitator fee leg the same way, enforced identically at verify). An agent signs a gasless Sui transaction paying those exact outputs and retries the same request as `multipart/form-data` (`name`, `site.tar`) with the signature in `X-PAYMENT`. The easiest way to do that from a coding assistant:
+That's a real quote: $0.25 for one month of hosting. Deploy is Suize's own first-party merchant on the rail, its payTo is the same address as the facilitator's fee treasury, so the outputs collapse to a single leg (a third-party merchant's quote splits into a merchant leg and a separate facilitator fee leg the same way, enforced identically at verify). An agent signs a gasless Sui transaction paying those exact outputs and retries the same request as `multipart/form-data` (`name`, `site.tar`) with the signature in `X-PAYMENT`. The easiest way to do that from a coding assistant:
 
 ```bash
 claude mcp add suize -- npx -y @suize/mcp
@@ -111,7 +111,7 @@ Nothing here is a mockup.
 - **On-chain (Sui mainnet).** `deploy_sui` is published and live: [`0xec2dcd65…`](https://suivision.xyz/package/0xec2dcd65271127019351678ddd05287176a0b9b7fc59ef6ceef34fdbc36e87db). Suize's own suize.io frontend was deployed onto Walrus through this exact rail, a real USDC settlement on mainnet.
 - **On npm.** [`@suize/pay`](https://www.npmjs.com/package/@suize/pay) (`npm i @suize/pay`) and [`@suize/mcp`](https://www.npmjs.com/package/@suize/mcp) (`npx @suize/mcp`) are published and installable.
 - **Upstream.** We authored the Sui `exact` scheme and opened the spec + mechanism PRs upstream on `x402-foundation/x402`: [#2615](https://github.com/x402-foundation/x402/pull/2615) (spec) and [#2616](https://github.com/x402-foundation/x402/pull/2616) (`@x402/sui` mechanism).
-- **Tests.** 104 TypeScript tests passing across the facilitator, `@suize/x402`, `@suize/pay`, and the deploy worker, plus 23 Move tests for `deploy_sui`. Zero failing.
+- **Tests.** 186 TypeScript tests passing across the facilitator, `@suize/x402`, `@suize/pay`, `@suize/mcp`, and the deploy worker, plus 26 Move tests for `deploy_sui`. Zero failing.
 
 ## Run it locally
 
@@ -126,11 +126,12 @@ bun run --filter '@suize/deploy-worker' dev     # the deploy worker (wrangler de
 Tests, per package:
 
 ```bash
-cd services/facilitator && bun test    # 26 passing
+cd services/facilitator && bun test    # 28 passing
 cd packages/x402 && bun test           # 39 passing
 cd packages/pay && bun test            # 21 passing
-cd services/deploy-worker && bun test  # 18 passing
-cd packages/move-deploy && sui move test
+cd packages/mcp && bun test            # 19 passing
+cd services/deploy-worker && bun test  # 79 passing
+cd packages/move-deploy && sui move test  # 26 passing
 ```
 
 ## License
