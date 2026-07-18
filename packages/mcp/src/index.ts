@@ -36,7 +36,13 @@ import {
 // ── Protocol constants (kept in lockstep with the backend MCP module) ────────
 const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] as const
 const DEFAULT_PROTOCOL_VERSION = '2025-06-18'
-const SERVER_INFO = { name: '@suize/mcp', version: '0.3.0' } as const
+// __MCP_VERSION__ is injected from package.json at build time (tsup define);
+// the typeof guard keeps `bun run src/index.ts` and tests alive without it.
+declare const __MCP_VERSION__: string
+const SERVER_INFO = {
+  name: '@suize/mcp',
+  version: typeof __MCP_VERSION__ === 'undefined' ? 'dev' : __MCP_VERSION__,
+} as const
 
 // ── JSON-RPC 2.0 wire types ──────────────────────────────────────────────────
 interface JsonRpcRequest {
@@ -66,7 +72,7 @@ const TOOLS = [
     name: 'deploy_site',
     description:
       'Deploy a built static site to Walrus through Suize and get a live URL. Point { dir } at your ' +
-      'built output folder (e.g. "./dist"). Pays a flat $0.10 per month of hosting from your local ' +
+      'built output folder (e.g. "./dist"). Pays a flat $0.25 per month of hosting from your local ' +
       'Suize key (gasless, non-custodial); { months } buys more up front (default 1; up to what Walrus ' +
       'can fund in one store, about two years on mainnet). ' +
       'Set { private: true } for a Seal-encrypted site only wallets you allow can open (2x the rate). ' +
@@ -76,7 +82,7 @@ const TOOLS = [
       properties: {
         dir: { type: 'string' as const, description: 'Path to the built static site folder to publish (e.g. "./dist").' },
         name: { type: 'string' as const, description: 'Optional label for the site (defaults to the folder name).' },
-        months: { type: 'number' as const, description: 'Months of hosting to prepay (default 1, $0.10/month; up to about two years per payment on mainnet).' },
+        months: { type: 'number' as const, description: 'Months of hosting to prepay (default 1, $0.25/month; up to about two years per payment on mainnet).' },
         private: { type: 'boolean' as const, description: 'Deploy as a private Seal-encrypted site (2x rate). Default false.' },
       },
       additionalProperties: false,
@@ -93,7 +99,7 @@ const TOOLS = [
     name: 'extend_site',
     description:
       'Buy more hosting time for a site you deployed. Pass { siteId } (from deploy_site or list_sites) ' +
-      'and { months }. Pays $0.10/month (2x for private sites) from your local key.',
+      'and { months }. Pays $0.25/month (2x for private sites) from your local key.',
     inputSchema: {
       type: 'object' as const,
       properties: {

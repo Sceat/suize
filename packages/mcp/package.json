@@ -1,6 +1,6 @@
 {
   "name": "@suize/mcp",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "description": "Local stdio MCP server — let your coding assistant (Claude Code / Cursor / Codex) deploy a static site to Walrus through Suize in one tool call. Signs a gasless x402 payment with a local key: the key never leaves your machine, and you own every site you deploy.",
   "private": false,
   "type": "module",
@@ -21,10 +21,10 @@
     "nanotar": "^0.3.0"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "@types/node": "^22.10.0",
     "@suize/shared": "workspace:^",
     "@suize/x402": "workspace:^",
+    "@types/bun": "latest",
+    "@types/node": "^22.10.0",
     "tsup": "^8.3.5",
     "typescript": "^5.6.0"
   },
@@ -42,5 +42,11 @@
     "suize",
     "claude"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sceat/suize.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://suize.io"
 }

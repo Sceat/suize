@@ -1,4 +1,9 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'tsup'
+
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as {
+  version: string
+}
 
 // Bundle @suize/mcp to a single ESM entry the `suize-mcp` bin runs under node.
 // The workspace packages (@suize/x402, @suize/shared) are bundled IN so no
@@ -16,4 +21,6 @@ export default defineConfig({
   // Bundle the workspace deps; keep the heavy real npm deps external.
   noExternal: ['@suize/x402', '@suize/shared'],
   external: ['@mysten/sui', 'nanotar'],
+  // Single source of truth for the handshake version: package.json.
+  define: { __MCP_VERSION__: JSON.stringify(version) },
 })
