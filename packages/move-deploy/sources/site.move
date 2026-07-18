@@ -44,6 +44,13 @@ const EDigestUsed: u64 = 0;
 /// `extend_site` must buy a POSITIVE duration.
 const EZeroDuration: u64 = 1;
 
+/// `delete_site` is OWNER-ONLY: the tx sender must equal `Site.owner` (the
+/// cryptographically-recovered payer — whoever pays, owns). The `Site` is a
+/// SHARED object, so Sui does NOT gate its deletion by object ownership — this
+/// code enforces it. Any other signer's delete attempt aborts here, so a paid
+/// site cannot be vandalized by a stranger passing it as a shared input.
+const ENotOwner: u64 = 2;
+
 // === Structs ===
 
 /// A deployed site's on-chain manifest. SHARED (has only `key`), so the worker
@@ -81,9 +88,9 @@ public struct Site has key {
     /// Number of files in the deployed bundle.
     file_count: u64,
     /// The wall-clock ms this site's hosting is PAID THROUGH (prepaid months at
-    /// $0.10/mo; sealed 2×). The one mutable field — `extend_site` pushes it
-    /// forward. The worker cron keeps Walrus storage extended toward it when a
-    /// prepay exceeds the Walrus max-epochs-ahead write ceiling.
+    /// $0.25/mo; sealed 2×). The one mutable field — `extend_site` pushes it
+    /// forward. Walrus storage is funded in one shot at deploy/extend; the
+    /// prepay ceiling is capped at the Walrus max-epochs-ahead write limit.
     paid_until_ms: u64,
     /// True for a Seal-encrypted PRIVATE site (blobs encrypted at rest; viewers
     /// decrypt client-side after the on-chain allowlist's `seal_approve`).
@@ -146,6 +153,14 @@ public struct SiteCreated has copy, drop {
 public struct SiteExtended has copy, drop {
     site_id: ID,
     paid_until_ms: u64,
+}
+
+/// Emitted on every successful `delete_site` — the gallery/worker fold these
+/// over `SiteCreated` to drop a removed site from a deployer's listing, no
+/// separate indexer needed. `owner` is the recovered payer that authorized it.
+public struct SiteDeleted has copy, drop {
+    site_id: ID,
+    owner: address,
 }
 
 // === Init ===
@@ -285,6 +300,54 @@ public fun extend_site(
     site.paid_until_ms = new_paid_until;
 
     event::emit(SiteExtended { site_id, paid_until_ms: new_paid_until });
+}
+
+// === Delete ===
+
+/// Permanently delete a `Site`, removing its on-chain manifest.
+///
+/// OWNER-SIGNED: the recovered payer recorded in `Site.owner` (whoever pays,
+/// owns) is the ONLY signer that may delete it. Because the `Site` is SHARED
+/// (see `create_site`), Sui does not enforce ownership at the transaction layer
+/// as it would for an owned object — anyone can pass a shared object as input —
+/// so this function enforces it explicitly: `ctx.sender() == site.owner`, else
+/// `ENotOwner`. There is deliberately NO service/admin delete path: neither the
+/// `DeployerCap` nor the `SiteAdminCap` can remove a site, only its owner can.
+///
+/// Asserts the version gate first (mirrors `create_site`/`extend_site`, so an
+/// emergency `freeze` locks deletion alongside every other state change), then
+/// the owner check, then unpacks the struct and deletes the `UID` via
+/// `object::delete` (a shared-object deletion). Every other field is
+/// String/ID/vector<u8>/u64/bool — all droppable — so they fall away. Emits
+/// `SiteDeleted`.
+///
+/// This does NOT touch the `SiteDigestRegistry`: the payment→site audit trail
+/// stays, so `site_for_digest` still resolves the (now-deleted) id for a
+/// recovering worker. It also does NOT refund or shorten Walrus storage — the
+/// blobs simply lapse at their already-funded end epoch.
+public fun delete_site(site: Site, v: &Version, ctx: &TxContext) {
+    v.assert_version();
+    assert!(ctx.sender() == site.owner, ENotOwner);
+
+    let site_id = object::id(&site);
+    let Site {
+        id,
+        owner,
+        name: _,
+        quilt_id: _,
+        manifest_blob_id: _,
+        manifest_hash: _,
+        quilt_blob_object: _,
+        manifest_blob_object: _,
+        version: _,
+        size_bytes: _,
+        file_count: _,
+        paid_until_ms: _,
+        sealed: _,
+    } = site;
+    id.delete();
+
+    event::emit(SiteDeleted { site_id, owner });
 }
 
 /// The site id a settled payment digest minted/extended, if any — the on-chain
@@ -720,6 +783,69 @@ fun test_site_for_digest_returns_the_minted_site() {
         assert!(site_for_digest(&reg, b"\xFF").is_none(), 2);
         test_scenario::return_shared(site);
         test_scenario::return_shared(reg);
+    };
+    scenario.end();
+}
+
+// ── delete_site ──────────────────────────────────────────────────────────────
+
+#[test]
+fun test_delete_site_removes_object_and_emits_event() {
+    let deployer = @0xD;
+    let mut scenario = test_scenario::begin(deployer);
+    // setup_with_site mints ONE site owned (attribution) by `deployer`.
+    setup_with_site(&mut scenario, deployer);
+    {
+        let v = scenario.take_shared<Version>();
+        let site = scenario.take_shared<Site>();
+        // Sender == owner (deployer) → the delete is authorized.
+        delete_site(site, &v, scenario.ctx());
+        test_scenario::return_shared(v);
+    };
+    // Closing the delete tx: exactly one SiteDeleted event, and the shared Site
+    // is GONE (no most-recent shared Site remains to take).
+    let effects = scenario.next_tx(deployer);
+    assert!(effects.num_user_events() == 1, 0);
+    assert!(!test_scenario::has_most_recent_shared<Site>(), 1);
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = ENotOwner)]
+fun test_delete_site_aborts_for_non_owner() {
+    let deployer = @0xD;
+    let attacker = @0xBAD;
+    let mut scenario = test_scenario::begin(deployer);
+    setup_with_site(&mut scenario, deployer);
+    // Switch the signer to a stranger and try to delete the deployer's site.
+    scenario.next_tx(attacker);
+    {
+        let v = scenario.take_shared<Version>();
+        let site = scenario.take_shared<Site>();
+        // sender=attacker != site.owner (deployer) → aborts ENotOwner, so a
+        // paid site cannot be vandalized by whoever passes it as a shared input.
+        delete_site(site, &v, scenario.ctx());
+        test_scenario::return_shared(v);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = deploy_sui::version::EWrongVersion)]
+fun test_delete_site_aborts_when_frozen() {
+    let deployer = @0xD;
+    let mut scenario = test_scenario::begin(deployer);
+    setup_with_site(&mut scenario, deployer);
+    {
+        let mut v = scenario.take_shared<Version>();
+        let admin = scenario.take_from_sender<version::AdminCap>();
+        let site = scenario.take_shared<Site>();
+        admin.freeze_version(&mut v);
+        // Version gate is the FIRST line, before the owner check: even the owner
+        // cannot delete while the package is frozen.
+        delete_site(site, &v, scenario.ctx());
+        scenario.return_to_sender(admin);
+        test_scenario::return_shared(v);
     };
     scenario.end();
 }
