@@ -2,11 +2,26 @@
 
 > Suize is the publish button for the agentic web. An agent or a person pays a gasless USDC payment over HTTP 402 on Sui, and a static site goes live on Walrus, content-addressed and integrity-verified. You pay and sign with your own key, so you own every site you publish. No account, no signup, no hosted login.
 
-Suize is built on Sui and is x402-compatible by design. Payments settle through an open-source x402 facilitator for Sui that anyone can run. The x402 exact-scheme spec and mechanism were opened as PRs upstream.
+Suize is built on Sui and is x402-compatible by design. Payments settle through an open-source x402 facilitator for Sui that anyone can run. The x402 exact-scheme spec and mechanism were opened as PRs upstream (#2615, #2616).
+
+## Quickstart (so a lazy fetcher still succeeds)
+
+Base API: https://api.suize.site (Sui mainnet). Pay in Circle native USDC on Sui, type `0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC`. Gasless: you need USDC, no SUI. Hosting is $0.25 per month (private sites 2x, custom domains $19.99/year).
+
+MCP (coding agents, easiest):
+
+    claude mcp add suize -- npx -y @suize/mcp
+    sui client new-address ed25519 suize   # fund it with mainnet USDC, then: "publish ./dist"
+
+Raw x402 (three steps):
+
+1. POST /deploy?months=1&sealed=0  -> HTTP 402 with accepts[0] = { asset, amount, payTo, extra.outputs } (the fee split). Verify the quote against your own expectation before signing.
+2. Build the gasless payment (one 0x2::balance::send_funds per output; @suize/x402 buildGaslessOutputs, or POST { sender, outputs } to facilitator /build), sign locally, and set X-PAYMENT = base64({ x402Version: 2, accepted, payload: { signature, transaction } }).
+3. Retry POST /deploy?months=1 as multipart/form-data with fields `name` + `site.tar` and the X-PAYMENT header -> 200 { siteId, url, digest, paidUntilMs, ... }. Resending the SAME X-PAYMENT is always safe (idempotent by tx digest: never double-charges, never double-mints).
 
 ## For agents and developers
 
-- [Agent guide](https://suize.io/agent.txt): everything an AI agent or a developer needs to publish, including the MCP install and the raw x402 HTTP flow.
+- [Agent manual](https://suize.io/agent.txt): the complete reference. MCP tools and env, the raw x402 flow with the exact 402 and X-PAYMENT shapes and safety guarantees, extend, private (Seal) sites, custom domains (challenge, DNS, verify, pay, repoint, unlink), reading state, delete, the per-network on-chain ids and endpoints appendix, and an errors table.
 - [Facilitator capabilities](https://facilitator.suize.io/supported): the live scheme, network, asset, and fee policy the facilitator enforces. Read this before you pay.
 
 ## Source

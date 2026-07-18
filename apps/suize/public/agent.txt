@@ -1,108 +1,531 @@
-# Suize: agent guide
+# Suize: agent manual
 
-Suize is the publish button for AI agents. An agent pays a small USDC amount over
-an HTTP 402 challenge and a static site goes live on Walrus (decentralized storage
-on Sui), content-addressed and integrity-verified. Gasless, non-custodial: you pay
-and sign with your OWN key, so you own every site you deploy. No account, no signup,
-no hosted login.
+Suize is the publish button for the agentic web. You pay one gasless USDC payment
+over an HTTP 402 challenge and a static site goes live on Walrus (decentralized
+storage on Sui), content-addressed and integrity-verified at serve time. You pay
+and sign with your OWN key, so you own every site you deploy: no account, no
+signup, no hosted login.
 
-If you are an AI agent or a developer building one, this file tells you everything
-you need to deploy.
+This file is the complete manual. If you are an AI agent or a developer building
+one, everything you need to deploy, extend, seal, domain, read, and delete is here.
+You never need to read the source.
 
-## The two ways to pay
+## Networks
 
-You need a Sui key that holds mainnet USDC to pay: Circle native USDC on Sui,
-type `0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC`.
-The rail is gasless, so you need NO SUI: the deploy payment draws from your USDC
-Address Balance and pays no gas. By default the Sui CLI keeps your key and does
-the signing (Suize only asks it to sign), so the key never leaves your machine.
-Suize never holds it and never signs for you.
+Two networks, selected by env, never by code. Only the exact string `mainnet` opts
+into mainnet; anything else is testnet (fail-safe).
 
-1. MCP (easiest for coding agents: Claude Code, Cursor, Codex)
-   Install:  claude mcp add suize -- npx -y @suize/mcp
-   Zero config: the MCP signs through your Sui CLI and defaults to mainnet (matching
-   the hosted charge door). Create a dedicated key once and it is used automatically
-   (the alias "suize"):
-     sui client new-address ed25519 suize
-   Fund the address it prints with mainnet USDC. That is it; no key to copy anywhere.
-   Optional env overrides for that server:
-     SUIZE_CLI_ALIAS       Sui CLI alias to sign with (default "suize")
-     SUIZE_SUI_BIN         path to the sui binary, if it is not on PATH
-     SUIZE_SUI_CONFIG_DIR  Sui config dir (passed to the CLI as SUI_CONFIG_DIR)
-     SUIZE_KEY_FILE        a path to a file holding a suiprivkey1... key, signed in-process (preferred: keeps it out of shell history), OR
-     SUIZE_KEY             a suiprivkey1... key directly, signed in-process (avoid inline values: they land in shell history)
-     SUIZE_NETWORK         mainnet (default) or testnet, paired with a self-hosted testnet SUIZE_API
-   Tools: deploy_site(dir, name?, months?, private?) · list_sites · extend_site(siteId, months) · site_status(siteId)
-   Then just tell the agent: "publish ./dist". It answers the 402, pays, and returns a live URL.
+- MAINNET is the live hosted rail: the charge door `https://api.suize.site` and the
+  facilitator `https://facilitator.suize.io` both run mainnet. This is what a
+  zero-config agent uses. Pay in Circle native USDC on Sui mainnet.
+- TESTNET is for self-hosting and dev only: there is no hosted testnet charge door.
+  Run your own worker + facilitator and point your client at them (the MCP takes
+  `SUIZE_API` + `SUIZE_NETWORK=testnet`; a raw client points at your own hosts).
 
-2. Raw x402 (any Sui-aware agent, no MCP)
-   Build and sign the gasless payment yourself with @suize/x402, then send the
-   X-PAYMENT header. See the flow below.
+The rail is gasless: every payment draws from your USDC Address Balance and pays no
+gas, so you need NO SUI, only USDC. The one exception is on-chain owner actions that
+are not payments (delete a site, manage a private site's allowlist): those are
+normal transactions you sign and they cost a little SUI gas.
 
-Reuse a key you already control, or create a dedicated one with the Sui CLI:
-  sui client new-address ed25519 suize
-Fund its address with mainnet USDC. No SUI needed.
+All on-chain ids, USDC types, and endpoints per network are in the appendix at the
+bottom.
 
-## The HTTP flow (raw x402)
+---
 
-Base API: https://api.suize.site (Sui mainnet)
+# QUICKSTART A: the MCP (easiest for coding agents)
 
-1. Ask for the price. A bare POST returns HTTP 402 with the payment terms:
-     POST /deploy?months=1&sealed=0
-   The 402 body carries accepts[0] with { asset, amount, payTo, extra.outputs }
-   (the fee split), and extra.buildUrl.
+A local stdio MCP server (`@suize/mcp`) that gives Claude Code / Cursor / Codex a
+`deploy_site` tool. It signs a gasless x402 payment with a LOCAL key and pays the
+live charge door. The key never leaves your machine.
 
-2. Build the gasless payment. Either construct it locally with
-   @suize/x402 buildGaslessOutputs({ client, sender, asset, outputs }), or POST the
-   declared outputs to the facilitator build door:
-     POST https://facilitator.suize.io/build   { sender, outputs }  -> { bytes }
+Install:
 
-3. Sign the bytes LOCALLY with your key. Base64-encode the payment payload
-   { x402Version: 2, accepted, payload: { signature, transaction } } into X-PAYMENT.
+    claude mcp add suize -- npx -y @suize/mcp
 
-4. Retry with the bundle + the header:
-     POST /deploy?months=1  (multipart/form-data)
-       name      your site label
-       site.tar  a tar of your built static site
-       header X-PAYMENT: <base64 payload>
-   Response 200: { siteId, subdomain, url, version, digest, months, paidUntilMs,
-   storageEndEpoch, expiresAtMs, sealed }. The site is live at its url (a
-   *.suize.site subdomain). The recovered payer, you, becomes the on-chain
-   Site.owner (whoever pays owns), though the owner address is not echoed in
-   this response body; read it back from the on-chain Site object or GET
-   /preview?site=<siteId>.
+Zero config: it defaults to mainnet (matching the hosted door) and signs through
+your Sui CLI. Create a dedicated key once and it is used automatically:
 
-Extend more time:  POST /extend?site=<siteId>&months=N   (same 402 -> pay -> done)
-Custom domain:     POST /domains  (+ ?verify=1), $19.99/year, DNS-verified, payer must own the site.
+    sui client new-address ed25519 suize
 
-## Pricing
+Fund the address it prints with mainnet USDC. Then just ask the assistant: "publish
+./dist". It answers the 402, pays $0.25 for a month, and returns the live URL.
 
-- 0.10 USDC per month of hosting, up to about two years per payment on mainnet (the exact cap is what Walrus can fund in one store; the charge door rejects an over-cap request before you pay). Nothing is permanent; a site serves while its storage is funded and expires if you let it lapse.
-- Private (Seal-encrypted) sites cost 2x. Only wallet addresses you allow can decrypt them, client-side.
-- Custom domain: 19.99 USDC per year.
-- A site whose Walrus storage would cost more than 0.05 USD per month is rejected before any spend (roughly a 100 MB upload ceiling today).
+## Signer resolution order
 
-## The network and asset (read this live)
+The MCP finds a signer in this order and stops at the first that resolves:
 
-Suize's hosted facilitator and charge door run on Sui mainnet today. The exact
-chain, USDC asset type, and fee policy are published at:
-  GET https://facilitator.suize.io/supported
-Read that before you pay: it returns the scheme, network (sui:mainnet for the
-hosted instance; sui:testnet only for a self-hosted testnet fork), and the fee
-split this facilitator enforces. Your payment must credit the declared outputs
-exactly or it is rejected at verify.
+1. `SUIZE_KEY`      a `suiprivkey1…` secret key, signed in-process. Avoid inline
+                    values (they land in shell history).
+2. `SUIZE_KEY_FILE` a path to a file holding a `suiprivkey1…` key, signed
+                    in-process. Preferred over `SUIZE_KEY`: keeps it out of shell
+                    history and env dumps.
+3. the Sui CLI      the alias named by `SUIZE_CLI_ALIAS` (default `suize`) as an
+                    external signer. The key stays in the CLI keystore; this process
+                    only ever sees the public address and the signature. Must be an
+                    ed25519 alias.
 
-## The rail
+The address that signs is the on-chain owner of every site it deploys: whoever pays,
+owns. Suize never holds your key and never signs for you.
 
-Payments settle through an open-source x402 facilitator for Sui
-(https://facilitator.suize.io: /supported /verify /settle /build). It is gasless
-and keyless: it simulates and broadcasts your signed transaction, never holds a
-key. Anyone can run their own instance. Suize opened the x402 exact-scheme spec
-and mechanism as PRs upstream.
+## MCP tools
 
-## Links
+- `deploy_site({ dir, name?, months?, private? })`
+  Publish the built static folder at `dir` (e.g. `./dist`) to Walrus. `months`
+  prepays hosting (default 1, $0.25/month; capped to what Walrus funds in one store,
+  24 months on mainnet). `private: true` deploys a Seal-encrypted site only wallets
+  you allow can open (2x rate). `name` labels it (defaults to the folder name).
+  Returns text: the live URL, the Site ID, the owner (you), the paid-through date,
+  and for a private site its allowlist id.
+
+- `list_sites()`
+  Every site you have deployed, found on-chain by your key's address (SiteCreated
+  events), newest first: name, Site ID, URL.
+
+- `extend_site({ siteId, months? })`
+  Buy more hosting time for a site: pays $0.25/month (2x for private) from your key.
+  `months` default 1.
+
+- `site_status({ siteId })`
+  A site's current state: URL, owner, size, and whether hosting is active or lapsed.
+
+## MCP env overrides
+
+| Var | Default | Meaning |
+| --- | --- | --- |
+| `SUIZE_CLI_ALIAS` | `suize` | Which Sui CLI alias to sign with. |
+| `SUIZE_SUI_BIN` | `sui` | Path to the `sui` binary if not on PATH. |
+| `SUIZE_SUI_CONFIG_DIR` | CLI default | Sui config dir (passed as `SUI_CONFIG_DIR`). |
+| `SUIZE_KEY_FILE` | unset | File holding a `suiprivkey1…` key (preferred in-process signer). |
+| `SUIZE_KEY` | unset | A `suiprivkey1…` key directly (avoid inline). |
+| `SUIZE_NETWORK` | `mainnet` | `mainnet` or `testnet` (pair testnet with a self-hosted `SUIZE_API`). |
+| `SUIZE_API` | `https://api.suize.site` | The charge door (override for self-hosted / testnet). |
+| `SUIZE_GRAPHQL` | per-network | Sui GraphQL endpoint override for reads. |
+
+The MCP guards the price LOCALLY: it derives the expected amount from the request
+params (months + private flag) and refuses to sign if the door's quoted asset or
+amount does not match exactly. A hostile or MITM'd door cannot walk it into signing a
+draining payment.
+
+---
+
+# QUICKSTART B: raw x402 HTTP (any Sui-aware agent, no MCP)
+
+Base API: `https://api.suize.site` (Sui mainnet). The publish flow is four steps.
+
+## 1. Discovery: ask for the price
+
+A bare POST with no body (or with only the query params) returns HTTP 402 with the
+exact terms for the requested months/sealed. Price discovery is zero-shot: the same
+URL quotes and charges.
+
+    POST /deploy?months=1&sealed=0
+
+The 402 body is a standard x402 V2 `PaymentRequired`:
+
+    {
+      "x402Version": 2,
+      "error": "payment required. <rider>",
+      "resource": { "url": "https://api.suize.site/deploy?months=1&sealed=0" },
+      "accepts": [
+        {
+          "scheme": "exact",
+          "network": "sui:mainnet",
+          "amount": "250000",
+          "asset": "0xdba34672…::usdc::USDC",
+          "payTo": "0x9036f4be…",
+          "maxTimeoutSeconds": 120,
+          "extra": {
+            "outputs": [ { "to": "0x9036f4be…", "amount": "250000" } ],
+            "buildUrl": "https://facilitator.suize.io/build"
+          }
+        }
+      ],
+      "extensions": { "payment-identifier": { "info": { "required": true, "id": "pay_…" } } }
+    }
+
+The same base64-encoded body is also on the `PAYMENT-REQUIRED` response header.
+
+- `amount` is the TOTAL in atomic USDC units (6 decimals; `250000` = $0.25).
+- `extra.outputs` is the declared fee split your payment must credit EXACTLY. Suize
+  Deploy is a first-party merchant whose `payTo` IS the facilitator's fee treasury,
+  so its outputs collapse to one leg. A third-party merchant's quote splits into a
+  merchant leg and a separate facilitator fee leg (enforced identically at verify).
+
+SAFETY: before you build or sign, verify the quote against your OWN expectation. The
+`asset` must be the network's native USDC and the outputs total (and `amount`) must
+equal the price you computed for your months/sealed. Never trust the door's number
+blindly: a mispriced or tampered 402 should fail before you sign.
+
+## 2. Build the gasless payment
+
+One `0x2::balance::send_funds<USDC>` moveCall per declared output, each drawing from
+your USDC Address Balance, with the gasless election forced (`setGasBudget(0n)`,
+built over the gRPC transport, which resolves `gasPrice=0`, `gasPayment=[]`). Two
+ways:
+
+- Locally with `@suize/x402`:
+
+      const client = grpcClient("sui:mainnet")
+      const { bytes } = await buildGaslessOutputs({ client, sender, asset, outputs })
+
+  `bytes` is the base64 unsigned TransactionData.
+
+- Or let the facilitator assemble it (keyless, holds no key):
+
+      POST https://facilitator.suize.io/build   { "sender": "0x…", "outputs": [...] }
+      -> { "bytes": "<base64 unsigned tx>" }
+
+  You can also pass `{ sender, payTo, amount }` and the facilitator derives the split
+  from its own policy. A build failure answers 402 (the sender cannot fund the split),
+  never 5xx.
+
+## 3. Sign locally
+
+Sign `bytes` with your key. The signature is the Sui signature (flag||sig||pubkey,
+base64). Assemble the X-PAYMENT header as base64 of:
+
+    {
+      "x402Version": 2,
+      "accepted": <the challenge's accepts[0], echoed VERBATIM>,
+      "payload": { "signature": "<base64 sui sig>", "transaction": "<the base64 bytes>" }
+    }
+
+`accepted` must equal `accepts[0]` field-for-field (scheme, network, asset, payTo,
+amount, outputs, and any `extra.suize` op binding). A tampered copy is rejected before
+any facilitator call. Sign and submit within `maxTimeoutSeconds` (120s): the tx carries
+a validity expiration.
+
+## 4. Retry with the bundle + the header
+
+    POST /deploy?months=1&sealed=0   (multipart/form-data)
+      name      your site label (<= 64 chars)
+      site.tar  an uncompressed tar of your built static site
+      header X-PAYMENT: <base64 payload>
+
+Bundle rules: <= 100 MB, <= 2000 files, no `..` path segments. A file's tar path
+becomes its served path (`index.html` at the root serves at `/`). The reserved path
+`/.suize/deploy.json` is dropped (a per-deploy receipt is injected there). A site
+whose Walrus storage would cost more than $0.05/month is rejected before any spend
+(roughly the 100 MB ceiling today).
+
+Success is 200:
+
+    {
+      "siteId": "0x…",            // on-chain Site object id
+      "subdomain": "<base36(siteId)>",
+      "url": "https://<subdomain>.suize.site",
+      "version": 1,
+      "digest": "<create_site tx digest>",
+      "months": 1,
+      "paidUntilMs": 1752000000000,
+      "storageEndEpoch": 1234,
+      "expiresAtMs": 1752500000000,
+      "sealed": false
+      // "allowlistId": "0x…"  present only when sealed
+    }
+
+The recovered payer (you) becomes the on-chain `Site.owner`. The owner address is not
+echoed in this body; read it back from the Site object or `GET /preview?site=<siteId>`.
+
+## Safety guarantees (raw and MCP)
+
+- Verify the quote against your own expectation BEFORE signing (step 1).
+- Retrying the SAME X-PAYMENT is ALWAYS safe. Settlement is idempotent by tx digest,
+  and `create_site` consumes that digest on-chain, so a resend can never double-charge
+  and never double-mint. A death mid-flight strands nothing.
+- A settled payment digest can even RECOVER a lost deploy later: resend the same
+  header and the worker returns the already-minted site (`recovered: true`) instead of
+  re-storing.
+- The money contract is fail-closed: a facilitator outage answers 503 (not "unpaid").
+  On 503 or a 5xx, resend the SAME header. Only a definitive 402 (bad terms / did not
+  verify) means build a fresh payment.
+
+---
+
+# EXTEND: buy more months
+
+    POST /extend?site=<siteId>&months=<N>
+
+Params may be query or JSON (`{ site, months }`). Same 402 -> pay -> done flow as
+deploy (single X-PAYMENT retry against the same URL).
+
+- OPEN-PAYER: ANYONE may fund ANY site's extension. It only ever ADDS paid time (a
+  gift-extend is harmless; a key that rotated can still keep its site alive). The
+  price is the site's OWN rate: $0.25/month, 2x if the site is sealed (the worker
+  reads the on-chain `sealed` bit to price it).
+- ON-CHAIN: `extend_site` advances `paid_until_ms` to `max(now, paid_until) + add`,
+  computed on-chain, and consumes the settled digest through the same registry as
+  create, so a replay can never extend twice. A lapsed site gets the FULL purchased
+  time (it never extends from a past instant).
+- The months are capped so the new paid-through fits what Walrus can fund in one
+  store; an over-cap extend is rejected (400) before you pay (extend closer to expiry
+  or by fewer months). A site whose Walrus blobs have already lapsed past recovery is
+  rejected (400): redeploy it instead.
+
+Response 200:
+
+    { "siteId", "digest", "paidUntilMs", "storageEndEpoch", "expiresAtMs", "warning"? }
+
+`warning` (rare) means the paid time moved on-chain but a post-settle Walrus storage
+top-up hiccuped; a repeat extend re-drives it (idempotent, no re-charge).
+
+---
+
+# PRIVATE (sealed) SITES
+
+Deploy with `sealed=1` (or `private=1`) for a Seal-encrypted private site. Price is
+2x the flat rate.
+
+What happens:
+
+- The worker mints an on-chain allowlist (`allowlist::create_for_owner`, gated by the
+  worker's DeployerCap) seeded with YOU (the payer), and transfers you the
+  `AllowlistCap`.
+- It Seal-encrypts EVERY file before Walrus, under the identity
+  `<allowlist object id hex> + "01"`, against this network's Seal committee (2-of-2 on
+  testnet, 2-of-3 on mainnet). The worker can encrypt but never decrypt.
+- The 200 body includes `allowlistId`. `sealed: true`.
+- A network with no configured Seal committee rejects a sealed deploy (400) BEFORE any
+  charge.
+
+Viewer behavior: the site URL (`https://<subdomain>.suize.site`) serves a bootstrap
+into the suize.io viewer (`https://suize.io/#/view/<siteId>`). A visitor connects a
+wallet, a session-key signature runs the on-chain `seal_approve`, and if the wallet is
+on the allowlist the key servers release the decryption key and every file is decrypted
+CLIENT-SIDE and rendered in a sandboxed iframe. Denial is cryptographic: a wallet not
+on the list simply cannot decrypt.
+
+Managing the allowlist (you hold the `AllowlistCap`): sign and execute a Move call.
+These are normal owner txs (a little SUI gas, not a gasless payment).
+
+    add:    <targetPkg>::allowlist::add(allowlist, cap, version, account)
+    remove: <targetPkg>::allowlist::remove(allowlist, cap, version, account)
+
+Argument order (all four): the shared `Allowlist` object, your `AllowlistCap`, the
+shared `Version` object (appendix), then the address to add/remove. Or use the
+dashboard at `https://suize.io/#/access/<allowlistId>`. `add` aborts EDuplicate if the
+address is already on the list; the wrong cap aborts EInvalidCap.
+
+---
+
+# CUSTOM DOMAINS
+
+$19.99/year, DNS-verified, payer must be the site owner. Full lifecycle:
+
+## 1. Challenge (free)
+
+    POST /domains        { "siteId": "0x…", "domain": "example.org" }
+
+Response:
+
+    { "domain", "status": "pending", "txtName": "_suize-verify.example.org",
+      "txtValue": "<token>", "cname": "<base36(siteId)>.suize.site" }
+
+Publish both DNS records:
+- a TXT at `_suize-verify.example.org` with value `txtValue`, and
+- point `example.org` at `cname` via CNAME. For a zone apex (which cannot hold a
+  CNAME), ALIAS/flattened A records pointing at `cname` are accepted too.
+
+## 2. Verify + pay
+
+    POST /domains?verify=1   { "siteId", "domain" }   (or body { verify: true })
+
+- If DNS is not green yet, it stays `status: "pending"` with `txtOk` / `cnameOk` and a
+  `detail` naming the missing record. Retry after propagation. (This step is free.)
+- Once both records are green and the domain is not linked, it answers 402. The quote
+  is BOUND to this op: `extra.suize = { op: "link-domain", domain, siteId }`, so a
+  settled link payment can never be replayed for a different domain or site. The payer
+  MUST equal `Site.owner` (a mismatched payer gets a fresh 402 with that reason).
+- Pay it (build + sign + retry with X-PAYMENT, exactly like deploy). Success:
+
+      { "domain", "status": "linked", "txtName", "txtValue", "cname",
+        "txtOk": true, "cnameOk": true, "sslStatus": "pending"|"active"|"manual",
+        "digest", "instructions"? }
+
+`sslStatus` is the custom-hostname SSL state; `manual` means your DNS provider handles
+the cert (the `instructions` field tells you to keep the CNAME). Re-running the free
+`verify=1` on an already-linked domain is idempotent and repairs SSL if it was not
+provisioned at link time.
+
+## 3. Repoint (free)
+
+Move an already-paid domain onto ANOTHER site you own, without re-paying the year.
+
+    POST /domains/repoint   { "domain", "newSiteId", "ts", "signature" }
+
+`signature` is base64 of a personal-message signature over EXACTLY:
+
+    Suize Deploy\nrepoint <domain> -> <newSiteId>\n@<ts>
+
+`ts` is your ms-epoch timestamp, accepted within a +/-60 min window. The signer must
+own BOTH the domain's current site and `newSiteId`. Response:
+
+    { "domain", "siteId": "<newSiteId>", "previousSiteId", "digest" }
+
+## 4. Unlink (free)
+
+    DELETE /domains/<domain>   { "ts", "signature" }
+
+`signature` is base64 of a personal-message signature over:
+
+    Suize Deploy\nunlink <domain>\n@<ts>
+
+`ts` within +/-60 min. The signer must equal the linked site's owner. Response:
+
+    { "status": "unlinked", "domain", "digest", "cfRemoved" }
+
+---
+
+# READING STATE
+
+- LIST YOUR SITES. Query `SiteCreated` events by type over Sui GraphQL and keep the
+  ones whose `owner` matches your address (newest first):
+
+      query($type: String!, $before: String) {
+        events(last: 50, before: $before, filter: { type: $type }) {
+          pageInfo { hasPreviousPage startCursor }
+          nodes { timestamp contents { json } }
+        }
+      }
+
+  `type` is `<PACKAGE>::site::SiteCreated` (appendix). Each `contents.json` carries
+  `site_id, owner, name, size_bytes, file_count, paid_until_ms, sealed`. Fold
+  `SiteExtended` (updates `paid_until_ms`) and `SiteDeleted` over these to track live
+  state. The MCP `list_sites` and the suize.io `#/sites` dashboard do exactly this.
+
+- READ A SITE OBJECT. GraphQL object query, asserting the type is
+  `<PACKAGE>::site::Site`:
+
+      query($id: SuiAddress!) { object(address: $id) { asMoveObject { contents { type { repr } json } } } }
+
+  Fields: `owner, name, quilt_id, manifest_blob_id, manifest_hash, quilt_blob_object,
+  manifest_blob_object, version, size_bytes, file_count, paid_until_ms, sealed`. A
+  site is live while `paid_until_ms > now`.
+
+- SITE CARD. `GET /preview?site=<siteId>` returns `{ siteId, title, description,
+  image, favicon }`, or `{ siteId, sealed: true }`, or `{ siteId, lapsed: true }`, or
+  404. Never touches sealed content.
+
+- URL DERIVATION. `subdomain = BigInt("0x"+siteId).toString(36).padStart(50, "0")`,
+  and the URL is `https://<subdomain>.suize.site`.
+
+- RECEIPTS. Every payment and on-chain action returns a tx `digest`; look it up on
+  Suiscan or SuiVision for the on-chain record.
+
+---
+
+# DELETE
+
+There is no charge and no HTTP endpoint for delete: it is a direct owner-signed Move
+call. Sign a tx calling `<targetPkg>::site::delete_site(site, version)` (args: the
+shared `Site` object, then the shared `Version` object). The sender MUST equal
+`Site.owner` (the recovered payer); any other signer aborts `ENotOwner`. This is a
+normal tx and costs a little SUI gas. It removes the on-chain manifest and emits
+`SiteDeleted`; it does NOT refund or shorten Walrus storage (the blobs lapse at their
+funded end epoch), and the payment->site audit trail is kept.
+
+Availability: live on testnet today. Not present in the live mainnet deploy package,
+so mainnet sites have no on-chain delete. To take a mainnet site down, let its hosting
+lapse (stop extending) and it stops serving when storage expires.
+
+---
+
+# APPENDIX: on-chain ids + endpoints
+
+## MAINNET (the live hosted rail)
+
+    Charge door (API)   https://api.suize.site
+    Facilitator         https://facilitator.suize.io
+    Sui GraphQL         https://graphql.mainnet.sui.io/graphql
+    Sui gRPC            https://fullnode.mainnet.sui.io:443
+    Walrus aggregator   https://aggregator.walrus-mainnet.walrus.space
+    Walrus System obj   0x2134d52768ea07e8c43570ef975eb3e4c27a39fa6396bef985b5abc58d03ddd2
+
+    USDC (asset)        0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC
+    Deploy package      0xec2dcd65271127019351678ddd05287176a0b9b7fc59ef6ceef34fdbc36e87db  (PACKAGE and target)
+    Version object      0xfc39ef5748bccdbbc445054940ff99bb448cf47497da71b047c1a5530bf56b4e
+    Domain registry     0x28d4557f9c55cdc8bb1afb98092ecfba505d8f23b0eae8a067473c2cba7a972b
+    SiteDigestRegistry  0xc95ac121e1ebc7727022c944ef573180a044360ff20208eca525dc36ea0b0ce5
+    Merchant + treasury 0x9036f4be5ca0d0c2b890f12b398c032a00952aa41c2776507db0d018002373a7  (treasury@suize)
+
+    Seal committee (2-of-3):
+      0x1afb3a57211ceff8f6781757821847e3ddae73f64e78ec8cd9349914ad985475  (NodeInfra)
+      0x145540d931f182fef76467dd8074c9839aea126852d90d18e1556fcbbd1208b6  (Overclock)
+      0xe0eb52eba9261b96e895bbb4deca10dcd64fbc626a1133017adcd5131353fd10  (Studio Mirai)
+
+## TESTNET (self-hosted / dev only: no hosted charge door)
+
+    Sui GraphQL         https://graphql.testnet.sui.io/graphql
+    Sui gRPC            https://fullnode.testnet.sui.io:443
+    Walrus aggregator   https://aggregator.walrus-testnet.walrus.space
+    Walrus System obj   0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af
+
+    USDC (asset)        0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC
+    Deploy PACKAGE      0x41cc6bab26d2b7b63c47f1dcc2bf1494cbee798cd47cc2115100d7e1cd71ac36  (type-origin, event filters)
+    Deploy target pkg   0xbf5429eed974d33091cd8f7e836ac1679855653b7bcbb5901735d41005942f51  (Move-call targets)
+    Version object      0xd97828ae3e5ca26f7aa712a8d9af4a65b65bc49c404c97ad89b62ac1d0b0fbfa
+    Domain registry     0x11d7efed38c1a4e98fa1cd68b2e236b3c459eb583e316f28a96b8aa1b5afd6aa
+    SiteDigestRegistry  0xe5928ef6b1ae7418876c567a916aca38e2c5cb7d546412eadb43370afa9092e8
+
+    Seal committee (2-of-2):
+      0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75  (mysten-testnet-1)
+      0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8  (mysten-testnet-2)
+
+The merchant/treasury on a self-hosted testnet instance is whatever its operator
+configures. Read `<facilitator>/supported` for the live scheme, network, asset, and
+fee policy any instance enforces, and never hardcode an id you can resolve live.
+
+Event/type names (both networks, PACKAGE-scoped): `<PACKAGE>::site::SiteCreated`,
+`SiteExtended`, `SiteDeleted`; object type `<PACKAGE>::site::Site`.
+
+---
+
+# ERRORS
+
+What each status means and what to do. The golden rule: resending the SAME X-PAYMENT
+is always safe (idempotent by digest), so retry the same header on anything transient.
+
+| Status | Meaning | Do |
+| --- | --- | --- |
+| 200 | Success (may be `recovered: true` on a retry) | Done. |
+| 402 | Payment required: discovery, or a definitive reject (bad terms, did not verify, wrong payer, settle failure) | If discovery: build + pay. If a reject: fix the cause and build a FRESH payment. |
+| 400 | Bad input: months out of range, invalid domain/siteId, unsafe path in bundle, sealed unavailable on this network, storage lapsed past recovery | Fix the input; do not retry as-is. |
+| 404 | Site or domain not found | Fix the id. |
+| 409 | This payment is being processed / a cap contention race | Retry the SAME header in a moment. |
+| 413 | Bundle too large (> 100 MB, or over the storage-cost cap) | Shrink the bundle. |
+| 429 | Rate limited (facilitator) | Back off and retry. |
+| 503 | Not configured, or a facilitator outage / transient (NOT "unpaid") | Retry the SAME X-PAYMENT header. |
+| 5xx | Transient worker error (the tx may have landed) | Retry the SAME X-PAYMENT header. |
+
+An extend or deploy that returns non-200 after you paid: resend the same inputs / same
+header. The rail recovers the already-paid work by digest and will not charge twice.
+
+---
+
+# FOR MERCHANTS (charge agents on the same rail)
+
+Suize Deploy is just a merchant on an open, free-to-run x402 facilitator for Sui.
+Anyone can be one:
+
+- The open-source x402 facilitator for Sui: `https://facilitator.suize.io` with
+  `GET /health`, `GET /supported`, `POST /verify`, `POST /settle`, `POST /build`. It
+  is keyless (holds no key: simulates then broadcasts the payer-signed tx) and
+  stateless (the chain is the database). Fork it, point it at your own treasury,
+  deploy. The fee is operator-owned: `fee = min(max(amount * feeBps/10000, feeFloor),
+  amount - 1)`, recomputed and ENFORCED at verify (declared outputs are never
+  trusted). The live instance publishes `feeBps: 200` (2%), `feeFloor: 10000` ($0.01).
+- `@suize/pay`: zero-dep merchant middleware (challenge + verify + settle) you drop
+  into any fetch handler. `@suize/x402`: the exact-scheme primitives (the gasless
+  builder, the split math, verify enforcement).
+
+Suize is x402-compatible by design. The x402 exact-scheme spec and mechanism were
+opened as PRs upstream (#2615, #2616).
+
+---
+
+# Links
 
 - Source:   https://github.com/Sceat/suize
 - The MCP:  https://github.com/Sceat/suize/tree/master/packages/mcp
-- Merchant integration (be a merchant on the rail): @suize/pay
+- Merchant: https://github.com/Sceat/suize/tree/master/packages/pay  (@suize/pay)
 - Site:     https://suize.io
