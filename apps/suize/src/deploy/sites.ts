@@ -6,11 +6,13 @@
 // =============================================================================
 
 import { graphqlUrl, packageIds } from '@suize/shared'
+import { normalizeSuiObjectId } from '@mysten/sui/utils'
 import { NETWORK } from '../config'
 import { hostOf, urlOf, epochOf, untilLabel, dateLabel, sizeLabel } from './util'
 
 const GRAPHQL_URL = graphqlUrl(NETWORK)
 const DEPLOY_PACKAGE = packageIds(NETWORK).DEPLOY.PACKAGE
+const OBJECT_BATCH_SIZE = 50
 
 export interface OwnedSite {
   siteId: string
@@ -49,6 +51,14 @@ const EVENTS_QUERY = `query($type: String!, $before: String) {
   }
 }`
 
+const OBJECTS_QUERY = `query($keys: [ObjectKey!]!) {
+  multiGetObjects(keys: $keys) { address }
+}`
+
+interface ObjectsData {
+  multiGetObjects?: Array<{ address?: string | null } | null> | null
+}
+
 const gql = async <T>(query: string, variables: Record<string, unknown>): Promise<T> => {
   const res = await fetch(GRAPHQL_URL, {
     method: 'POST',
@@ -59,6 +69,20 @@ const gql = async <T>(query: string, variables: Record<string, unknown>): Promis
   const body = (await res.json()) as { data?: T; errors?: { message?: string }[] }
   if (body.errors?.length) throw new Error(body.errors[0]?.message ?? 'graphql error')
   return body.data as T
+}
+
+const fetchExistingIds = async (ids: string[]): Promise<Set<string>> => {
+  const existing = new Set<string>()
+  for (let i = 0; i < ids.length; i += OBJECT_BATCH_SIZE) {
+    const batch = ids.slice(i, i + OBJECT_BATCH_SIZE).map((id) => normalizeSuiObjectId(id))
+    const data = await gql<ObjectsData>(OBJECTS_QUERY, {
+      keys: batch.map((address) => ({ address })),
+    })
+    for (const object of data.multiGetObjects ?? []) {
+      if (object?.address) existing.add(normalizeSuiObjectId(object.address))
+    }
+  }
+  return existing
 }
 
 const toNum = (v: unknown): number => {
@@ -152,5 +176,6 @@ export async function fetchOwnedSites(owner: string, maxPages = 8): Promise<Owne
     })
   }
 
-  return sites
+  const existingIds = await fetchExistingIds(sites.map(({ siteId }) => siteId))
+  return sites.filter(({ siteId }) => existingIds.has(normalizeSuiObjectId(siteId)))
 }

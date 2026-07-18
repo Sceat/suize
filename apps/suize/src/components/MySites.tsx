@@ -8,8 +8,10 @@
 // =============================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useCurrentAccount, useDAppKit } from '@mysten/dapp-kit-react'
+import { useCurrentAccount, useCurrentClient, useDAppKit } from '@mysten/dapp-kit-react'
 import { ConnectButton } from '@mysten/dapp-kit-react/ui'
+import { Transaction } from '@mysten/sui/transactions'
+import { DELETE_SITE_LIVE, packageIds } from '@suize/shared'
 import { Folio } from './Folio'
 import { DeployPanel } from './DeployPanel'
 import { DomainRow } from './DomainRow'
@@ -21,11 +23,19 @@ import type { PaySigner } from '../deploy/pay'
 import { explorerObject, explorerTx, dateLabel } from '../deploy/util'
 import { getDevSigner } from '../viewer/devSigner'
 import { navigate } from '../viewer/router'
+import { NETWORK } from '../config'
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`
+const DEPLOY_IDS = packageIds(NETWORK).DEPLOY
+
+interface DirectTxResult {
+  Transaction?: { digest: string }
+  FailedTransaction?: { digest: string }
+}
 
 export function MySites() {
   const account = useCurrentAccount()
+  const client = useCurrentClient()
   const dAppKit = useDAppKit()
   const dev = useMemo(() => getDevSigner(), [])
 
@@ -61,6 +71,35 @@ export function MySites() {
       if (runRef.current === run) setError(true)
     }
   }, [address])
+
+  const deleteSite = useCallback(
+    async (siteId: string) => {
+      const transaction = new Transaction()
+      transaction.moveCall({
+        target: DEPLOY_IDS.TARGETS.DELETE_SITE,
+        arguments: [transaction.object(siteId), transaction.object(DEPLOY_IDS.VERSION_OBJECT)],
+      })
+
+      let result: DirectTxResult
+      if (dev) {
+        const exec = client as unknown as {
+          signAndExecuteTransaction: (input: {
+            transaction: Transaction
+            signer: unknown
+          }) => Promise<DirectTxResult>
+        }
+        result = await exec.signAndExecuteTransaction({ transaction, signer: dev.keypair })
+      } else {
+        result = (await dAppKit.signAndExecuteTransaction({ transaction })) as DirectTxResult
+      }
+
+      if (result.FailedTransaction || !result.Transaction) throw new Error('Delete transaction failed.')
+      // Invalidate any older event read that could still contain this Site.
+      ++runRef.current
+      setSites((current) => (current ? current.filter((site) => site.siteId !== siteId) : current))
+    },
+    [client, dAppKit, dev],
+  )
 
   useEffect(() => {
     setSites(null) // address changed: show loading, never the previous wallet's list
@@ -120,7 +159,14 @@ export function MySites() {
               )}
               {sites &&
                 sites.map((s, i) => (
-                  <SiteCard key={s.siteId} index={i} site={s} signer={signer} onChanged={() => void refresh()} />
+                  <SiteCard
+                    key={s.siteId}
+                    index={i}
+                    site={s}
+                    signer={signer}
+                    onChanged={() => void refresh()}
+                    onDelete={DELETE_SITE_LIVE[NETWORK] ? deleteSite : null}
+                  />
                 ))}
             </section>
           </div>
@@ -130,9 +176,22 @@ export function MySites() {
   )
 }
 
-function SiteCard({ index, site, signer, onChanged }: { index: number; site: OwnedSite; signer: PaySigner | null; onChanged: () => void }) {
-  const [busy, setBusy] = useState(false)
+function SiteCard({
+  index,
+  site,
+  signer,
+  onChanged,
+  onDelete,
+}: {
+  index: number
+  site: OwnedSite
+  signer: PaySigner | null
+  onChanged: () => void
+  onDelete: ((siteId: string) => Promise<void>) | null
+}) {
+  const [busy, setBusy] = useState<'extend' | 'delete' | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [deleteArmed, setDeleteArmed] = useState(false)
   // The site's linked custom domains, reported up by DomainRow (chain-derived).
   const [customDomains, setCustomDomains] = useState<string[]>([])
   // Sync latch — a fast double-click must never fire two payments (state is async).
@@ -155,7 +214,7 @@ function SiteCard({ index, site, signer, onChanged }: { index: number; site: Own
     if (!signer || inFlight.current) return
     inFlight.current = true
     setErr(null)
-    setBusy(true)
+    setBusy('extend')
     try {
       await extend({ signer, siteId: site.siteId, months: 1, sealed: site.sealed })
       await new Promise((r) => setTimeout(r, 900)) // chain lags a beat behind settle
@@ -165,7 +224,23 @@ function SiteCard({ index, site, signer, onChanged }: { index: number; site: Own
       setErr(/reject|denied|cancel/i.test(msg) ? 'You cancelled the payment.' : "Couldn’t extend. Try again.")
     } finally {
       inFlight.current = false
-      setBusy(false)
+      setBusy(null)
+    }
+  }
+
+  const doDelete = async () => {
+    if (!onDelete || inFlight.current) return
+    inFlight.current = true
+    setErr(null)
+    setBusy('delete')
+    try {
+      await onDelete(site.siteId)
+    } catch (e) {
+      const msg = (e as Error)?.message ?? ''
+      setErr(/reject|denied|cancel/i.test(msg) ? 'You cancelled the deletion.' : "Couldn’t delete. Try again.")
+    } finally {
+      inFlight.current = false
+      setBusy(null)
     }
   }
 
@@ -230,9 +305,29 @@ function SiteCard({ index, site, signer, onChanged }: { index: number; site: Own
             Visit ↗
           </a>
         )}
-        <button className="btn btn--primary" disabled={busy || !signer} onClick={() => void doExtend()}>
-          {busy ? 'Extending…' : site.lapsed ? 'Relist +1 mo' : 'Extend +1 mo'}
+        <button className="btn btn--primary" disabled={busy !== null || !signer} onClick={() => void doExtend()}>
+          {busy === 'extend' ? 'Extending…' : site.lapsed ? 'Relist +1 mo' : 'Extend +1 mo'}
         </button>
+        {onDelete &&
+          (deleteArmed ? (
+            <>
+              <span className="dmsg">Deletes the site and its URL now. Storage lapses at its paid end date. No refunds.</span>
+              <button className="btn btn--danger" disabled={busy !== null} onClick={() => void doDelete()}>
+                {busy === 'delete' ? 'Deleting…' : 'Confirm'}
+              </button>
+            </>
+          ) : (
+            <button
+              className="btn btn--ghost"
+              disabled={busy !== null}
+              onClick={() => {
+                setErr(null)
+                setDeleteArmed(true)
+              }}
+            >
+              Delete
+            </button>
+          ))}
         <span className="filed__ends">
           {site.receiptDigest && (
             <a className="filed__end" href={explorerTx(site.receiptDigest)} target="_blank" rel="noopener noreferrer">

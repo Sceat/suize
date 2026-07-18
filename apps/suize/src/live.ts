@@ -7,11 +7,13 @@
 // =============================================================================
 
 import { graphqlUrl, packageIds, WALRUS_EPOCHS } from '@suize/shared'
+import { normalizeSuiObjectId } from '@mysten/sui/utils'
 import { NETWORK } from './config'
 import type { DeploySite, Preview } from './types'
 
 const GRAPHQL_URL = graphqlUrl(NETWORK)
 const DEPLOY_PACKAGE = packageIds(NETWORK).DEPLOY.PACKAGE
+const GALLERY_SITE_LIMIT = 50
 
 /** A real on-chain explorer link for a settlement / create tx digest. */
 export const explorerTx = (digest: string): string => `https://suiscan.xyz/${NETWORK}/tx/${digest}`
@@ -60,6 +62,14 @@ const EVENTS_QUERY = `query($type: String!, $before: String) {
   }
 }`
 
+const OBJECTS_QUERY = `query($keys: [ObjectKey!]!) {
+  multiGetObjects(keys: $keys) { address }
+}`
+
+interface ObjectsData {
+  multiGetObjects?: Array<{ address?: string | null } | null> | null
+}
+
 const gql = async <T>(query: string, variables: Record<string, unknown>): Promise<T> => {
   const res = await fetch(GRAPHQL_URL, {
     method: 'POST',
@@ -70,6 +80,19 @@ const gql = async <T>(query: string, variables: Record<string, unknown>): Promis
   const body = (await res.json()) as { data?: T; errors?: { message?: string }[] }
   if (body.errors?.length) throw new Error(body.errors[0]?.message ?? 'graphql error')
   return body.data as T
+}
+
+const fetchExistingIds = async (ids: string[]): Promise<Set<string>> => {
+  if (ids.length === 0) return new Set()
+  const normalized = ids.map((id) => normalizeSuiObjectId(id))
+  const data = await gql<ObjectsData>(OBJECTS_QUERY, {
+    keys: normalized.map((address) => ({ address })),
+  })
+  return new Set(
+    (data.multiGetObjects ?? []).flatMap((object) =>
+      object?.address ? [normalizeSuiObjectId(object.address)] : [],
+    ),
+  )
 }
 
 const toNum = (v: unknown): number => {
@@ -99,9 +122,9 @@ export interface LiveData {
 /**
  * Fetch the real front-page feed: every deployed site (newest first) mapped to
  * the gallery shape, plus honest counters derived from the same events. Counters:
- * sitesLive = sites whose paid-through is still in the future; paymentsSettled =
- * create + extend events (each is one settled x402 payment); epochsFunded = total
- * Walrus epochs currently paid ahead across all live sites.
+ * sitesLive and epochsFunded cover the bounded, existence-checked gallery window;
+ * paymentsSettled covers the fetched create + extend event window (each event is
+ * one settled x402 payment).
  */
 export async function fetchLive(maxPages = 6): Promise<LiveData> {
   const empty: LiveData = { sites: [], figures: { sitesLive: 0, paymentsSettled: 0, epochsFunded: 0 } }
@@ -136,24 +159,48 @@ export async function fetchLive(maxPages = 6): Promise<LiveData> {
 
   const now = Date.now()
   const nowEpoch = epochOf(now)
-  const seen = new Set<string>()
   const sites: DeploySite[] = []
   let epochsFunded = 0
 
   created.sort((a, b) => (b.timestamp ? Date.parse(b.timestamp) : 0) - (a.timestamp ? Date.parse(a.timestamp) : 0))
 
-  for (const n of created) {
+  // The gallery is intentionally bounded to the newest 50 distinct Site ids, so
+  // the live-object check stays one small GraphQL batch per refresh.
+  const seen = new Set<string>()
+  const candidates: Array<{ node: EventNode; siteId: string }> = []
+  for (const node of created) {
+    const rawId = node.contents?.json?.site_id
+    if (!rawId) continue
+    let siteId: string
+    try {
+      siteId = normalizeSuiObjectId(rawId)
+    } catch {
+      continue
+    }
+    if (seen.has(siteId)) continue
+    seen.add(siteId)
+    candidates.push({ node, siteId })
+    if (candidates.length === GALLERY_SITE_LIMIT) break
+  }
+
+  let existingIds: Set<string>
+  try {
+    existingIds = await fetchExistingIds(candidates.map(({ siteId }) => siteId))
+  } catch {
+    return empty
+  }
+
+  for (const { node: n, siteId } of candidates) {
     const j = n.contents?.json
-    if (!j?.site_id || seen.has(j.site_id)) continue
-    seen.add(j.site_id)
+    if (!j || !existingIds.has(siteId)) continue
     const sealed = j.sealed === true
-    const sub = subdomainOf(j.site_id)
+    const sub = subdomainOf(siteId)
     const paidUntil = toNum(j.paid_until_ms)
     const endEpoch = paidUntil ? epochOf(paidUntil) : null
     if (endEpoch != null) epochsFunded += Math.max(0, endEpoch - nowEpoch)
     const i = sites.length
     sites.push({
-      siteId: j.site_id,
+      siteId,
       name: j.name || '(untitled edition)',
       host: sealed ? 'private · wallet-gated' : `${sub}.suize.site`,
       url: sealed ? '' : `https://${sub}.suize.site`,

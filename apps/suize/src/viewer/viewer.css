@@ -73,13 +73,219 @@
   color: var(--blue);
 }
 
-/* ---------- THE DECRYPTED SITE FRAME ---------- */
-.vsite {
+/* =============================================================================
+   THE VAULT DOOR — the sealed-site GATE. No navbar, no card: a calm, full-
+   viewport frontispiece over the house ink-smoke shader. One action in the happy
+   path (connect, which chains the unlock); a single mono progress line while the
+   chain runs; a dignified refusal when the crypto says no.
+   ============================================================================= */
+.vault {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* transparent: the body paper + the shader show through */
+}
+/* the reused HeroShader, dialed down so the door reads over a whisper of ink */
+.vault .hero-shader {
+  opacity: 0.5;
+}
+
+.vault__stage {
+  position: relative;
   flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: clamp(32px, 8vh, 96px) 24px;
+  animation: vrise 0.5s var(--ease) both;
+}
+@keyframes vrise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vault__stage {
+    animation: none;
+  }
+}
+
+.vault__kicker {
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.vault__name {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(34px, 6vw, 60px);
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  margin: 16px 0 0;
+  max-width: 18ch;
+  overflow-wrap: anywhere;
+}
+.vault__note {
+  font-family: var(--sans);
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--fg-2);
+  margin: 18px 0 0;
+  max-width: 40ch;
+}
+/* the refusal — a serif statement, ink not alarm-red */
+.vault__deny {
+  font-family: var(--serif);
+  font-size: clamp(17px, 2vw, 20px);
+  line-height: 1.5;
+  color: var(--fg-2);
+  margin: 16px 0 0;
+  max-width: 34ch;
+}
+.vault__act {
+  margin-top: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+/* the single-line unlock progress — mono, a hairline spinner, never a big spinner */
+.vault__progress {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  color: var(--fg-3);
+}
+.vault__spin {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--blue-glow);
+  border-top-color: var(--blue);
+  animation: vspin 0.7s linear infinite;
+}
+/* replaces all chrome */
+.vault__foot {
+  position: relative;
+  flex: 0 0 auto;
+  text-align: center;
+  padding: 0 20px 26px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--fg-4);
+}
+
+/* the connect control, styled as the door's one primary action */
+.vault__act mysten-dapp-kit-connect-button {
+  --primary: var(--fg);
+  --primary-foreground: #fff;
+  --background: var(--ink-raised);
+  --foreground: var(--fg);
+  --secondary: var(--ink-surface);
+  --secondary-foreground: var(--fg);
+  --border: var(--hair-strong);
+  --muted: var(--ink-surface);
+  --muted-foreground: var(--fg-3);
+  --popover: var(--ink-raised);
+  --popover-foreground: var(--fg);
+  --radius: 4px;
+  --font-sans: var(--sans);
+  --font-weight-medium: 600;
+  --font-weight-semibold: 600;
+  --cursor-button: pointer;
+  --cursor-menu-item: pointer;
+  --ring: var(--blue);
+}
+.vault__act mysten-dapp-kit-connect-button::part(trigger) {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 12px 22px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 6px 16px -8px rgba(10, 27, 46, 0.4);
+}
+
+/* ---------- THE DECRYPTED SITE FRAME + its lone floating chip ---------- */
+.vsite-shell {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+.vsite {
+  display: block;
   width: 100%;
+  height: 100vh;
+  height: 100dvh;
   border: 0;
   background: #fff;
-  display: block;
+}
+.vchip {
+  position: absolute;
+  z-index: 2;
+  top: 14px;
+  left: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: calc(100vw - 28px);
+  padding: 7px 12px;
+  font-size: 11px;
+  background: rgba(251, 252, 254, 0.82);
+  backdrop-filter: blur(10px) saturate(150%);
+  border: 1px solid var(--hair);
+  border-radius: 5px;
+  box-shadow: 0 6px 20px -12px rgba(10, 27, 46, 0.5);
+}
+.vchip__home {
+  flex: 0 0 auto;
+  font-family: 'Hashgraph Title', var(--sans);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--fg);
+}
+.vchip__home:hover {
+  color: var(--blue-deep);
+}
+.vchip__sep {
+  flex: 0 0 auto;
+  color: var(--fg-4);
+}
+.vchip__name {
+  min-width: 0;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vchip__link {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  padding-left: 9px;
+  border-left: 1px solid var(--hair);
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+.vchip__link:hover {
+  color: var(--blue);
 }
 
 /* ---------- STATE PANELS (reading / ready / denied / error) ---------- */
@@ -282,3 +488,9 @@
   font-weight: 600;
   padding: 11px 18px;
 }
+
+/* Unlock progress: a hairline bar with real phase anchors; the fill's long
+   transition provides the gentle creep between anchors. */
+.vault__busy { display: flex; flex-direction: column; align-items: center; gap: 14px; width: min(320px, 80vw); }
+.vault__bar { width: 100%; height: 2px; background: rgba(10, 27, 46, 0.1); border-radius: 1px; overflow: hidden; }
+.vault__bar-fill { display: block; height: 100%; background: var(--blue, #1e7fd6); transition: width 2.4s cubic-bezier(0.16, 1, 0.3, 1); }
