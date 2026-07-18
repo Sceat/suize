@@ -69,6 +69,10 @@ export const SUI_ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/
 export interface Signer {
   address(): string
   signTransaction(bytes: Uint8Array): Promise<{ signature: string }>
+  /** Personal-message signing (repoint auth). Only the in-process key paths can
+   * do this: `sui keytool sign` applies the transaction intent and cannot sign
+   * personal messages. Absent ⇒ the tool explains the SUIZE_KEY_FILE route. */
+  signPersonalMessage?(bytes: Uint8Array): Promise<{ signature: string }>
 }
 
 const cliAlias = (): string => env('SUIZE_CLI_ALIAS') || 'suize'
@@ -188,7 +192,11 @@ export const signer = (): Signer => {
         `The key from SUIZE_KEY/SUIZE_KEY_FILE is not a valid Sui secret key (expected suiprivkey1…): ${(e as Error).message}`,
       )
     }
-    _signer = { address: () => kp.toSuiAddress(), signTransaction: b => kp.signTransaction(b) }
+    _signer = {
+      address: () => kp.toSuiAddress(),
+      signTransaction: b => kp.signTransaction(b),
+      signPersonalMessage: b => kp.signPersonalMessage(b),
+    }
     return _signer
   }
 

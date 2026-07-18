@@ -12,7 +12,7 @@ import { basename, join, relative } from 'node:path'
 import { createTar } from 'nanotar'
 import { fromBase64 } from '@mysten/sui/utils'
 import { grpcClient, buildGaslessOutputs, formatUsdc } from '@suize/x402'
-import { caip2, maxDeployMonths, deployPriceUsdc, DOMAIN_PRICE_PER_YEAR_USDC } from '@suize/shared'
+import { caip2, maxDeployMonths, deployPriceUsdc, DOMAIN_PRICE_PER_YEAR_USDC, buildDeployRepointAuthMessage } from '@suize/shared'
 import { API_URL, GRAPHQL_URL, NETWORK, DEPLOY, USDC_TYPE, SUI_ADDRESS_RE, address, signer } from './config'
 
 export interface DeployArgs {
@@ -523,6 +523,56 @@ export const linkDomain = async (args: DomainArgs): Promise<string> => {
     `  URL:    https://${domain}`,
     linked.digest ? `  Digest: ${linked.digest}` : '',
     `  SSL:    ${linked.sslStatus ?? 'provisioning'}${linked.instructions ? `\n  ${linked.instructions}` : ''}`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+export interface RepointArgs {
+  domain?: string
+  newSiteId?: string
+}
+
+/** Move an already-paid domain onto another site the same key owns — FREE.
+ * Auth is an owner-signed PERSONAL MESSAGE (the shared byte-for-byte builder);
+ * the worker verifies the signer owns BOTH the currently-linked site and the
+ * new one. The Sui CLI cannot sign personal messages, so this needs an
+ * in-process key (SUIZE_KEY / SUIZE_KEY_FILE). */
+export const repointDomain = async (args: RepointArgs): Promise<string> => {
+  const domain = (args.domain ?? '').trim().toLowerCase()
+  const newSiteId = (args.newSiteId ?? '').trim()
+  if (!DOMAIN_RE.test(domain)) throw new Error('Pass { domain } — the linked custom domain to move.')
+  if (!SUI_ADDRESS_RE.test(newSiteId)) throw new Error('Pass { newSiteId } — the 0x… id of the site to point the domain at.')
+
+  const s = signer()
+  if (!s.signPersonalMessage) {
+    throw new Error(
+      'Repointing needs a personal-message signature and the Sui CLI can only sign transactions. ' +
+        'Export your key once (`sui keytool export`) into a private file and set SUIZE_KEY_FILE to its path ' +
+        '(or set SUIZE_KEY), then retry. Linking, deploying, and extending keep working through the CLI as before.',
+    )
+  }
+
+  const ts = Date.now()
+  const message = buildDeployRepointAuthMessage(domain, newSiteId, ts)
+  const { signature } = await s.signPersonalMessage(new TextEncoder().encode(message))
+
+  const res = await fetch(`${API_URL}/domains/repoint`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domain, newSiteId, ts, signature }),
+  })
+  const body = (await asJson(res)) as { domain?: string; siteId?: string; previousSiteId?: string; digest?: string | null; error?: string }
+  if (res.status !== 200) {
+    throw new Error(`repoint failed (${res.status}): ${body.error ?? JSON.stringify(body).slice(0, 200)}`)
+  }
+  if (body.previousSiteId === body.siteId) {
+    return `${domain} already points at ${newSiteId} — nothing to do.`
+  }
+  return [
+    `Repointed ${domain}: ${body.previousSiteId} -> ${newSiteId} (free, no new charge).`,
+    `  URL:    https://${domain} (new content serves after the short domain cache TTL)`,
+    body.digest ? `  Digest: ${body.digest}` : '',
   ]
     .filter(Boolean)
     .join('\n')

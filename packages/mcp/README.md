@@ -44,6 +44,7 @@ It answers the 402, pays $0.25 for a month of hosting, and returns the live URL.
 | `extend_site` | Buy more hosting time for a site you own: `{ siteId }` + `{ months }`. Pays $0.25/month (2x for private). |
 | `site_status` | Show a site's current state: URL, owner, size, and how long its hosting is paid through (active or lapsed). Pass `{ siteId }`. |
 | `link_domain` | Link a custom domain to a site you own: `{ siteId, domain }`. First run returns the DNS records to set (TXT + CNAME); once DNS verifies, the same call pays $19.99/year and links the domain on-chain with automatic SSL. Re-runs are free and idempotent; only the final link charges, signed by the site owner's key. |
+| `repoint_domain` | Move an already-linked domain onto another site you own: `{ domain, newSiteId }`. Free, no new charge. Auth is a personal message signed by the key that owns both sites, so it needs `SUIZE_KEY` / `SUIZE_KEY_FILE` (the Sui CLI signer cannot sign personal messages). |
 | `domain_status` | A domain's link state for a site: linked, waiting on DNS (with the exact records still missing), or verified-but-unlinked. Free, never pays. |
 
 ## Non-custodial by construction

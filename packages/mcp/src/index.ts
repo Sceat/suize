@@ -29,11 +29,13 @@ import {
   listSites,
   siteStatus,
   linkDomain,
+  repointDomain,
   domainStatus,
   type DeployArgs,
   type ExtendArgs,
   type SiteIdArgs,
   type DomainArgs,
+  type RepointArgs,
 } from './deploy'
 
 // ── Protocol constants (kept in lockstep with the backend MCP module) ────────
@@ -142,6 +144,21 @@ const TOOLS = [
     },
   },
   {
+    name: 'repoint_domain',
+    description:
+      'Move an already-linked custom domain onto another site you own — free, no new charge. Auth is a ' +
+      'personal message signed by the key that owns BOTH sites; needs an in-process key (SUIZE_KEY or ' +
+      'SUIZE_KEY_FILE), the Sui CLI signer cannot sign personal messages.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        domain: { type: 'string' as const, description: 'The linked custom domain to move.' },
+        newSiteId: { type: 'string' as const, description: 'The 0x… Site ID to point the domain at.' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'domain_status',
     description:
       'Check a custom domain\'s link state for a site: linked (with SSL state), waiting on DNS (shows the exact ' +
@@ -164,6 +181,7 @@ const TOOL_HANDLERS: Record<string, (args: ToolArgs) => Promise<string>> = {
   extend_site: args => extendSite(args as ExtendArgs),
   site_status: args => siteStatus(args as SiteIdArgs),
   link_domain: args => linkDomain(args as DomainArgs),
+  repoint_domain: args => repointDomain(args as RepointArgs),
   domain_status: args => domainStatus(args as DomainArgs),
 }
 

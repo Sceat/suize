@@ -95,6 +95,11 @@ owns. Suize never holds your key and never signs for you.
   idempotent; only the final link charges, and the payment must be signed by the
   site owner's key.
 
+- `repoint_domain({ domain, newSiteId })`
+  Move an already-linked domain onto another site you own. Free, no new charge.
+  Auth is a personal message signed by the key that owns both sites, so it needs
+  SUIZE_KEY or SUIZE_KEY_FILE (the Sui CLI signer cannot sign personal messages).
+
 - `domain_status({ siteId, domain })`
   The domain's link state: linked, waiting on DNS (with the exact records still
   missing), or verified-but-unlinked. Free, never pays.
