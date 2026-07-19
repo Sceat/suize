@@ -283,78 +283,72 @@ a { color: inherit; text-decoration: none; }
 .front__proof a { color: var(--fg-2); border-bottom: 1px solid var(--hair-strong); white-space: nowrap; transition: color .16s var(--ease), border-color .16s var(--ease); }
 .front__proof a:hover { color: var(--blue-deep); border-color: var(--blue-deep); }
 .front__note { font-family: var(--mono); font-size: 12px; color: var(--fg-3); padding: 28px 0 8px; border-top: 1px solid var(--hair); }
-.front__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border-top: 1px solid var(--fg); }
-@media (max-width: 940px){ .front__grid { grid-template-columns: repeat(2,1fr); } }
-@media (max-width: 620px){ .front__grid { grid-template-columns: 1fr; } }
+/* ---------- THE FRONT-PAGE INDEX ----------
+   An editorial ledger of the real feed. One row per public edition, strictly
+   single line: the serif headline (links to the live site) · the served host
+   (mono, ellipsis-truncated, never wraps) · a dotted leader · the dateline facts
+   (pressed-ago · epochs-left · receipt). The landing executes ZERO third-party
+   content, so the feed is text, never an iframe wall. A heavy top rule opens the
+   section (house idiom); rows part on the house fading hairline. */
+.index { border-top: 1px solid var(--fg); }
+.index__row {
+  position: relative; display: flex; align-items: baseline; gap: 0 14px;
+  padding: 13px 2px; min-width: 0;
+}
+.index__row + .index__row::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: var(--rule-fade);
+}
+.index__row:hover { background: linear-gradient(180deg, var(--blue-wash), transparent 72%); }
 
-/* story cell */
-.story { padding: 22px 24px 24px; border-bottom: 1px solid var(--hair); border-right: 1px solid var(--hair-2); position: relative; }
-.story:hover { background: linear-gradient(180deg, var(--blue-wash), transparent 60%); }
-.story--lead { grid-column: span 2; grid-row: span 2; padding: 26px 30px 30px; }
-@media (max-width: 620px){ .story--lead { grid-column: span 1; } }
-.story__link { display: block; }
-.story__dateline { display: flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: 10px; letter-spacing: .02em; color: var(--fg-3); text-transform: uppercase; }
-.story__cat { font-family: var(--sans); font-weight: 600; letter-spacing: .16em; color: var(--blue-deep); }
-.shot { position: relative; overflow: hidden; border-radius: 3px; border: 1px solid var(--hair); background: var(--ink-surface); margin: 14px 0; }
-.story .shot { aspect-ratio: 16/10; }
-.story--lead .shot { aspect-ratio: 16/8.4; margin: 18px 0 20px; }
-/* faux browser + faux page composition */
-.shot__top { position: absolute; inset: 0 0 auto 0; height: 12px; background: var(--ink-0); border-bottom: 1px solid var(--hair-2); z-index: 2; }
-.shot__top::after { content:''; position: absolute; left: 8px; top: 4px; width: 42%; height: 4px; border-radius: 2px; background: rgba(10,27,46,.1); }
-.shot__body { position: absolute; inset: 12px 0 0 0; }
-/* archetypes */
-.pv-docs { display: grid; grid-template-columns: 26% 1fr; height: 100%; }
-.pv-docs__side { background: var(--ink-0); border-right: 1px solid var(--hair-2); background-image: repeating-linear-gradient(180deg, transparent 0 13px, rgba(10,27,46,.09) 13px 15px); background-size: 100% 22px; background-position: 12px 16px; background-repeat: repeat; }
-.pv-docs__main { padding: 14px 16px; background-image: repeating-linear-gradient(180deg, rgba(10,27,46,.11) 0 5px, transparent 5px 20px); }
-.pv-docs__main::before { content:''; display:block; width: 55%; height: 10px; border-radius: 2px; background: var(--fg); opacity: .78; margin-bottom: 12px; }
-.pv-folio { height: 100%; background: linear-gradient(155deg, var(--blue-ice), var(--ink-surface) 78%); position: relative; }
-.pv-folio::before { content:''; position: absolute; inset: 12px 12px 40% 12px; border-radius: 3px; background: linear-gradient(145deg, #0c1a2b, #1a3752); }
-.pv-folio::after { content:''; position: absolute; left: 12px; right: 40%; bottom: 14px; height: 8px; border-radius: 2px; background: rgba(10,27,46,.32); box-shadow: 0 14px 0 -3px rgba(10,27,46,.16); }
-.pv-status { height: 100%; padding: 12px 14px; background-image: repeating-linear-gradient(180deg, rgba(10,27,46,.09) 0 3px, transparent 3px 15px); font-family: var(--mono); }
-.pv-status::before { content:'STATUS · OK'; position: absolute; right: 12px; top: 20px; font-family: var(--mono); font-size: 9px; letter-spacing: .1em; color: var(--bull); }
-.pv-landing { height: 100%; display: grid; place-content: center; gap: 9px; justify-items: center; background: radial-gradient(120% 90% at 50% 10%, var(--blue-wash), transparent 60%); }
-.pv-landing::before { content:''; width: 120px; height: 13px; border-radius: 3px; background: var(--fg); opacity: .82; }
-.pv-landing::after { content:''; width: 68px; height: 9px; border-radius: 2px; background: var(--blue); }
-.pv-deck { height: 100%; background: linear-gradient(135deg,#0c1a2b,#1a3752); position: relative; }
-.pv-deck::before { content:''; position: absolute; left: 16px; bottom: 34px; width: 58%; height: 14px; border-radius: 3px; background: rgba(255,255,255,.9); }
-.pv-deck::after { content:''; position: absolute; left: 16px; bottom: 18px; width: 34%; height: 8px; border-radius: 2px; background: var(--blue-bright); }
-.pv-locked { height: 100%; background: linear-gradient(135deg, var(--ink-0), var(--ink-surface)); position: relative; filter: none; }
-.pv-locked::before { content:''; position: absolute; inset: 0; backdrop-filter: blur(3px); background: repeating-linear-gradient(180deg, rgba(10,27,46,.06) 0 6px, transparent 6px 18px); }
-.pv-locked__lock { position: absolute; inset: 0; display: grid; place-content: center; color: var(--fg-3); }
-/* live preview: the real page rendered at desktop width, scaled to fit the card.
-   width:400% + scale(.25) cancel to the card's width regardless of card size, so
-   the frame always shows a desktop miniature, never a squished mobile layout, with
-   no JS. The .shot__top browser bar (z-index:2) sits over the very top edge; the
-   iframe is pointer-events:none + aria-hidden so the overlaying story link stays
-   clickable. Bigger lead card uses a gentler ratio so its render is not over-wide. */
-.shot--live .shot__frame { position: absolute; top: 0; left: 0; width: 400%; height: 400%; border: 0; transform: scale(.25); transform-origin: 0 0; pointer-events: none; }
-.story--lead .shot--live .shot__frame { width: 200%; height: 200%; transform: scale(.5); }
+/* the headline — serif display face; shrinks to an ellipsis only under duress */
+.index__name {
+  flex: 0 1 auto; min-width: 4ch; font-family: var(--serif); font-weight: 600;
+  font-size: 18px; line-height: 1.25; letter-spacing: -.01em; color: var(--fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .16s var(--ease);
+}
+a.index__name:hover { color: var(--blue-deep); }
 
-.story__name { font-family: var(--serif); font-weight: 600; letter-spacing: -.01em; color: var(--fg); margin: 0; overflow-wrap: anywhere; }
-.story .story__name { font-size: 19px; line-height: 1.2; }
-.story--lead .story__name { font-size: clamp(26px,3vw,38px); line-height: 1.08; }
-.story:hover .story__name { color: var(--blue-deep); }
-/* the long base36 Walrus subdomain must break, or it forces the story cell's
-   min-content past a phone viewport (horizontal overflow). */
-.story__host { font-family: var(--mono); font-size: 11.5px; color: var(--fg-3); margin-top: 5px; overflow-wrap: anywhere; }
-.story--lead .story__sub { font-family: var(--serif); font-size: 15.5px; line-height: 1.55; color: var(--fg-2); margin: 12px 0 0; max-width: 46ch; }
-.story__foot { display: flex; align-items: center; gap: 8px; margin-top: 13px; padding-top: 11px; border-top: 1px solid var(--hair-2); }
+/* the served host — mono; the long base36 subdomain ellipsis-truncates, no wrap.
+   The high shrink factor makes the host yield FIRST under a tight row, so the
+   serif headline stays readable and the host is the truncation victim (phones). */
+.index__host {
+  flex: 0 100 auto; min-width: 2ch; font-size: 11.5px; color: var(--fg-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* the dotted leader — fills the gap to the right-aligned facts (the house
+   radial-dot ledger move); it only claims free space, collapsing to nothing when
+   the row is tight, so it can never cause overflow. */
+.index__leader {
+  flex: 1 1 auto; min-width: 0; align-self: center; height: 1em;
+  background-image: radial-gradient(circle, var(--fg-4) 1px, transparent 1.4px);
+  background-size: 7px 100%; background-position: 0 center; background-repeat: repeat-x; opacity: .5;
+}
+
+/* the right-aligned dateline facts — one nowrap cluster, sized to content so it
+   is never the overflow cause; the flexible name/host/leader yield around it */
+.index__meta { flex: 0 0 auto; display: flex; align-items: baseline; gap: 12px; white-space: nowrap; }
+.index__ago { font-size: 11px; color: var(--fg-3); }
+
+/* the newest edition leads — a touch larger, nothing else changes (size, not chrome) */
+.index__row:first-child { padding-top: 17px; padding-bottom: 17px; }
+.index__row:first-child .index__name { font-size: clamp(21px, 2.2vw, 26px); }
+
+@media (max-width: 620px){
+  .index__row { gap: 0 10px; padding: 12px 2px; }
+  .index__row:first-child { padding-top: 14px; padding-bottom: 14px; }
+  .index__row:first-child .index__name { font-size: 20px; }
+  .index__leader { display: none; }
+  .index__meta { margin-left: auto; gap: 9px; }
+}
+
 .epoch { font-family: var(--mono); font-size: 11px; color: var(--fg-2); display: inline-flex; align-items: baseline; gap: 7px; }
 .epoch b { font-weight: 500; color: var(--fg); }
 .epoch--soon b, .epoch--soon { color: var(--bear); }
 .epoch--perm { color: var(--blue-deep); }
 .epoch--perm b { color: var(--blue-deep); }
-.tag { font-family: var(--sans); font-size: 9px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--fg-3); padding: 3px 7px; border: 1px solid var(--hair); border-radius: 3px; }
-.tag--unlisted { color: var(--fg-2); }
-.tag--private { color: var(--fg-2); }
-.receipt { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--fg-3); transition: color .16s; }
+.receipt { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--fg-3); transition: color .16s; }
 .receipt:hover { color: var(--blue); }
-.receipt svg { flex: 0 0 auto; }
-.leadbar {
-  display: flex; align-items: baseline; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--hair);
-}
-.leadbar .dots { flex: 1 1 auto; height: 1em; align-self: center;
-  background-image: radial-gradient(circle, var(--fg-4) 1px, transparent 1.4px); background-size: 7px 100%; background-position: 0 center; background-repeat: repeat-x; opacity: .5; }
 
 /* ---------- TRUST BEATS ---------- */
 .trust { background: var(--ink-surface); border-top: 1px solid var(--hair); }

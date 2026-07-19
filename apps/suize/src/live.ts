@@ -9,7 +9,7 @@
 import { graphqlUrl, packageIds, WALRUS_EPOCHS } from '@suize/shared'
 import { normalizeSuiObjectId } from '@mysten/sui/utils'
 import { NETWORK } from './config'
-import type { DeploySite, Preview } from './types'
+import type { DeploySite } from './types'
 
 const GRAPHQL_URL = graphqlUrl(NETWORK)
 const DEPLOY_PACKAGE = packageIds(NETWORK).DEPLOY.PACKAGE
@@ -44,7 +44,6 @@ interface SiteCreatedJson {
   site_id?: string
   owner?: string
   name?: string
-  size_bytes?: string | number
   paid_until_ms?: string | number
   sealed?: boolean
 }
@@ -98,14 +97,6 @@ const fetchExistingIds = async (ids: string[]): Promise<Set<string>> => {
 const toNum = (v: unknown): number => {
   const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : 0
   return Number.isFinite(n) ? n : 0
-}
-
-const previewFor = (sealed: boolean, i: number): Preview => {
-  if (sealed) return 'locked'
-  // A neutral visual archetype chosen by list position, purely decorative: it
-  // gives the wall variety and does NOT depict the site's real appearance (we
-  // never fetch/screenshot the live page). Honest because it claims nothing.
-  return (['landing', 'folio', 'docs', 'status', 'deck'] as const)[i % 5]
 }
 
 export interface LiveFigures {
@@ -198,25 +189,15 @@ export async function fetchLive(maxPages = 6): Promise<LiveData> {
     const paidUntil = toNum(j.paid_until_ms)
     const endEpoch = paidUntil ? epochOf(paidUntil) : null
     if (endEpoch != null) epochsFunded += Math.max(0, endEpoch - nowEpoch)
-    const i = sites.length
     sites.push({
       siteId,
       name: j.name || '(untitled edition)',
       host: sealed ? 'private · wallet-gated' : `${sub}.suize.site`,
       url: sealed ? '' : `https://${sub}.suize.site`,
-      sizeBytes: toNum(j.size_bytes),
       expiresAtEpoch: endEpoch,
       receiptDigest: n.transaction?.digest ?? null,
       privacy: sealed ? 'private' : 'public',
-      category: sealed ? 'Private' : 'Live edition',
       pressedAgo: pressedAgo(n.timestamp ? Date.parse(n.timestamp) : 0),
-      viaAgent: false,
-      preview: previewFor(sealed, i),
-      lead: i === 0,
-      sub:
-        i === 0
-          ? `Pressed to Walrus and paid on the open rail, content-addressed, so the URL can't rot. ${sizeLabel(toNum(j.size_bytes))} live right now.`
-          : undefined,
     })
   }
 
@@ -225,6 +206,3 @@ export async function fetchLive(maxPages = 6): Promise<LiveData> {
 
   return { sites, figures: { sitesLive, paymentsSettled, epochsFunded } }
 }
-
-const sizeLabel = (bytes: number): string =>
-  bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`

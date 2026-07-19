@@ -58,6 +58,8 @@
   worker in flight (redirected) · lead reviews (key-handling)
   · DONE inline by lead (5 lines, sub-brief-size): devSigner ?dev-key now ALIAS-ONLY (raw
   suiprivkey in URL rejected; keys live in gitignored .env.local) — owner correction
+- [T-041] Landing stops executing third-party content: gallery live-iframes replaced by an editorial list (recursive landing-copy embeds were exploding visitor browsers); tick 1s→30s; dead preview styles swept — accept: 0 iframes on landing, 390px overflow-free, gates green · lead publishes + repoints suize.io
+  (brief said T-034; that id is taken by "Mainnet infra events survived" in OPEN — used next-free T-041 to avoid a duplicate ledger key; renumber if you meant otherwise)
 
 ## OPEN (ordered by value ÷ blast-radius)
 
