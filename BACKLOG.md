@@ -58,8 +58,8 @@
   worker in flight (redirected) · lead reviews (key-handling)
   · DONE inline by lead (5 lines, sub-brief-size): devSigner ?dev-key now ALIAS-ONLY (raw
   suiprivkey in URL rejected; keys live in gitignored .env.local) — owner correction
-- [T-041] Landing stops executing third-party content: gallery live-iframes replaced by an editorial list (recursive landing-copy embeds were exploding visitor browsers); tick 1s→30s; dead preview styles swept — accept: 0 iframes on landing, 390px overflow-free, gates green · lead publishes + repoints suize.io
-  (brief said T-034; that id is taken by "Mainnet infra events survived" in OPEN — used next-free T-041 to avoid a duplicate ledger key; renumber if you meant otherwise)
+- [T-041] Landing stops executing third-party content: gallery live-iframes replaced by an editorial list (recursive landing-copy embeds were exploding visitor browsers); tick 1s→30s; dead preview styles swept — accept: 0 iframes on landing, 390px overflow-free, gates green · DONE + SHIPPED LIVE 2026-07-19 · keys: gates✓ (tsc 0, build 0, net −164 LoC) behavior✓ (0 iframes + scrollWidth 390 measured; lead viewed 1440/390 shots) quality✓ (lead line-by-line) · proof: commit d0bb7d5; fund $0.50 demo→service gasless BZyF8UjU…; publish $0.25 site 0xec85c251…2d1acc (owner suize-mainnet-service, paid→Aug 18); repoint suize.io digest 31kYoHxR…; live-verified new bundle + x-suize-integrity (old site 0x06027fda… keeps its subdomain till Aug 18 lapse)
+  (brief said T-034; that id is taken by "Mainnet infra events survived" in OPEN — used next-free T-041 to avoid a duplicate ledger key)
 
 ## OPEN (ordered by value ÷ blast-radius)
 
