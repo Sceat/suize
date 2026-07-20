@@ -80,6 +80,81 @@ export function gaslessShapeProblem(data: ReturnType<Transaction['getData']>): s
   return ''
 }
 
+// ── expiration gate (issue #1) ────────────────────────────────────────────────
+// Simulation (dryRun / SimulateTransaction) is NOT epoch-aware: an EXPIRED signed
+// payment dry-runs clean yet can NEVER settle, because the chain rejects a passed
+// expiration window only at BROADCAST. A resource server that serves before settling
+// would therefore deliver against a payment that can never pay. verify must read the
+// live epoch + chain and reject a window that has already passed.
+//
+// The pure kernel takes the decoded tx data plus the live `currentEpoch` and `chainId`
+// (both read from the chain by the caller). It MIRRORS the upstream signing-path rule
+// in full: the ValidDuring window (epoch bounds + chain bind + the not-yet-supported
+// timestamp fields), the legacy Epoch(max), and None. Money-path conservatism: it fails
+// CLOSED — an undecodable, ambiguous, or unrecognized expiration REJECTS (a passed-
+// through ambiguous window is the exact serve-before-settle hazard). Returns a problem
+// string, or "" when the expiration is safe. Pure — no client.
+export function expirationProblem(
+  data: ReturnType<Transaction['getData']>,
+  currentEpoch: bigint,
+  chainId: string,
+): string {
+  const exp = data.expiration
+  const payment = data.gasData?.payment
+  const gasless = payment == null || (Array.isArray(payment) && payment.length === 0)
+
+  // None / absent. A gasless tx MUST carry a ValidDuring — the protocol accepts an
+  // empty gasPayment ONLY with one — so its absence means the tx can never settle:
+  // reject. A client-paid coin tx with no expiration is epoch-valid forever: pass.
+  if (exp == null || exp.$kind === 'None') {
+    return gasless ? 'gasless payment carries no expiration (cannot settle)' : ''
+  }
+
+  // Legacy Epoch(max): valid iff the chain has not passed the max epoch.
+  if (exp.$kind === 'Epoch') {
+    const max = BigInt(exp.Epoch)
+    return currentEpoch > max ? `expired: epoch ${currentEpoch} > max epoch ${max}` : ''
+  }
+
+  if (exp.$kind === 'ValidDuring') {
+    const w = exp.ValidDuring
+    // The timestamp bounds are not settlement-enforceable yet — a window carrying them
+    // is unverifiable here, so reject rather than guess (fail closed).
+    if (w.minTimestamp != null || w.maxTimestamp != null) {
+      return 'unsupported timestamp-bounded expiration'
+    }
+    // Cross-chain bind: a window built for another Sui network can never settle here.
+    if (w.chain !== chainId) return `wrong chain: ${w.chain} ≠ ${chainId}`
+    // Gasless width bind. Sui's own validity_check (sui-transaction.rs, verified
+    // 2026-07-21) requires a ValidDuring OUTSIDE the owned-input relax flag to carry
+    // BOTH epoch bounds, with maxEpoch equal to minEpoch (legacy) or minEpoch + 1
+    // (multi-epoch); a null bound or any wider span is rejected AT BROADCAST. That relax
+    // flag exists for owned-input (coin) txs and never applies to a gasless
+    // Address-Balance payment (empty gasPayment), so the SDK only ever stamps a width-1
+    // gasless window. A null-max or (min, min+100) gasless span is therefore a
+    // hand-crafted forgery that simulates clean yet can never settle: the exact
+    // serve-before-settle hazard this gate exists to kill. If mainnet ever relaxes to
+    // any-range windows, the x402 spec revs first and this mirror follows it (impl
+    // follows spec, one home).
+    if (gasless && !(w.minEpoch != null && w.maxEpoch != null && BigInt(w.maxEpoch) - BigInt(w.minEpoch) <= 1n)) {
+      return `illegal gasless window: [${w.minEpoch}, ${w.maxEpoch}]`
+    }
+    // Current-window bounds. On the gasless arm both are now guaranteed present; the
+    // client-paid arm stays null-tolerant (a null bound is unbounded that side), which
+    // the owned-input relax exception legitimately permits.
+    if (w.maxEpoch != null && currentEpoch > BigInt(w.maxEpoch)) {
+      return `expired: epoch ${currentEpoch} > maxEpoch ${w.maxEpoch}`
+    }
+    if (w.minEpoch != null && currentEpoch < BigInt(w.minEpoch)) {
+      return `not yet valid: epoch ${currentEpoch} < minEpoch ${w.minEpoch}`
+    }
+    return ''
+  }
+
+  // Unrecognized expiration kind — fail closed (an ambiguous window is a reject).
+  return `unrecognized expiration: ${(exp as { $kind?: string }).$kind}`
+}
+
 /**
  * Derive the payer address from a signed deploy/charge payment — the on-chain `owner`
  * (whoever pays, owns) and the no-proxy-debit cross-check (recovered == simulated sender).

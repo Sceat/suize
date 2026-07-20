@@ -33,6 +33,7 @@ import {
   recoverPayer,
   assertOutputsExact,
   assertGaslessTxShape,
+  expirationProblem,
   normalizeBalanceChanges,
   outputProblems,
   OutputsError,
@@ -203,6 +204,22 @@ export const doVerify = async (
         `payment already executed on-chain (digest ${digest})`,
       );
     }
+
+    // EXPIRATION GATE (issue #1): simulation is NOT epoch-aware, so an expired payment
+    // dry-runs clean but can never settle. Read the live epoch + chain identifier and
+    // reject a window that has passed BEFORE simulating — a serve-before-settle resource
+    // server must never deliver against an unsettleable payment. A transient failure of
+    // these reads falls through to the catch below as facilitator_unready (fail-safe).
+    const [{ systemState }, { chainIdentifier }] = await Promise.all([
+      client.core.getCurrentSystemState(),
+      client.core.getChainIdentifier(),
+    ]);
+    const expProblem = expirationProblem(
+      Transaction.from(fromBase64(transaction)).getData(),
+      BigInt(systemState.epoch),
+      chainIdentifier,
+    );
+    if (expProblem) return fail("invalid_transaction_state", expProblem);
 
     // Simulate: proves the exact split AND yields the simulated sender.
     const sim = await assertOutputsExact({ client, txBytesB64: transaction, asset: policy.asset, outputs });

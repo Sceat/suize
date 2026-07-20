@@ -24,6 +24,7 @@ import {
   assertOutputsExact,
   assertUnsignedBytesSafe,
   assertGaslessTxShape,
+  expirationProblem,
   gaslessShapeProblem,
   GASLESS_ALLOWED_TARGETS,
   OutputsError,
@@ -406,6 +407,113 @@ describe('gaslessShapeProblem (F3 — gasless command allow-list)', () => {
     const err = (() => { try { assertGaslessTxShape(FIXTURE_BYTES) } catch (e) { return e as OutputsError } })()
     expect((err as OutputsError).code).toBe('invalid_exact_sui_payload_outputs_mismatch')
     expect((err as OutputsError).message).toContain('not gasless')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// expirationProblem (issue #1) — the epoch/chain expiration gate. Simulation is NOT
+// epoch-aware, so an EXPIRED gasless payment simulates clean yet can never settle;
+// verify must reject a passed window. Synthetic decoded shapes (the house kernel idiom,
+// mirroring gaslessShapeProblem above) plus one real offline-built decode-proof.
+describe('expirationProblem (epoch/chain expiration gate)', () => {
+  const CHAIN = '69WiPg3DAQiwdxfncX6wYQ2siKwAe6L9BZthQea3JNMD' // testnet genesis digest (valid base58, 32B)
+  const NOW = 1000n
+  // Minimal decoded-data shape the kernel reads (expiration + gasData.payment).
+  const data = (expiration: unknown, payment: unknown[] = []) =>
+    ({ expiration, gasData: { payment } } as unknown as Parameters<typeof expirationProblem>[0])
+  // Default: a LEGAL gasless window (both bounds present, width 1) containing NOW.
+  const valid = (over: Record<string, unknown> = {}) => ({
+    $kind: 'ValidDuring',
+    ValidDuring: { minEpoch: '1000', maxEpoch: '1001', minTimestamp: null, maxTimestamp: null, chain: CHAIN, nonce: 1, ...over },
+  })
+
+  test('PASS: a ValidDuring window that contains the current epoch', () => {
+    expect(expirationProblem(data(valid()), NOW, CHAIN)).toBe('')
+  })
+
+  test('REJECT: a ValidDuring window one epoch in the PAST (the issue-#1 bug)', () => {
+    expect(expirationProblem(data(valid({ minEpoch: '998', maxEpoch: '999' })), NOW, CHAIN)).toContain('expired')
+  })
+
+  test('REJECT: a window not yet valid (minEpoch in the future)', () => {
+    expect(expirationProblem(data(valid({ minEpoch: '1001', maxEpoch: '1002' })), NOW, CHAIN)).toContain('not yet valid')
+  })
+
+  test('REJECT: a window for the WRONG chain (cross-network replay)', () => {
+    expect(expirationProblem(data(valid({ chain: 'SomeOtherChainIdentifier' })), NOW, CHAIN)).toContain('wrong chain')
+  })
+
+  test('REJECT: a window carrying the not-yet-supported timestamp fields', () => {
+    expect(expirationProblem(data(valid({ minTimestamp: '1' })), NOW, CHAIN)).toContain('timestamp')
+    expect(expirationProblem(data(valid({ maxTimestamp: '9' })), NOW, CHAIN)).toContain('timestamp')
+  })
+
+  test('PASS: a client-paid tx with null (unbounded) epoch bounds', () => {
+    // The owned-input relax flag tolerates a null bound; only the GASLESS arm requires
+    // both bounds present (the width vectors below).
+    expect(expirationProblem(data(valid({ minEpoch: null, maxEpoch: null }), [{ objectId: '0x1' }]), NOW, CHAIN)).toBe('')
+  })
+
+  // Gasless width bind (issue #1 fail-open): Sui's validity_check rejects a gasless
+  // ValidDuring that lacks a bound or spans more than one epoch AT BROADCAST. The SDK
+  // only ever stamps a width-1 window; an attacker hand-builds what the SDK never emits.
+  test('REJECT: a gasless ValidDuring with a null bound (the SDK always stamps both)', () => {
+    expect(expirationProblem(data(valid({ maxEpoch: null })), NOW, CHAIN)).toContain('illegal gasless window')
+    expect(expirationProblem(data(valid({ minEpoch: null })), NOW, CHAIN)).toContain('illegal gasless window')
+  })
+
+  test('REJECT: a gasless ValidDuring wider than one epoch, current epoch INSIDE it', () => {
+    // The fail-open: width 100, NOW in [min, max], so every prior bound check passes.
+    expect(expirationProblem(data(valid({ minEpoch: '1000', maxEpoch: '1100' })), NOW, CHAIN)).toContain('illegal gasless window')
+  })
+
+  test('PASS: a gasless width-1 or legacy width-0 window in range', () => {
+    expect(expirationProblem(data(valid({ minEpoch: '1000', maxEpoch: '1001' })), NOW, CHAIN)).toBe('')
+    expect(expirationProblem(data(valid({ minEpoch: '1000', maxEpoch: '1000' })), NOW, CHAIN)).toBe('')
+  })
+
+  test('PASS: the width bind is GASLESS-only, a client-paid wide window still verifies', () => {
+    // Identical wide bounds to the reject above, but client-paid (non-empty gasPayment):
+    // the owned-input relax flag legitimately permits it, so over-tightening here would
+    // false-reject real wallet payments.
+    expect(expirationProblem(data(valid({ minEpoch: '1000', maxEpoch: '1100' }), [{ objectId: '0x1' }]), NOW, CHAIN)).toBe('')
+  })
+
+  test('Epoch(max): passes at/below max, rejects once past it', () => {
+    expect(expirationProblem(data({ $kind: 'Epoch', Epoch: 1000 }), NOW, CHAIN)).toBe('')
+    expect(expirationProblem(data({ $kind: 'Epoch', Epoch: 999 }), NOW, CHAIN)).toContain('expired')
+  })
+
+  test('None: REJECTED on a gasless shape, PASSED on a client-paid coin tx', () => {
+    // A gasless tx (empty gasPayment) with None can never settle → reject.
+    expect(expirationProblem(data({ $kind: 'None', None: true }, []), NOW, CHAIN)).toContain('cannot settle')
+    // Absent expiration on a gasless shape → same.
+    expect(expirationProblem(data(null, []), NOW, CHAIN)).toContain('cannot settle')
+    // A client-paid coin tx (non-empty gasPayment) with None → no-expiry, pass.
+    expect(expirationProblem(data({ $kind: 'None', None: true }, [{ objectId: '0x1' }]), NOW, CHAIN)).toBe('')
+  })
+
+  test('fails CLOSED on an unrecognized expiration kind', () => {
+    expect(expirationProblem(data({ $kind: 'Whenever' }), NOW, CHAIN)).toContain('unrecognized')
+  })
+
+  test('DECODE-PROOF: a real offline-built gasless ValidDuring tx decodes into the kernel', async () => {
+    // Proves Transaction.from(bytes).getData().expiration yields the exact shape the
+    // kernel reads (the premortem unknown), against genuinely BCS-encoded bytes. No
+    // network, deterministic.
+    const tx = new Transaction()
+    tx.setSender('0x' + '2'.repeat(64))
+    tx.setGasBudget(0n)
+    tx.setGasPrice(0)
+    tx.setGasPayment([])
+    tx.setExpiration({ ValidDuring: { minEpoch: '900', maxEpoch: '901', minTimestamp: null, maxTimestamp: null, chain: CHAIN, nonce: 7 } })
+    tx.moveCall({ target: '0x2::balance::send_funds', typeArguments: [ASSET], arguments: [tx.pure.u64(1000n), tx.pure.address(MERCHANT)] })
+    const decoded = Transaction.from(await tx.build()).getData()
+    // The [900,901] window: expired at epoch 902, still valid at 901.
+    expect(expirationProblem(decoded, 902n, CHAIN)).toContain('expired')
+    expect(expirationProblem(decoded, 901n, CHAIN)).toBe('')
+    // The chain bind is real: a different live chain id rejects the decoded window.
+    expect(expirationProblem(decoded, 901n, 'DifferentChainId')).toContain('wrong chain')
   })
 })
 

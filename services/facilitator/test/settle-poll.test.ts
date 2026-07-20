@@ -48,6 +48,14 @@ const payload = (): PaymentPayload => ({
 
 const notFound = () => Object.assign(new Error("transaction not found"), { code: "NOT_FOUND" });
 
+// doVerify now reads the live epoch + chain for the expiration gate (issue #1). The
+// captured fixture carries a None expiration on a funded (client-paid) tx, so it passes
+// the gate regardless — these reads only need to answer for the re-verify to proceed.
+const core = {
+  getCurrentSystemState: async () => ({ systemState: { epoch: "100" } }),
+  getChainIdentifier: async () => ({ chainIdentifier: "x" }),
+};
+
 /** An executed-SUCCESS tx paying the honest split of `amount` (fee = 2%, floor $0.01). */
 const executedTx = (amount: bigint, fee: bigint) => ({
   effects: { status: { success: true } },
@@ -100,6 +108,7 @@ test("broadcast timeout → first read NOT_FOUND → a later poll read sees the 
     waitForTransaction: async () => {
       throw new Error("The operation was aborted due to timeout");
     },
+    core,
   } as any;
 
   const r = await doSettle(client, policy, payload(), requirements());
@@ -122,6 +131,7 @@ test("still NOT_FOUND after the poll window → settle_failed, and NOT cached (a
     waitForTransaction: async () => {
       throw new Error("The operation was aborted due to timeout");
     },
+    core,
   } as any;
 
   const failed = await doSettle(neverFound, policy, payload(), req);

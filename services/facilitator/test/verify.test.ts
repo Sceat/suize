@@ -4,6 +4,9 @@
 // decodable send_funds tx + a mock transport whose simulate returns a canned result.
 // No live chain, no funded keys.
 import { test, expect } from "bun:test";
+import { Transaction } from "@mysten/sui/transactions";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { toBase64 } from "@mysten/sui/utils";
 import { assertOutputsExact, OutputsError, type PaymentPayload, type PaymentRequirements } from "@suize/x402";
 import { policyFor, type Env } from "../src/env";
 import { outputsFor } from "../src/fees";
@@ -123,4 +126,77 @@ test("verify ACCEPTS a payment that pays the recomputed split exactly", async ()
   });
   expect(payer).toBe(SENDER);
   expect(debit).toBe(1_000_000n);
+});
+
+// ── expiration enforcement at verify (issue #1) ───────────────────────────────────
+// Simulation is NOT epoch-aware: an EXPIRED signed gasless payment dry-runs clean yet
+// can NEVER settle (the chain only rejects it at broadcast). A resource server that
+// serves before settling would deliver against an unsettleable payment, so doVerify
+// MUST read the live epoch/chain and reject a window that has already passed.
+const CHAIN = "69WiPg3DAQiwdxfncX6wYQ2siKwAe6L9BZthQea3JNMD"; // testnet genesis digest (valid base58, 32B)
+const KP = Ed25519Keypair.fromSecretKey(new Uint8Array(32).fill(9));
+const PAYER = KP.getPublicKey().toSuiAddress();
+
+/** A gasless-shaped (gasPrice 0, gasPayment []) send_funds tx carrying a ValidDuring
+ * window, signed by KP. Fully offline + deterministic — no network. */
+async function expiringPayload(minEpoch: string, maxEpoch: string): Promise<PaymentPayload> {
+  const tx = new Transaction();
+  tx.setSender(PAYER);
+  tx.setGasBudget(0n);
+  tx.setGasPrice(0);
+  tx.setGasPayment([]);
+  tx.setExpiration({ ValidDuring: { minEpoch, maxEpoch, minTimestamp: null, maxTimestamp: null, chain: CHAIN, nonce: 7 } });
+  tx.moveCall({ target: "0x2::balance::send_funds", typeArguments: [policy.asset], arguments: [tx.pure.u64(1000n), tx.pure.address(MERCHANT)] });
+  const bytes = await tx.build();
+  const { signature } = await KP.signTransaction(bytes);
+  return { x402Version: 2, accepted: requirements(), payload: { signature, transaction: toBase64(bytes) } };
+}
+
+/** Mock client at a given current epoch: chain-id + system-state reads, an unexecuted
+ * replay guard, and a sim that pays the recomputed split EXACTLY (payer = KP) — so only
+ * the expiration gate decides the verdict. */
+const epochMock = (currentEpoch: number) =>
+  ({
+    core: {
+      getCurrentSystemState: async () => ({ systemState: { epoch: String(currentEpoch) } }),
+      getChainIdentifier: async () => ({ chainIdentifier: CHAIN }),
+    },
+    getTransaction: async () => {
+      throw notFound();
+    },
+    simulateTransaction: async () => ({
+      $kind: "Transaction",
+      Transaction: {
+        status: { success: true, error: null },
+        balanceChanges: [
+          { coinType: policy.asset, address: PAYER, amount: "-1000000" },
+          { coinType: policy.asset, address: MERCHANT, amount: "980000" },
+          { coinType: policy.asset, address: TREASURY.toLowerCase(), amount: "20000" },
+        ],
+        transaction: { sender: PAYER },
+      },
+    }),
+  }) as any;
+
+test("doVerify REJECTS a payment whose ValidDuring window is one epoch in the past", async () => {
+  // Built valid during [899,900]; the chain is now at epoch 901 → it can never settle.
+  const r = await doVerify(epochMock(901), policy, await expiringPayload("899", "900"), requirements());
+  expect(r.isValid).toBe(false);
+  expect(r.invalidReason).toBe("invalid_transaction_state");
+});
+
+test("doVerify ACCEPTS the same payment while its window is still current", async () => {
+  // Built valid during [900,901]; the chain is at epoch 901 → inside the window.
+  const r = await doVerify(epochMock(901), policy, await expiringPayload("900", "901"), requirements());
+  expect(r.isValid).toBe(true);
+  expect(r.payer).toBe(PAYER);
+});
+
+test("doVerify REJECTS a hand-crafted gasless window wider than one epoch (chain INSIDE it)", async () => {
+  // Sui's validity_check permits only a width-0/1 gasless window; a width-100 span
+  // simulates clean while the chain sits inside it, yet broadcast-rejects. The SDK never
+  // emits this shape; an attacker hand-builds precisely what the SDK never emits.
+  const r = await doVerify(epochMock(950), policy, await expiringPayload("900", "1000"), requirements());
+  expect(r.isValid).toBe(false);
+  expect(r.invalidReason).toBe("invalid_transaction_state");
 });
