@@ -191,3 +191,12 @@ test("doVerify ACCEPTS the same payment while its window is still current", asyn
   expect(r.isValid).toBe(true);
   expect(r.payer).toBe(PAYER);
 });
+
+test("doVerify REJECTS a hand-crafted gasless window wider than one epoch (chain INSIDE it)", async () => {
+  // Sui's validity_check permits only a width-0/1 gasless window; a width-100 span
+  // simulates clean while the chain sits inside it, yet broadcast-rejects. The SDK never
+  // emits this shape; an attacker hand-builds precisely what the SDK never emits.
+  const r = await doVerify(epochMock(950), policy, await expiringPayload("900", "1000"), requirements());
+  expect(r.isValid).toBe(false);
+  expect(r.invalidReason).toBe("invalid_transaction_state");
+});

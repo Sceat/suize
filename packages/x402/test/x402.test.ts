@@ -421,9 +421,10 @@ describe('expirationProblem (epoch/chain expiration gate)', () => {
   // Minimal decoded-data shape the kernel reads (expiration + gasData.payment).
   const data = (expiration: unknown, payment: unknown[] = []) =>
     ({ expiration, gasData: { payment } } as unknown as Parameters<typeof expirationProblem>[0])
+  // Default: a LEGAL gasless window (both bounds present, width 1) containing NOW.
   const valid = (over: Record<string, unknown> = {}) => ({
     $kind: 'ValidDuring',
-    ValidDuring: { minEpoch: '999', maxEpoch: '1001', minTimestamp: null, maxTimestamp: null, chain: CHAIN, nonce: 1, ...over },
+    ValidDuring: { minEpoch: '1000', maxEpoch: '1001', minTimestamp: null, maxTimestamp: null, chain: CHAIN, nonce: 1, ...over },
   })
 
   test('PASS: a ValidDuring window that contains the current epoch', () => {
@@ -447,8 +448,35 @@ describe('expirationProblem (epoch/chain expiration gate)', () => {
     expect(expirationProblem(data(valid({ maxTimestamp: '9' })), NOW, CHAIN)).toContain('timestamp')
   })
 
-  test('PASS: null epoch bounds are unbounded on that side', () => {
-    expect(expirationProblem(data(valid({ minEpoch: null, maxEpoch: null })), NOW, CHAIN)).toBe('')
+  test('PASS: a client-paid tx with null (unbounded) epoch bounds', () => {
+    // The owned-input relax flag tolerates a null bound; only the GASLESS arm requires
+    // both bounds present (the width vectors below).
+    expect(expirationProblem(data(valid({ minEpoch: null, maxEpoch: null }), [{ objectId: '0x1' }]), NOW, CHAIN)).toBe('')
+  })
+
+  // Gasless width bind (issue #1 fail-open): Sui's validity_check rejects a gasless
+  // ValidDuring that lacks a bound or spans more than one epoch AT BROADCAST. The SDK
+  // only ever stamps a width-1 window; an attacker hand-builds what the SDK never emits.
+  test('REJECT: a gasless ValidDuring with a null bound (the SDK always stamps both)', () => {
+    expect(expirationProblem(data(valid({ maxEpoch: null })), NOW, CHAIN)).toContain('illegal gasless window')
+    expect(expirationProblem(data(valid({ minEpoch: null })), NOW, CHAIN)).toContain('illegal gasless window')
+  })
+
+  test('REJECT: a gasless ValidDuring wider than one epoch, current epoch INSIDE it', () => {
+    // The fail-open: width 100, NOW in [min, max], so every prior bound check passes.
+    expect(expirationProblem(data(valid({ minEpoch: '1000', maxEpoch: '1100' })), NOW, CHAIN)).toContain('illegal gasless window')
+  })
+
+  test('PASS: a gasless width-1 or legacy width-0 window in range', () => {
+    expect(expirationProblem(data(valid({ minEpoch: '1000', maxEpoch: '1001' })), NOW, CHAIN)).toBe('')
+    expect(expirationProblem(data(valid({ minEpoch: '1000', maxEpoch: '1000' })), NOW, CHAIN)).toBe('')
+  })
+
+  test('PASS: the width bind is GASLESS-only, a client-paid wide window still verifies', () => {
+    // Identical wide bounds to the reject above, but client-paid (non-empty gasPayment):
+    // the owned-input relax flag legitimately permits it, so over-tightening here would
+    // false-reject real wallet payments.
+    expect(expirationProblem(data(valid({ minEpoch: '1000', maxEpoch: '1100' }), [{ objectId: '0x1' }]), NOW, CHAIN)).toBe('')
   })
 
   test('Epoch(max): passes at/below max, rejects once past it', () => {

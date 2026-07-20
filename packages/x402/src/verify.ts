@@ -125,7 +125,23 @@ export function expirationProblem(
     }
     // Cross-chain bind: a window built for another Sui network can never settle here.
     if (w.chain !== chainId) return `wrong chain: ${w.chain} ≠ ${chainId}`
-    // A null bound is unbounded that side (Sui semantics); only a present bound gates.
+    // Gasless width bind. Sui's own validity_check (sui-transaction.rs, verified
+    // 2026-07-21) requires a ValidDuring OUTSIDE the owned-input relax flag to carry
+    // BOTH epoch bounds, with maxEpoch equal to minEpoch (legacy) or minEpoch + 1
+    // (multi-epoch); a null bound or any wider span is rejected AT BROADCAST. That relax
+    // flag exists for owned-input (coin) txs and never applies to a gasless
+    // Address-Balance payment (empty gasPayment), so the SDK only ever stamps a width-1
+    // gasless window. A null-max or (min, min+100) gasless span is therefore a
+    // hand-crafted forgery that simulates clean yet can never settle: the exact
+    // serve-before-settle hazard this gate exists to kill. If mainnet ever relaxes to
+    // any-range windows, the x402 spec revs first and this mirror follows it (impl
+    // follows spec, one home).
+    if (gasless && !(w.minEpoch != null && w.maxEpoch != null && BigInt(w.maxEpoch) - BigInt(w.minEpoch) <= 1n)) {
+      return `illegal gasless window: [${w.minEpoch}, ${w.maxEpoch}]`
+    }
+    // Current-window bounds. On the gasless arm both are now guaranteed present; the
+    // client-paid arm stays null-tolerant (a null bound is unbounded that side), which
+    // the owned-input relax exception legitimately permits.
     if (w.maxEpoch != null && currentEpoch > BigInt(w.maxEpoch)) {
       return `expired: epoch ${currentEpoch} > maxEpoch ${w.maxEpoch}`
     }
