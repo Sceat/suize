@@ -31,7 +31,7 @@ Bun workspace monorepo: `apps/* packages/* services/*`.
 1. **Non-custodial by construction; whoever pays, owns.** The payer signs locally (own key, key file, or the Sui CLI); no service ever holds a payer key or signs owner txs. The recovered payer becomes `Site.owner`: the payment IS the authentication, there is no second auth primitive for publishing.
 2. **Network selection is ENV-ONLY.** `SUI_NETWORK` (workers), `VITE_SUI_NETWORK` (apps); only the exact string `mainnet` opts in, everything else is testnet (fail-safe). On-chain ids, endpoints, and constants live ONLY in `@suize/shared`; nothing else hardcodes an id, target, or network.
 3. **Suize's own instances are LIVE ON MAINNET (2026-07-15 full cutover).** `facilitator.suize.io` and `api.suize.site` both run `SUI_NETWORK=mainnet`. `deploy_sui` is published on mainnet at `0xec2dcd65271127019351678ddd05287176a0b9b7fc59ef6ceef34fdbc36e87db`; `treasury@suize` resolves to `0x9036f4be5ca0d0c2b890f12b398c032a00952aa41c2776507db0d018002373a7` (also the Deploy merchant address, so Deploy's own 402 quotes collapse to a single output). Mainnet USDC is Circle's native `0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC`. A fresh self-hosted clone still DEFAULTS to testnet (`wrangler deploy --env mainnet` opts in, never a code change); testnet stays available for dev via an explicit env override.
-4. **NEVER `git add` / `commit` / `push` without explicit owner approval.**
+4. **Git follows the global git law (owner 2026-07-17):** commit and push verified work autonomously, granular and atomic. Pushing code is never deploying: mainnet/prod actions stay owner-gated.
 5. **The lead session never edits code directly** (owner law 2026-07-12): every code change goes through a briefed subagent; the lead briefs, reviews, and verifies.
 
 ## Conventions
@@ -52,10 +52,6 @@ Bun workspace monorepo: `apps/* packages/* services/*`.
 
 - Operational wallet management (keys, funding, WAL duties) lives in the private ops runbook outside the public tree.
 
-
-<demo-runbook>
-When the owner cues a live demo run (lines like "publish the demo page" or "publish the architecture preview privately and whitelist my wallet 0x…"), FIRST read `marketing/demo/RUNBOOK.md` (local, gitignored): it holds the staged site folders, the demo wallet, the exact tool calls, pre-flight checks, and fallbacks. While he records: act immediately on each cue, keep output minimal, reply with the live URL.
-</demo-runbook>
 
 ## Pointers
 

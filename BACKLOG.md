@@ -63,6 +63,9 @@
 
 ## OPEN (ordered by value ÷ blast-radius)
 
+- [T-042] address matching uses bare toLowerCase in x402 verify — MIGRATED to GitHub issue #2 (team-slow board = GitHub issues; this row is historical).
+- [T-043] no expiration check in verify — DONE via GitHub issue #1, merged eb35520 (the fix also hardened the upstream x402 spec). Historical row.
+
 - [T-032] GPT full audit (2026-07-15) verdict NOT-READY — rail real, gap is copy/config + guards.
   Lead CONFIRMED the 2 scariest: SEAL_KEY_SERVERS.mainnet=[] → sealed deploy pays-then-fails (real
   fund loss); index.html:14 still "fifty cents"+"publish button". FIX WAVE (3 opus/sonnet workers,
