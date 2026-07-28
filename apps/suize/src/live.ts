@@ -61,12 +61,22 @@ const EVENTS_QUERY = `query($type: String!, $before: String) {
   }
 }`
 
+// Existence check AND live field read in one batch: the create event's
+// paid_until_ms is a snapshot that a later SiteExtended never updates, so the
+// live object is the only truthful expiry.
 const OBJECTS_QUERY = `query($keys: [ObjectKey!]!) {
-  multiGetObjects(keys: $keys) { address }
+  multiGetObjects(keys: $keys) { address asMoveObject { contents { json } } }
 }`
 
+interface SiteObjectJson {
+  paid_until_ms?: string | number
+}
+
 interface ObjectsData {
-  multiGetObjects?: Array<{ address?: string | null } | null> | null
+  multiGetObjects?: Array<{
+    address?: string | null
+    asMoveObject?: { contents?: { json?: SiteObjectJson | null } | null } | null
+  } | null> | null
 }
 
 const gql = async <T>(query: string, variables: Record<string, unknown>): Promise<T> => {
@@ -81,17 +91,19 @@ const gql = async <T>(query: string, variables: Record<string, unknown>): Promis
   return body.data as T
 }
 
-const fetchExistingIds = async (ids: string[]): Promise<Set<string>> => {
-  if (ids.length === 0) return new Set()
+/** Live Site objects by id; a missing entry means the object is gone (expired). */
+const fetchLiveSites = async (ids: string[]): Promise<Map<string, SiteObjectJson>> => {
+  const live = new Map<string, SiteObjectJson>()
+  if (ids.length === 0) return live
   const normalized = ids.map((id) => normalizeSuiObjectId(id))
   const data = await gql<ObjectsData>(OBJECTS_QUERY, {
     keys: normalized.map((address) => ({ address })),
   })
-  return new Set(
-    (data.multiGetObjects ?? []).flatMap((object) =>
-      object?.address ? [normalizeSuiObjectId(object.address)] : [],
-    ),
-  )
+  for (const object of data.multiGetObjects ?? []) {
+    if (!object?.address) continue
+    live.set(normalizeSuiObjectId(object.address), object.asMoveObject?.contents?.json ?? {})
+  }
+  return live
 }
 
 const toNum = (v: unknown): number => {
@@ -174,34 +186,36 @@ export async function fetchLive(maxPages = 6): Promise<LiveData> {
     if (candidates.length === GALLERY_SITE_LIMIT) break
   }
 
-  let existingIds: Set<string>
+  let liveSites: Map<string, SiteObjectJson>
   try {
-    existingIds = await fetchExistingIds(candidates.map(({ siteId }) => siteId))
+    liveSites = await fetchLiveSites(candidates.map(({ siteId }) => siteId))
   } catch {
     return empty
   }
 
   for (const { node: n, siteId } of candidates) {
     const j = n.contents?.json
-    if (!j || !existingIds.has(siteId)) continue
+    const object = liveSites.get(siteId)
+    if (!j || !object) continue
     const sealed = j.sealed === true
     const sub = subdomainOf(siteId)
-    const paidUntil = toNum(j.paid_until_ms)
-    const endEpoch = paidUntil ? epochOf(paidUntil) : null
-    if (endEpoch != null) epochsFunded += Math.max(0, endEpoch - nowEpoch)
+    // The live object wins: it carries every extend. The create event is only a
+    // fallback for a content read that came back empty.
+    const paidUntil = toNum(object.paid_until_ms) || toNum(j.paid_until_ms) || null
+    if (paidUntil != null) epochsFunded += Math.max(0, epochOf(paidUntil) - nowEpoch)
     sites.push({
       siteId,
       name: j.name || '(untitled edition)',
       host: sealed ? 'private · wallet-gated' : `${sub}.suize.site`,
       url: sealed ? '' : `https://${sub}.suize.site`,
-      expiresAtEpoch: endEpoch,
+      paidUntilMs: paidUntil,
       receiptDigest: n.transaction?.digest ?? null,
       privacy: sealed ? 'private' : 'public',
       pressedAgo: pressedAgo(n.timestamp ? Date.parse(n.timestamp) : 0),
     })
   }
 
-  const sitesLive = sites.filter((s) => s.expiresAtEpoch == null || s.expiresAtEpoch > nowEpoch).length
+  const sitesLive = sites.filter((s) => s.paidUntilMs == null || s.paidUntilMs > now).length
   const paymentsSettled = created.length + extended.length
 
   return { sites, figures: { sitesLive, paymentsSettled, epochsFunded } }

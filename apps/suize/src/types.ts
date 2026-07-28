@@ -15,9 +15,10 @@ export interface DeploySite {
   host: string
   /** Full served URL. */
   url: string
-  /** Absolute Walrus epoch the storage lease ends at; `null` = permanent (funded
-   * pool, never expires). `epochsRemaining()` derives the live countdown. */
-  expiresAtEpoch: number | null
+  /** Wall-clock ms the storage lease is paid through, read from the LIVE Site
+   * object (so extends are reflected, unlike the create event); `null` =
+   * permanent (funded pool, never expires). `timeLeft()` derives the countdown. */
+  paidUntilMs: number | null
   /** Settlement tx digest (0x…); `null` when no public receipt is shown. */
   receiptDigest: string | null
   privacy: Privacy

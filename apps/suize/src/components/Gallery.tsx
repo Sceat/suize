@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { epochsRemaining, shortDigest } from '../data'
+import { timeLeft, shortDigest } from '../data'
 import { explorerTx } from '../live'
 import type { LiveState } from '../useLive'
 import type { DeploySite } from '../types'
 
 // The front page IS the news: an editorial INDEX of the REAL on-chain feed
-// (live.ts → SiteCreated events). Each row is a real DeploySite; the epoch
-// countdown is derived live from the Walrus epoch clock and each receipt links
+// (live.ts → SiteCreated events). Each row is a real DeploySite; the countdown
+// is derived from the live object's paid-through time and each receipt links
 // the real create tx on the explorer. Nothing here is fabricated (honesty law).
 //
 // The landing executes ZERO third-party content. A published site can be a
@@ -15,7 +15,7 @@ import type { DeploySite } from '../types'
 // feed is therefore a text index, never an iframe wall.
 
 function EpochLabel({ site }: { site: DeploySite }) {
-  const rem = epochsRemaining(site)
+  const rem = timeLeft(site)
   if (rem === 'permanent') {
     return (
       <span className="epoch epoch--perm">
@@ -23,10 +23,9 @@ function EpochLabel({ site }: { site: DeploySite }) {
       </span>
     )
   }
-  const soon = rem <= 2
   return (
-    <span className={`epoch${soon ? ' epoch--soon' : ''}`}>
-      <b>{rem}</b> left
+    <span className={`epoch${rem.soon ? ' epoch--soon' : ''}`}>
+      <b>{rem.label}</b>
     </span>
   )
 }
@@ -61,8 +60,8 @@ function IndexRow({ site }: { site: DeploySite }) {
 }
 
 export function Gallery({ live }: { live: LiveState }) {
-  // Re-render on a slow tick so the derived epoch countdowns stay current. The
-  // tick only refreshes the epochs-left labels; 30s is ample (the chain doesn't
+  // Re-render on a slow tick so the derived countdowns stay current. The
+  // tick only refreshes the time-left labels; 30s is ample (the chain doesn't
   // move fast and useLive refetches the feed on its own cadence).
   const [, setTick] = useState(0)
   useEffect(() => {
